@@ -2,7 +2,7 @@
 name = "tahoe-lafs"
 dynamic = ["version"]
 description = "secure, decentralized, fault-tolerant file store"
-readme = "README.rst"
+readme = "README.md"
 requires-python = ">=3.9"
 license = "GPL-2.0-or-later"  # see README.rst -- there is an alternative licence
 authors = [
