@@ -37,6 +37,9 @@ def _find_tahoe() -> str:
     )
 
 
+_DEFAULT_WEB_PORT = 3456
+
+
 class StorageNode:
     """
     Manages a single Tahoe-LAFS storage node for the gatekeeper.
@@ -47,6 +50,9 @@ class StorageNode:
     reserved_space tells Tahoe to refuse writes that would leave fewer than
     this many bytes free in storage_dir — it is a floor, not a cap.
     Real quota enforcement lives in gatekeeper/storage/pool.py (task 1.5.2).
+
+    web_port is the TCP port for the Tahoe HTTP gateway on localhost.
+    TahoeClient connects to http://127.0.0.1:<web_port>.
 
     Peer connection to the introducer is verified in the two-node smoke test
     (task 1.16.2) rather than in unit tests, because unit tests mock the
@@ -70,13 +76,20 @@ class StorageNode:
         storage_dir: str,
         reserved_space: int = 0,
         nickname: str = "backupbuddy-storage",
+        web_port: int = _DEFAULT_WEB_PORT,
     ) -> None:
         self.basedir = Path(os.path.realpath(basedir))
         self.storage_dir = Path(os.path.realpath(storage_dir))
         self.reserved_space = reserved_space
         self.nickname = nickname
+        self.web_port = web_port
         self._process: asyncio.subprocess.Process | None = None
         self._tahoe: str = _find_tahoe()
+
+    @property
+    def node_url(self) -> str:
+        """Base URL for the Tahoe HTTP gateway on this node."""
+        return f"http://127.0.0.1:{self.web_port}"
 
     def create(self, introducer_furl: str) -> None:
         """
@@ -120,6 +133,7 @@ class StorageNode:
         if not config.has_section("node"):
             config.add_section("node")
         config.set("node", "nickname", self.nickname)
+        config.set("node", "web.port", f"tcp:{self.web_port}:interface=127.0.0.1")
 
         if not config.has_section("client"):
             config.add_section("client")

@@ -121,6 +121,15 @@ class TestStorageNodeConfigure(unittest.TestCase):
         self.assertEqual(self._read_cfg().get("node", "nickname"), "anders-node")
 
     @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
+    def test_configure_sets_web_port(self, _mock_find):
+        from gatekeeper.tahoe.storage_node import StorageNode
+        StorageNode(str(self.basedir), str(self.storage_dir),
+                    web_port=3456)._configure(_FAKE_FURL)
+        written = self._read_cfg().get("node", "web.port")
+        self.assertIn("3456", written)
+        self.assertIn("127.0.0.1", written)
+
+    @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
     def test_configure_is_idempotent(self, _mock_find):
         """Calling _configure twice must produce consistent config."""
         from gatekeeper.tahoe.storage_node import StorageNode
