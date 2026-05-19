@@ -157,7 +157,7 @@ Kludde then clones the fork locally and sets up the project structure.
 
 ---
 
-### [ ] 1.2.3 — Tahoe client (gateway) for gatekeeper
+### [x] 1.2.3 — Tahoe client (gateway) for gatekeeper
 
 **Reads:** DECISIONS.md → ADR-001, docs/architecture.md → Data flow
 **Creates:** `gatekeeper/tahoe/client.py`
@@ -177,7 +177,13 @@ Kludde then clones the fork locally and sets up the project structure.
 - Unit test: upload → download → hash match
 
 ```
-> Kludde: <!-- -->
+> Kludde: TahoeClient in gatekeeper/tahoe/client.py wraps the Tahoe HTTP gateway
+> with four async operations: upload (PUT /uri), download (streaming GET /uri/<ref>),
+> ls (GET /uri/<ref>?t=json → list of (name, ref) tuples), mkdir (POST /uri?t=mkdir).
+> Returns opaque reference strings — no Tahoe caps, FURLs, or shares terminology in
+> public API or raised exceptions. metadata param accepted by upload() but not stored
+> at this layer (fragmenter's responsibility per ADR-008). SHA-256 computed and
+> returned by download() for caller verification. 15 unit tests all pass.
 ```
 
 ---
