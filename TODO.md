@@ -12,6 +12,8 @@
 > - If a task reveals something unexpected, add a new x.y.z task before continuing
 > - If a task would require a Phase 2 feature, stop and flag it — see ADR-016
 > - The project owner (Johan) handles the GitHub fork action if Kludde lacks access
+> - **PAUSE after each completed task.** End your response after committing a task.
+>   Johan will do /clear between tasks to save tokens and then ask you to continue.
 
 ---
 
