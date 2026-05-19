@@ -102,7 +102,7 @@ Kludde then clones the fork locally and sets up the project structure.
 
 ## 1.2 — Tahoe-LAFS base configuration
 
-### [ ] 1.2.1 — Introducer node setup
+### [x] 1.2.1 — Introducer node setup
 
 **Reads:** DECISIONS.md → ADR-001, docs/architecture.md → Introducer node
 **Creates:** `gatekeeper/tahoe/introducer.py`, `docs/tahoe_internals.md`
@@ -120,7 +120,11 @@ Kludde then clones the fork locally and sets up the project structure.
 - Unit test: introducer starts, FURL is a non-empty string
 
 ```
-> Kludde: <!-- -->
+> Kludde: IntroducerNode class in gatekeeper/tahoe/introducer.py. Wraps tahoe
+> create-introducer and tahoe run as async managed subprocess. FURL returned
+> from start() but never logged or user-facing. project-docs/tahoe_internals.md
+> created as internal dev reference. 8 unit tests pass (mocked subprocess).
+> pytest added to requirements.txt. Note: docs/ in TODO referred to project-docs/.
 ```
 
 ---

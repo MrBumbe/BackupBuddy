@@ -37,6 +37,7 @@ humanize==4.15.0
 hyperlink==21.0.0
 idna==3.15
 Incremental==24.11.0
+iniconfig==2.3.0
 iterable-io==1.0.4
 klein==24.8.0
 legacy-cgi==2.6.4
@@ -55,6 +56,7 @@ pip-api==0.0.34
 pip-requirements-parser==32.0.1
 pip_audit==2.10.0
 platformdirs==4.9.6
+pluggy==1.6.0
 psutil==7.2.2
 py-serializable==2.1.0
 py-ubjson==0.16.1
@@ -69,6 +71,7 @@ PyNaCl==1.6.2
 pyOpenSSL==26.2.0
 pyparsing==3.3.2
 pyrsistent==0.20.0
+pytest==9.0.3
 python-dotenv==1.2.2
 pyutil==3.3.6
 pywin32==311
@@ -81,7 +84,7 @@ six==1.17.0
 sortedcontainers==2.4.0
 spake2==0.9
 starlette==1.0.0
--e git+https://github.com/MrBumbe/BackupBuddy.git@47143528f554c312ab73a995e1873ba1eece949d#egg=tahoe_lafs
+-e git+https://github.com/MrBumbe/BackupBuddy.git@f432a682351d49e082cc2df1355614e7c103871a#egg=tahoe_lafs
 tomli==2.4.1
 tomli_w==1.2.0
 tqdm==4.67.3
