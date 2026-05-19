@@ -56,3 +56,13 @@ zope.interface-*.egg
 secret-env-plain
 
 .ruff_cache
+
+# BackupBuddy
+.env
+*.db
+*.key
+*.cap
+lifeboat.enc
+__pycache__/
+node_modules/
+.tahoe/

@@ -21,7 +21,7 @@
 
 ## 1.1 — Project foundation
 
-### [ ] 1.1.1 — Fork and clone Tahoe-LAFS
+### [x] 1.1.1 — Fork and clone Tahoe-LAFS
 
 **Reads:** CLAUDE.md, DECISIONS.md → ADR-001, project-docs/architecture.md
 **Note:** If Kludde cannot perform the GitHub fork directly, flag to Johan.
@@ -39,12 +39,16 @@ Kludde then clones the fork locally and sets up the project structure.
 - `UPSTREAM.md` exists with base commit hash
 
 ```
-> Kludde: <!-- -->
+> Kludde: Fork already cloned by Johan to MrBumbe/BackupBuddy. Added upstream remote
+> (tahoe-lafs/tahoe-lafs). Base commit: f002fd0d (2026-01-21). One local commit ahead
+> of upstream (test fix). Fixed pyproject.toml readme ref (README.rst → README.md).
+> `tahoe --version` works via entry point in .venv; `python -m tahoe` does not work
+> (Tahoe uses `allmydata` as the Python package name, not `tahoe`). All done.
 ```
 
 ---
 
-### [ ] 1.1.2 — Repository structure and project scaffolding
+### [x] 1.1.2 — Repository structure and project scaffolding
 
 **Reads:** CLAUDE.md → Project file structure
 **Creates:** `gatekeeper/`, `agent/`, `tests/unit/`, `tests/integration/`,
@@ -65,7 +69,10 @@ Kludde then clones the fork locally and sets up the project structure.
 - `.env` is gitignored
 
 ```
-> Kludde: <!-- -->
+> Kludde: All directories created per CLAUDE.md structure. requirements.txt generated
+> from full venv freeze (105 packages, all pinned). pip-audit clean. .env.example
+> created. .gitignore extended with BackupBuddy-specific entries. Python 3.13 in use
+> (≥ 3.11 requirement met). pip-audit included in venv for CI use.
 ```
 
 ---
