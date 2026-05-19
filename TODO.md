@@ -129,7 +129,7 @@ Kludde then clones the fork locally and sets up the project structure.
 
 ---
 
-### [ ] 1.2.2 — Gatekeeper as Tahoe storage node
+### [x] 1.2.2 — Gatekeeper as Tahoe storage node
 
 **Reads:** DECISIONS.md → ADR-001, ADR-005, docs/architecture.md → Cluster
 **Creates:** `gatekeeper/tahoe/storage_node.py`
@@ -145,7 +145,14 @@ Kludde then clones the fork locally and sets up the project structure.
 - Unit test: node starts, connects, peer count increases
 
 ```
-> Kludde: <!-- -->
+> Kludde: StorageNode class in gatekeeper/tahoe/storage_node.py. Wraps tahoe
+> create-node and tahoe run as async managed subprocess. Configures [storage]
+> storage_dir (verified native Tahoe config key in allmydata/client.py — no
+> symlinks needed), reserved_space, and introducer FURL via configparser.
+> reserved_space is a floor not a cap; real quota enforcement in task 1.5.2.
+> Startup ready-signal is "client running" (NODETYPE="client" in Tahoe source).
+> Peer connection to introducer verified in smoke test (task 1.16.2).
+> 18 unit tests pass; all 26 unit tests (incl. introducer) green.
 ```
 
 ---
