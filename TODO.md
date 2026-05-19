@@ -77,7 +77,7 @@ Kludde then clones the fork locally and sets up the project structure.
 
 ---
 
-### [ ] 1.1.3 — CONTRIBUTING.md
+### [x] 1.1.3 — CONTRIBUTING.md
 
 **Reads:** CLAUDE.md → Git conventions
 **Creates:** `CONTRIBUTING.md`
@@ -91,7 +91,9 @@ Kludde then clones the fork locally and sets up the project structure.
 - File exists and covers all points above
 
 ```
-> Kludde: <!-- -->
+> Kludde: CONTRIBUTING.md created covering: commit format+types, branch naming,
+> task completion checklist, unit test instructions (pytest tests/unit/),
+> pip-audit requirement, and language rules.
 ```
 
 ---
