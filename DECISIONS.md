@@ -258,6 +258,12 @@ and backed_up_at timestamp (plaintext).
 - Reconstruction time scales with the number of files (may take minutes for large catalogs)
 - The GUI must provide a clear "rebuild catalog" flow in the emergency restore section
 
+**Implementation note:**
+`TahoeClient.upload()` (gatekeeper/tahoe/client.py) accepts a `metadata` parameter
+but does not store it. Metadata tags are written by the fragmenter (task 1.7.1) when
+the file cap is linked into a Tahoe directory entry. This split is intentional:
+the HTTP client layer has no knowledge of directory structure or encryption keys.
+
 ---
 
 ## ADR-009 — Invite system: open model with single-use codes
