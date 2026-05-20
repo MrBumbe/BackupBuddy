@@ -93,7 +93,16 @@ def _register_background_tasks() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Steps 3–9 of the startup sequence; full cleanup on shutdown."""
+    """Steps 3–9 of the startup sequence; full cleanup on shutdown.
+
+    Two modes:
+    - Setup mode: root_dir.cap absent — GUI starts so the user can complete
+      onboarding (task 1.7.x). Databases and Tahoe processes are NOT started.
+    - Normal mode: root_dir.cap present — full startup, all components active.
+
+    app.state.setup_required is set in both modes so route handlers can gate
+    access to features that require a fully onboarded gatekeeper.
+    """
     config: GatekeeperConfig = _state["config"]
     data_dir: Path = _state["data_dir"]
 
@@ -103,58 +112,65 @@ async def lifespan(app: FastAPI):
     cluster_db: ClusterDB | None = None
 
     try:
-        # Step 3 — storage pool
+        # Step 3 — storage pool (always runs; validates paths are accessible)
         logger.info("Initialising storage pool (%d path(s))", len(config.storage_pool))
         pool = StoragePoolManager(config.storage_pool)
 
-        # Step 4 — root_dir.cap
+        # Step 4 — detect setup mode
         root_cap_path = data_dir / "root_dir.cap"
-        if not root_cap_path.exists():
-            raise RuntimeError(
-                "root_dir.cap not found in data directory — "
-                "run 'backupbuddy setup' to complete onboarding before starting"
-            )
-        root_dir_cap = root_cap_path.read_text(encoding="utf-8").strip()
-        if not root_dir_cap:
-            raise RuntimeError("root_dir.cap is empty — onboarding may be incomplete")
-
-        # Step 5 — databases
-        logger.info("Opening databases")
-        catalog_key = _derive_catalog_key(root_dir_cap)
-        catalog_db = CatalogDB(str(data_dir / "catalog.db"), catalog_key)
-        cluster_db = ClusterDB(str(data_dir / "cluster.db"))
-
-        # Step 6 — introducer (only on the designated introducer node)
-        introducer_furl = config.tahoe.introducer
-        if config.tahoe.run_introducer:
-            logger.info("Starting Tahoe introducer node")
-            introducer = IntroducerNode(str(data_dir / "tahoe" / "introducer"))
-            introducer.create()
-            introducer_furl = await introducer.start()
-            # FURL is internal — never logged at INFO level or above
-
-        # Step 7 — storage/client node
-        logger.info("Starting Tahoe storage node")
-        # Phase 1: Tahoe's storage node writes to the pool path with the largest
-        # quota. The remaining pool paths are tracked by StoragePoolManager and
-        # used by the fragmenter (task 1.9) via get_target_path().
-        # Multi-path distribution at the Tahoe level is a Phase 2 concern.
-        first_pool_path = max(pool.get_usage(), key=lambda e: e["quota_bytes"])["path"]
-        storage_node = StorageNode(
-            basedir=str(data_dir / "tahoe" / "storage_node"),
-            storage_dir=first_pool_path,
-            reserved_space=_TAHOE_RESERVED_BYTES,
-            nickname=config.node.name,
+        root_dir_cap = (
+            root_cap_path.read_text(encoding="utf-8").strip()
+            if root_cap_path.exists()
+            else None
         )
-        storage_node.create(introducer_furl)
-        await storage_node.start()
+        setup_required = not root_dir_cap
 
-        # Step 8 — background scheduler stubs
-        # TODO: store task refs on app.state.background_tasks to prevent GC
-        # once stubs become long-running coroutines (tasks 1.6.2, 1.8.3, 1.11.2, 1.13.2)
-        _register_background_tasks()
+        if setup_required:
+            logger.warning(
+                "root_dir.cap not found — starting in setup mode. "
+                "Open the GUI to complete onboarding."
+            )
+        else:
+            # Step 5 — databases
+            logger.info("Opening databases")
+            catalog_key = _derive_catalog_key(root_dir_cap)  # type: ignore[arg-type]
+            catalog_db = CatalogDB(str(data_dir / "catalog.db"), catalog_key)
+            cluster_db = ClusterDB(str(data_dir / "cluster.db"))
 
-        # Expose shared state to route handlers
+            # Step 6 — introducer (only on the designated introducer node)
+            introducer_furl = config.tahoe.introducer
+            if config.tahoe.run_introducer:
+                logger.info("Starting Tahoe introducer node")
+                introducer = IntroducerNode(str(data_dir / "tahoe" / "introducer"))
+                introducer.create()
+                introducer_furl = await introducer.start()
+                # FURL is internal — never logged at INFO level or above
+
+            # Step 7 — storage/client node
+            logger.info("Starting Tahoe storage node")
+            # Phase 1: Tahoe's storage node writes to the pool path with the
+            # largest quota. Remaining paths are used by the fragmenter (task 1.9)
+            # via StoragePoolManager.get_target_path().
+            # Multi-path distribution at the Tahoe level is a Phase 2 concern.
+            largest_pool_path = max(
+                pool.get_usage(), key=lambda e: e["quota_bytes"]
+            )["path"]
+            storage_node = StorageNode(
+                basedir=str(data_dir / "tahoe" / "storage_node"),
+                storage_dir=largest_pool_path,
+                reserved_space=_TAHOE_RESERVED_BYTES,
+                nickname=config.node.name,
+            )
+            storage_node.create(introducer_furl)
+            await storage_node.start()
+
+            # Step 8 — background scheduler stubs
+            # TODO: store task refs on app.state.background_tasks to prevent GC
+            # once stubs become long-running coroutines (tasks 1.6.2, 1.8.3, 1.11.2, 1.13.2)
+            _register_background_tasks()
+
+        # Expose shared state to route handlers (None in setup mode)
+        app.state.setup_required = setup_required
         app.state.config = config
         app.state.pool = pool
         app.state.catalog_db = catalog_db
@@ -162,8 +178,9 @@ async def lifespan(app: FastAPI):
         app.state.storage_node = storage_node
 
         logger.info(
-            "Gatekeeper '%s' ready — GUI at http://%s:%d",
+            "Gatekeeper '%s' %s — GUI at http://%s:%d",
             config.node.display_name,
+            "ready" if not setup_required else "in setup mode",
             config.tailscale_ip,
             config.web.port,
         )
@@ -183,15 +200,36 @@ async def lifespan(app: FastAPI):
         logger.info("Gatekeeper shutdown complete")
 
 
+# ── Routes ───────────────────────────────────────────────────────────────────
+
+def _register_routes(app: FastAPI) -> None:
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    @app.get("/api/status")
+    async def status(request: Request) -> JSONResponse:
+        """Returns whether the gatekeeper is fully operational or in setup mode."""
+        if request.app.state.setup_required:
+            return JSONResponse({"status": "setup_required"}, status_code=503)
+        cfg: GatekeeperConfig = request.app.state.config
+        return JSONResponse({
+            "status": "ok",
+            "node": cfg.node.name,
+            "display_name": cfg.node.display_name,
+        })
+
+
 # ── App factory ───────────────────────────────────────────────────────────────
 
 def _create_app() -> FastAPI:
-    return FastAPI(
+    app = FastAPI(
         title="BackupBuddy Gatekeeper",
         docs_url=None,
         redoc_url=None,
         lifespan=lifespan,
     )
+    _register_routes(app)
+    return app
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
