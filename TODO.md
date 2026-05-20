@@ -268,7 +268,7 @@ docs/configuration.md → cluster.db
 
 ## 1.4 — Configuration parsing
 
-### [ ] 1.4.1 — gatekeeper.cfg parser
+### [x] 1.4.1 — gatekeeper.cfg parser
 
 **Reads:** docs/configuration.md → gatekeeper.cfg, SECURITY.md → Section 1
 **Creates:** `gatekeeper/config.py`
@@ -288,7 +288,15 @@ docs/configuration.md → cluster.db
   storage path that does not exist
 
 ```
-> Kludde: <!-- -->
+> Kludde: GatekeeperConfig in gatekeeper/config.py — full Pydantic v2 model for all
+> gatekeeper.cfg sections. configparser with delimiters=('=',) and optionxform=str to
+> handle Windows paths (colons in paths) and preserve case for exclude patterns.
+> SMTP password and webhook URL are NOT stored; silently ignored if present in the file.
+> tailscale_ip field is None at parse time; populated at startup by tailscale.py (1.5.1).
+> Storage pool paths validated: absolute, exists, is_dir (ConfigError on any failure).
+> SIGHUP handler registered via install_sighup_handler(); no-op on Windows.
+> Durations ('1h', '15m') → seconds int. Times ('04:00') → datetime.time.
+> Quotas ('2000 GB') → bytes int. 39 tests pass, 1 skipped (SIGHUP on Windows).
 ```
 
 ---
