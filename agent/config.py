@@ -42,6 +42,7 @@ def _bool(value: str) -> bool:
 
 class ScheduleConfig(BaseModel):
     full_scan_seconds: int = 86400  # default 24h
+    stability_seconds: int = 1800   # default 30 min — file must be idle before queuing
 
 
 class NodeConfig(BaseModel):
@@ -120,8 +121,19 @@ def _parse_ini(parser: configparser.ConfigParser) -> AgentConfig:
 
     # [schedule]
     sched_raw = sec("schedule")
+    stability_raw = sched_raw.get("stability_minutes")
+    if stability_raw is not None:
+        try:
+            stability_seconds = int(stability_raw.strip()) * 60
+        except ValueError:
+            raise ConfigError(
+                f"[schedule] stability_minutes must be a plain integer, got {stability_raw!r}"
+            )
+    else:
+        stability_seconds = 1800
     schedule = ScheduleConfig(
         full_scan_seconds=_parse_duration(sched_raw.get("full_scan", "24h")),
+        stability_seconds=stability_seconds,
     )
 
     # [backup] — bare keys (paths), required

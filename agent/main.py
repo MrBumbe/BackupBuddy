@@ -4,8 +4,8 @@ Agent startup sequence.
   1. Read backup.cfg
   2. Create GatekeeperClient
   3. Register with gatekeeper (non-fatal on failure — agent keeps running)
-  4. Start config file watcher
-  5. [stub] File watcher — task 1.6.2
+  4. Start config file watcher (backup.cfg reload on change)
+  5. Start file watcher with stability detection
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from pathlib import Path
 
 from agent.config import AgentConfig, ConfigError, load_config, watch_config
 from agent.gatekeeper_client import GatekeeperClient, RegistrationError
+from agent.watcher import FileWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,26 @@ async def _run(config_path: Path) -> None:
     except RegistrationError as exc:
         logger.error("Registration failed: %s — will retry on next startup", exc)
 
+    upload_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    watcher = FileWatcher(
+        backup_paths=config.backup_paths,
+        stability_seconds=config.schedule.stability_seconds,
+        exclude_patterns=config.excludes,
+        queue=upload_queue,
+    )
+
     def _on_reload(new_cfg: AgentConfig) -> None:
         logger.info("Configuration reloaded from %s", config_path)
 
     stop_watch = watch_config(config_path, _on_reload)
 
-    logger.info("Agent running — file watcher pending (task 1.6.2)")
+    logger.info("Agent running — file watcher active")
 
     try:
-        while True:
-            await asyncio.sleep(3600)
+        await watcher.run()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
     finally:
         stop_watch()
         await client.aclose()
