@@ -426,7 +426,7 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 
 ---
 
-### [ ] 1.5.4 — Gatekeeper startup sequence
+### [x] 1.5.4 — Gatekeeper startup sequence
 
 **Reads:** CLAUDE.md → Architecture quick reference, docs/architecture.md → Gatekeeper
 **Creates:** `gatekeeper/main.py`
@@ -452,7 +452,11 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 - Graceful shutdown works on SIGTERM
 
 ```
-> Kludde: <!-- -->
+> Kludde: main.py already existed with solid structure; added TahoeClient integration
+> (step 7), setup-mode detection (root_dir.cap absent → 503 from /api/status),
+> catalog key derivation via HKDF-SHA256, and background scheduler stubs.
+> 16 unit tests via starlette.testclient.TestClient (httpx.ASGITransport 0.28.1
+> does not trigger ASGI lifespan). Full suite: 248 pass, 9 skip (Windows POSIX skips).
 ```
 
 ---
