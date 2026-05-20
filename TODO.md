@@ -332,7 +332,7 @@ docs/configuration.md → cluster.db
 
 ## 1.5 — Gatekeeper core
 
-### [ ] 1.5.1 — Tailscale interface detection and startup check
+### [x] 1.5.1 — Tailscale interface detection and startup check
 
 **Reads:** SECURITY.md → Section 3, DECISIONS.md → ADR-002, CLAUDE.md → GUI route pattern
 **Creates:** `gatekeeper/tailscale.py`
@@ -349,7 +349,11 @@ docs/configuration.md → cluster.db
 - Unit test: mock Tailscale running, mock Tailscale not running
 
 ```
-> Kludde: <!-- -->
+> Kludde: get_tailscale_ip() uses psutil.net_if_addrs() to scan all IPv4 interfaces for
+> addresses in Tailscale's CGNAT block 100.64.0.0/10 — no API or CLI call needed.
+> assert_tailscale_running() raises TailscaleNotRunning and logs at ERROR if no interface
+> found; returns the IP string on success (ready for use as Uvicorn host in task 1.5.4).
+> 15 unit tests pass including CGNAT boundary cases and IPv6 exclusion.
 ```
 
 ---
