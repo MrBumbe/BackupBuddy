@@ -65,7 +65,10 @@ class NodeConfig(BaseModel):
 
 class TahoeConfig(BaseModel):
     # FURL — internal only, never logged or shown to users
-    introducer: str
+    # Empty when run_introducer = true (FURL comes from the introducer process at startup)
+    introducer: str = ""
+    # True on the one node in the cluster that runs the Tahoe introducer process
+    run_introducer: bool = False
 
 
 class AdaptiveConfig(BaseModel):
@@ -216,9 +219,15 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
 
     # [tahoe] — required
     tahoe_raw = sec("tahoe")
-    if not tahoe_raw.get("introducer"):
-        raise ConfigError("[tahoe] introducer is required")
-    tahoe = TahoeConfig(introducer=tahoe_raw["introducer"])
+    run_introducer = _bool(tahoe_raw.get("run_introducer", "false"))
+    if not run_introducer and not tahoe_raw.get("introducer"):
+        raise ConfigError(
+            "[tahoe] introducer FURL is required when run_introducer is false"
+        )
+    tahoe = TahoeConfig(
+        introducer=tahoe_raw.get("introducer", ""),
+        run_introducer=run_introducer,
+    )
 
     # [fragmentation]
     frag_raw = sec("fragmentation")

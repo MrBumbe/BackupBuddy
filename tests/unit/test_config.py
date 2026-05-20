@@ -471,6 +471,70 @@ class TestStoragePoolPathValidation:
         assert cfg.storage_pool[1].quota_bytes == 200 * 1024**3
 
 
+# ── TahoeConfig: run_introducer ───────────────────────────────────────────────
+
+class TestTahoeRunIntroducer:
+    def test_run_introducer_defaults_to_false(self, tmp_path):
+        pool = _make_pool(tmp_path)
+        cfg_file = _write_cfg(tmp_path, _minimal_cfg(str(pool)))
+        cfg = load_config(cfg_file)
+        assert cfg.tahoe.run_introducer is False
+
+    def test_run_introducer_true_without_furl_is_valid(self, tmp_path):
+        pool = _make_pool(tmp_path)
+        content = f"""\
+            [node]
+            name         = n
+            display_name = N
+
+            [tahoe]
+            run_introducer = true
+
+            [storage-pool]
+            {pool} = 100 GB
+        """
+        cfg_file = _write_cfg(tmp_path, content)
+        cfg = load_config(cfg_file)
+        assert cfg.tahoe.run_introducer is True
+        assert cfg.tahoe.introducer == ""
+
+    def test_run_introducer_false_without_furl_raises(self, tmp_path):
+        pool = _make_pool(tmp_path)
+        content = f"""\
+            [node]
+            name         = n
+            display_name = N
+
+            [tahoe]
+            run_introducer = false
+
+            [storage-pool]
+            {pool} = 100 GB
+        """
+        cfg_file = _write_cfg(tmp_path, content)
+        with pytest.raises(ConfigError, match="introducer"):
+            load_config(cfg_file)
+
+    def test_run_introducer_true_with_furl_is_valid(self, tmp_path):
+        pool = _make_pool(tmp_path)
+        content = f"""\
+            [node]
+            name         = n
+            display_name = N
+
+            [tahoe]
+            run_introducer = true
+            introducer     = pb://nodeid@host:3456/secret
+
+            [storage-pool]
+            {pool} = 100 GB
+        """
+        cfg_file = _write_cfg(tmp_path, content)
+        cfg = load_config(cfg_file)
+        assert cfg.tahoe.run_introducer is True
+        assert "pb://" in cfg.tahoe.introducer
+
+
 # ── Secrets not stored ────────────────────────────────────────────────────────
 
 class TestSecretsNotStored:
