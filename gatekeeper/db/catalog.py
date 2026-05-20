@@ -28,7 +28,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 logger = logging.getLogger(__name__)
 
-_MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+_MIGRATIONS_DIR = Path(__file__).parent / "migrations" / "catalog"
 _NONCE_SIZE = 12  # bytes — AES-GCM standard 96-bit nonce
 
 # Columns that update_file() is allowed to touch.  Column names are
