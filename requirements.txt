@@ -26,8 +26,11 @@ cyclonedx-python-lib==11.7.0
 defusedxml==0.7.1
 distro==1.9.0
 eliot==1.18.0
+bandit==1.9.4
 fastapi==0.136.1
 filelock==3.29.0
+flake8==7.3.0
+flake8-bandit==4.1.1
 foolscap==24.9.0
 h11==0.16.0
 httpcore==1.0.9
@@ -44,6 +47,7 @@ legacy-cgi==2.6.4
 license-expression==30.4.4
 magic-wormhole==0.24.0
 markdown-it-py==4.2.0
+mccabe==0.7.0
 MarkupSafe==3.0.3
 mdurl==0.1.2
 msgpack==1.1.2
@@ -63,6 +67,7 @@ py-ubjson==0.16.1
 pyasn1==0.6.3
 pyasn1_modules==0.4.2
 pycddl==0.6.4
+pycodestyle==2.14.0
 pycparser==3.0
 pydantic==2.13.4
 pydantic_core==2.46.4
@@ -75,6 +80,7 @@ pytest==9.0.3
 python-dotenv==1.2.2
 pyutil==3.3.6
 pywin32==311
+pyflakes==3.4.0
 PyYAML==6.0.3
 qrcode==8.2
 requests==2.34.2
@@ -82,6 +88,7 @@ rich==15.0.0
 service-identity==24.2.0
 six==1.17.0
 sortedcontainers==2.4.0
+stevedore==5.8.0
 spake2==0.9
 starlette==1.0.0
 -e git+https://github.com/MrBumbe/BackupBuddy.git@f432a682351d49e082cc2df1355614e7c103871a#egg=tahoe_lafs

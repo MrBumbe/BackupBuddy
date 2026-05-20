@@ -190,7 +190,7 @@ Kludde then clones the fork locally and sets up the project structure.
 
 ## 1.3 — Database layer
 
-### [ ] 1.3.1 — catalog.db schema and access layer
+### [x] 1.3.1 — catalog.db schema and access layer
 
 **Reads:** SECURITY.md → Section 4, DECISIONS.md → ADR-014,
 docs/configuration.md → catalog.db
@@ -214,7 +214,15 @@ docs/configuration.md → catalog.db
 - Attempting string-formatted query raises linting error (add flake8 rule)
 
 ```
-> Kludde: <!-- -->
+> Kludde: CatalogDB in gatekeeper/db/catalog.py — crypto-aware (Alt A, 2026-05-20 design decision).
+> Accepts plaintext cap/original_path, encrypts with AES-256-GCM internally; key passed at init.
+> Blind index (HMAC-SHA256 path_hmac column) enables get_file_by_path() without decrypting rows.
+> original_path and path_hmac allow NULL for ADR-008 call-home edge case (NOT NULL rejected 2026-05-20).
+> Migration 001 in gatekeeper/db/migrations/001_catalog_init.sql; version table managed in Python.
+> WAL mode, 0600 perms (POSIX only; skipped on Windows). All queries parameterized.
+> flake8-bandit S608 rule added (.flake8); fires on f-string/concat SQL, noqa-annotated on safe
+> whitelisted-column use in update_file(). 26 tests pass (1 skipped — permissions, Windows dev env).
+> NOTE: If Alt A is revisited, update catalog.py, 001_catalog_init.sql, and the fragmenter together.
 ```
 
 ---

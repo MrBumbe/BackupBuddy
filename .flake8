@@ -1,0 +1,13 @@
+[flake8]
+# Enable bandit security checks via flake8-bandit.
+# S608: Possible SQL injection via string-based query construction.
+#       Any execute(f"...{var}...") or execute("..." + var) without
+#       # noqa: S608 will be a linting error.
+# The one intentional use in catalog.py update_file() is annotated
+# with # noqa: S608 and a comment explaining why it is safe (column
+# names come from a frozen whitelist, not from user input).
+select = S608
+per-file-ignores =
+    # Test files may contain intentional bad patterns for demonstration.
+    tests/*:S608
+max-line-length = 120
