@@ -396,7 +396,7 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 
 ---
 
-### [ ] 1.5.3 — Encrypted secrets store
+### [x] 1.5.3 — Encrypted secrets store
 
 **Reads:** SECURITY.md → Sections 1, 7, DECISIONS.md → ADR-007
 **Creates:** `gatekeeper/secrets.py`
@@ -414,7 +414,14 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 - Unit test: set, get, verify value matches, verify file is not plaintext
 
 ```
-> Kludde: <!-- -->
+> Kludde: SecretsStore class in gatekeeper/secrets.py. AES-256-GCM with HKDF-SHA256
+> key derivation from machine ID (Linux: /etc/machine-id, Windows: MachineGuid registry)
+> + per-install salt stored in config_dir/secrets.salt. Config_dir is injectable for
+> testability (same pattern as CatalogDB). set_secret/get_secret/delete_secret API.
+> Secrets file: JSON of {key: base64(nonce+ciphertext)}, perms 0600 (skipped on Windows).
+> 22 unit tests: round-trip, plaintext absence, nonce randomness, wrong-machine-id
+> rejection, corrupted-file handling, salt persistence, logging safety.
+> Full suite: 228 pass, 9 skip.
 ```
 
 ---
