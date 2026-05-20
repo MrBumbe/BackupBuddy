@@ -26,7 +26,8 @@ from typing import Any
 import uvicorn
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from gatekeeper.config import (
     ConfigError,
@@ -37,6 +38,7 @@ from gatekeeper.config import (
 from gatekeeper.db.catalog import CatalogDB
 from gatekeeper.db.cluster import ClusterDB
 from gatekeeper.storage.pool import PoolPathError, StoragePoolManager
+from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
 from gatekeeper.tahoe.storage_node import StorageNode
 from gatekeeper.tailscale import TailscaleNotRunning, assert_tailscale_running
@@ -110,6 +112,7 @@ async def lifespan(app: FastAPI):
     introducer: IntroducerNode | None = None
     catalog_db: CatalogDB | None = None
     cluster_db: ClusterDB | None = None
+    tahoe_client: TahoeClient | None = None
 
     try:
         # Step 3 — storage pool (always runs; validates paths are accessible)
@@ -164,6 +167,11 @@ async def lifespan(app: FastAPI):
             storage_node.create(introducer_furl)
             await storage_node.start()
 
+            # Step 7 (continued) — Tahoe client wrapping the storage node's HTTP gateway
+            logger.info("Starting Tahoe client at %s", storage_node.node_url)
+            tahoe_client = TahoeClient(storage_node.node_url)
+            logger.info("Tahoe client ready")
+
             # Step 8 — background scheduler stubs
             # TODO: store task refs on app.state.background_tasks to prevent GC
             # once stubs become long-running coroutines (tasks 1.6.2, 1.8.3, 1.11.2, 1.13.2)
@@ -176,6 +184,7 @@ async def lifespan(app: FastAPI):
         app.state.catalog_db = catalog_db
         app.state.cluster_db = cluster_db
         app.state.storage_node = storage_node
+        app.state.tahoe_client = tahoe_client
 
         logger.info(
             "Gatekeeper '%s' %s — GUI at http://%s:%d",
@@ -189,6 +198,8 @@ async def lifespan(app: FastAPI):
 
     finally:
         logger.info("Gatekeeper shutting down")
+        if tahoe_client is not None:
+            await tahoe_client.aclose()
         if storage_node is not None:
             await storage_node.stop()
         if introducer is not None:
@@ -203,9 +214,6 @@ async def lifespan(app: FastAPI):
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 def _register_routes(app: FastAPI) -> None:
-    from fastapi import Request
-    from fastapi.responses import JSONResponse
-
     @app.get("/api/status")
     async def status(request: Request) -> JSONResponse:
         """Returns whether the gatekeeper is fully operational or in setup mode."""
