@@ -301,7 +301,7 @@ docs/configuration.md → cluster.db
 
 ---
 
-### [ ] 1.4.2 — backup.cfg parser (agent)
+### [x] 1.4.2 — backup.cfg parser (agent)
 
 **Reads:** docs/configuration.md → backup.cfg, SECURITY.md → Section 4
 **Creates:** `agent/config.py`
@@ -317,7 +317,15 @@ docs/configuration.md → cluster.db
 - Unit tests: valid config, non-existent path, invalid glob pattern
 
 ```
-> Kludde: <!-- -->
+> Kludde: AgentConfig in agent/config.py — Pydantic v2 model for [schedule],
+> [backup], [exclude], [node]. [backup] and [exclude] use allow_no_value=True
+> bare-key parsing (same as gatekeeper excludes). Backup paths validated:
+> absolute, exists, is_dir, not system-critical (/etc /boot /sys /proc /dev).
+> Glob patterns validated: non-empty, no null bytes, valid fnmatch syntax.
+> watch_config() mtime-polls in a daemon thread; malformed reloads silently
+> ignored so agent keeps running on last valid config. SIGHUP not used (agent
+> is cross-platform). 24 tests pass, 2 skipped (POSIX critical-path tests,
+> /etc and /proc absent on Windows dev machine).
 ```
 
 ---
