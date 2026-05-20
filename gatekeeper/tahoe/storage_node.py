@@ -77,12 +77,18 @@ class StorageNode:
         reserved_space: int = 0,
         nickname: str = "backupbuddy-storage",
         web_port: int = _DEFAULT_WEB_PORT,
+        shares_needed: int = 3,
+        shares_happy: int = 5,
+        shares_total: int = 5,
     ) -> None:
         self.basedir = Path(os.path.realpath(basedir))
         self.storage_dir = Path(os.path.realpath(storage_dir))
         self.reserved_space = reserved_space
         self.nickname = nickname
         self.web_port = web_port
+        self.shares_needed = shares_needed
+        self.shares_happy = shares_happy
+        self.shares_total = shares_total
         self._process: asyncio.subprocess.Process | None = None
         self._tahoe: str = _find_tahoe()
 
@@ -139,6 +145,11 @@ class StorageNode:
             config.add_section("client")
         # Tahoe reads introducer.furl from [client] to connect at startup.
         config.set("client", "introducer.furl", introducer_furl)
+        # ADR-018: k/n is a node-level setting; per-upload overrides are not
+        # supported by the Tahoe HTTP API.  All uploads use these values.
+        config.set("client", "shares.needed", str(self.shares_needed))
+        config.set("client", "shares.happy",  str(self.shares_happy))
+        config.set("client", "shares.total",  str(self.shares_total))
 
         if not config.has_section("storage"):
             config.add_section("storage")

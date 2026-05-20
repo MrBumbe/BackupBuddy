@@ -41,6 +41,8 @@ from gatekeeper.config import (
 )
 from gatekeeper.db.catalog import CatalogDB
 from gatekeeper.db.cluster import ClusterDB
+from gatekeeper.fragmenter.fragmenter import Fragmenter, derive_metadata_key
+from gatekeeper.fragmenter.profiles import get_profile
 from gatekeeper.storage.pool import PoolPathError, StoragePoolManager
 from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
@@ -141,6 +143,7 @@ async def lifespan(app: FastAPI):
     catalog_db: CatalogDB | None = None
     cluster_db: ClusterDB | None = None
     tahoe_client: TahoeClient | None = None
+    fragmenter: Fragmenter | None = None
 
     try:
         # Step 3 — storage pool (always runs; validates paths are accessible)
@@ -186,11 +189,29 @@ async def lifespan(app: FastAPI):
             largest_pool_path = max(
                 pool.get_usage(), key=lambda e: e["quota_bytes"]
             )["path"]
+
+            # ADR-018: k/n is a node-level Tahoe setting.  Resolve from the
+            # active profile; adaptive k/n falls back to balanced (3,5) until
+            # task 1.11.1 provides get_current_kn().
+            active_profile = config.fragmentation.profile
+            if active_profile == "adaptive":
+                shares_k, shares_n = 3, 5
+                logger.info(
+                    "Adaptive profile selected — using balanced (3,5) at startup; "
+                    "task 1.11.1 will compute final k/n from cluster size"
+                )
+            else:
+                _p = get_profile(active_profile)
+                shares_k, shares_n = _p.k, _p.n
+
             storage_node = StorageNode(
                 basedir=str(data_dir / "tahoe" / "storage_node"),
                 storage_dir=largest_pool_path,
                 reserved_space=_TAHOE_RESERVED_BYTES,
                 nickname=config.node.name,
+                shares_needed=shares_k,
+                shares_happy=shares_n,
+                shares_total=shares_n,
             )
             storage_node.create(introducer_furl)
             await storage_node.start()
@@ -199,6 +220,20 @@ async def lifespan(app: FastAPI):
             logger.info("Starting Tahoe client at %s", storage_node.node_url)
             tahoe_client = TahoeClient(storage_node.node_url)
             logger.info("Tahoe client ready")
+
+            # Step 7 (continued) — Fragmenter
+            # root_dir.cap is the mutable Tahoe directory cap; its read-write form
+            # is used as the root_dir_ref for linking uploaded files (ADR-008).
+            root_dir_ref = root_dir_cap  # type: ignore[assignment]
+            metadata_key = derive_metadata_key(root_dir_cap)  # type: ignore[arg-type]
+            fragmenter = Fragmenter(
+                tahoe_client=tahoe_client,
+                catalog_db=catalog_db,
+                root_dir_ref=root_dir_ref,
+                metadata_key=metadata_key,
+            )
+            logger.info("Fragmenter ready (profile=%s k=%d n=%d)",
+                        active_profile, shares_k, shares_n)
 
             # Step 8 — background scheduler stubs
             # TODO: store task refs on app.state.background_tasks to prevent GC
@@ -213,6 +248,7 @@ async def lifespan(app: FastAPI):
         app.state.cluster_db = cluster_db
         app.state.storage_node = storage_node
         app.state.tahoe_client = tahoe_client
+        app.state.fragmenter = fragmenter
 
         logger.info(
             "Gatekeeper '%s' %s — GUI at http://%s:%d",

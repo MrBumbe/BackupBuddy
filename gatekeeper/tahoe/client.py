@@ -162,6 +162,34 @@ class TahoeClient:
         logger.debug("mkdir complete, ref length=%d", len(ref))
         return ref
 
+    async def link_file(
+        self,
+        dir_ref: str,
+        name: str,
+        file_ref: str,
+        metadata: dict,
+    ) -> None:
+        """
+        Link a file cap into a Tahoe directory with associated metadata.
+
+        Uses POST /uri/<dir_ref>?t=set_children (verified in fork source:
+        src/allmydata/web/directory.py).  The file cap is stored as a
+        read-only URI in the directory entry.  metadata is arbitrary JSON
+        stored alongside the entry — used by the fragmenter for encrypted
+        call-home reconstruction tags (ADR-008).
+
+        Raises TahoeError on failure.
+        """
+        encoded_dir = urlquote(dir_ref, safe="")
+        body = {name: ["filenode", {"ro_uri": file_ref, "metadata": metadata}]}
+        response = await self._http.post(
+            f"{self._node_url}/uri/{encoded_dir}",
+            params={"t": "set_children"},
+            json=body,
+        )
+        _raise_for_tahoe_error(response, "link_file")
+        logger.debug("File linked as %r in directory", name)
+
 
 # ------------------------------------------------------------------
 # Internal helpers

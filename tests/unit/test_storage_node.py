@@ -140,6 +140,29 @@ class TestStorageNodeConfigure(unittest.TestCase):
         self.assertEqual(cfg.get("client", "introducer.furl"), _FAKE_FURL)
         self.assertEqual(cfg.get("storage", "enabled"), "true")
 
+    @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
+    def test_configure_writes_default_shares(self, _mock_find):
+        """Default shares.needed/happy/total (3/5/5) written to [client] section."""
+        from gatekeeper.tahoe.storage_node import StorageNode
+        StorageNode(str(self.basedir), str(self.storage_dir))._configure(_FAKE_FURL)
+        cfg = self._read_cfg()
+        self.assertEqual(cfg.get("client", "shares.needed"), "3")
+        self.assertEqual(cfg.get("client", "shares.happy"),  "5")
+        self.assertEqual(cfg.get("client", "shares.total"),  "5")
+
+    @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
+    def test_configure_writes_custom_shares(self, _mock_find):
+        """Custom shares.needed/happy/total written from constructor params."""
+        from gatekeeper.tahoe.storage_node import StorageNode
+        StorageNode(
+            str(self.basedir), str(self.storage_dir),
+            shares_needed=3, shares_happy=7, shares_total=7,
+        )._configure(_FAKE_FURL)
+        cfg = self._read_cfg()
+        self.assertEqual(cfg.get("client", "shares.needed"), "3")
+        self.assertEqual(cfg.get("client", "shares.happy"),  "7")
+        self.assertEqual(cfg.get("client", "shares.total"),  "7")
+
 
 class TestStorageNodeStartStop(unittest.IsolatedAsyncioTestCase):
 

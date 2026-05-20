@@ -545,14 +545,14 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 
 ## 1.7 — Fragmenter
 
-### [ ] 1.7.1 — Hash verification and fragmentation
+### [x] 1.7.1 — Hash verification and fragmentation
 
 **Reads:** SECURITY.md → Section 4, DECISIONS.md → ADR-006,
 CLAUDE.md → Every file hash verification
 **Creates:** `gatekeeper/fragmenter/fragmenter.py`, `gatekeeper/fragmenter/profiles.py`
 **Requirements:**
 - `profiles.py`: maps profile names to Tahoe k/n values
-  `PROFILES = { "lagom": (3,5), "trygg": (3,7), "paranoid": (3,10) }`
+  `PROFILES = { "balanced": (3,5), "secure": (3,7), "paranoid": (3,10) }`
   Adaptiv profile k/n computed separately (see 1.11)
 - `fragmenter.py`:
   `fragment_and_upload(file_path, profile, agent, original_path) → cap`
@@ -574,7 +574,19 @@ CLAUDE.md → Every file hash verification
 - Unit tests: successful upload, hash mismatch handling, profile mapping
 
 ```
-> Kludde: <!-- -->
+> Kludde: profiles.py — PROFILES dict with balanced(3,5)/secure(3,7)/paranoid(3,10); get_profile()
+> raises ValueError for unknown names and "adaptive" (task 1.11.1). fragmenter.py — Fragmenter class
+> with fragment_and_upload(): SHA-256 before+after upload (file-change detection), AES-256-GCM
+> encrypted metadata tags in Tahoe directory entries for ADR-008 call-home reconstruction,
+> catalog.db insertion on success. derive_metadata_key() uses separate HKDF info string from
+> catalog key. ADR-018 added to DECISIONS.md: k/n is a Tahoe node-level setting (tahoe.cfg),
+> not per-upload — verified in fork source; profile changes require node restart.
+> StorageNode extended with shares_needed/happy/total params; written to tahoe.cfg [client].
+> TahoeClient extended with link_file() using POST /uri/<dir>?t=set_children (verified in fork).
+> main.py: reads profile k/n at startup, passes to StorageNode; creates Fragmenter and exposes
+> on app.state. test_main.py mock fixed (fragmentation.profile = "balanced").
+> 33 new tests (31 fragmenter + 2 storage_node shares). Full suite: 324 pass, 10 skip, 2 pre-existing
+> agent test failures (test_agent_main.py — not caused by this task, agent/main.py untouched).
 ```
 
 ---

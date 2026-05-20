@@ -507,5 +507,61 @@ Both servers are started with `asyncio.gather()` inside a single process.
 
 ---
 
+## ADR-018 — Fragmentation profiles are node-wide settings, not per-upload
+
+**Status:** Accepted
+
+**Decision:** A fragmentation profile (Balanced, Secure, Paranoid, Adaptive) applies to
+all uploads from a given gatekeeper node at any point in time. Changing the active profile
+requires updating the Tahoe node configuration and restarting the node.
+
+**Background — what the fragmentation profile controls:**
+
+When BackupBuddy stores a file in the cluster, it splits the file into fragments.
+The profile determines two numbers:
+
+- **k** — how many fragments are needed to restore the file (e.g. any 3 of 5)
+- **n** — how many fragments are created in total (e.g. 5 spread across 5 buddy nodes)
+
+A higher n means more redundancy: the file can survive more nodes going offline.
+
+**Why per-upload k/n is not possible (Phase 1):**
+
+Tahoe-LAFS controls k and n through its node configuration file (`tahoe.cfg`), not through
+per-upload parameters in its HTTP API. The upload endpoint (`PUT /uri`) does not accept k
+or n as query parameters — verified in the fork source (`src/allmydata/web/unlinked.py`).
+
+This means all files uploaded at any moment use the k/n values that are currently written
+in `tahoe.cfg`. You cannot upload one file as Balanced (3,5) and another as Secure (3,7)
+in the same session without modifying the config and restarting the node.
+
+**What this means in practice:**
+
+- The active profile is stored in `gatekeeper.cfg` and written to `tahoe.cfg` when the
+  Tahoe node starts up.
+- All backups run with that profile until the user changes it in the GUI.
+- If a user switches from Balanced to Secure, BackupBuddy updates `tahoe.cfg` and restarts
+  the Tahoe node. New uploads from that point use the new k/n.
+- Files already in the cluster keep their original k/n until the nightly rebalance job
+  re-fragments them (task 1.11).
+- The fragmenter records the k/n in `catalog.db` per file so the rebalance job always
+  knows what each file was originally uploaded with.
+
+**What this does NOT affect:**
+
+- The `catalog.db` record for each file always stores the exact k/n used at upload time.
+  Normal restore (task 1.12.1) and call-home reconstruction (task 1.12.2) both work correctly
+  regardless of which profile is currently active.
+- Files from different periods may have different k/n values in the catalog — that is
+  expected and handled correctly by the restore and rebalance logic.
+
+**Phase 2 note:**
+
+Per-upload k/n overrides could be implemented by patching the Tahoe upload path at the
+Python API level (bypassing the HTTP gateway). This is a Phase 2 improvement and must not
+be implemented as part of Phase 1.
+
+---
+
 _BackupBuddy DECISIONS.md_
 _Read relevant ADRs before implementing any related feature._
