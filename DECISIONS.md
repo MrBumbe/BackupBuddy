@@ -466,5 +466,46 @@ tested end-to-end per docs/testing.md.
 
 ---
 
+## ADR-017 — Dual-listener architecture: Tailscale GUI + LAN agent API
+
+**Status:** Accepted
+
+**Decision:** The gatekeeper runs two independent HTTP servers:
+
+1. **GUI / cluster API** — bound to the Tailscale IP, port 8080 (default).
+   Handles the web GUI, cluster-to-cluster communication, and any endpoint
+   that buddies in other home networks need to reach via Tailscale.
+
+2. **Agent API** — bound to the local LAN IP, port 8081 (default).
+   Handles agent registration, fragment upload, and lifeboat distribution.
+   Accepts connections from the local subnet only; never reachable via
+   Tailscale or the public internet.
+
+Both servers are started with `asyncio.gather()` inside a single process.
+
+**Rationale:**
+- SECURITY.md §3 requires the GUI to bind to Tailscale only, but agents
+  on the home LAN cannot reach the Tailscale interface.
+- Separating the two listeners enforces the network boundary in code:
+  a compromised cluster node cannot reach the agent API even if it has
+  Tailscale access to the gatekeeper.
+- Binding each server to a specific interface is simpler and more auditable
+  than a single 0.0.0.0 server with runtime IP-filtering middleware.
+
+**Consequences:**
+- The gatekeeper detects its LAN IP at startup using psutil (same library
+  used for Tailscale detection). If no LAN IP is found, the agent API is
+  skipped with a warning — the gatekeeper still starts in GUI-only mode.
+- The agent API is only activated when `[agent_api] token` is set in
+  gatekeeper.cfg. An empty token disables the agent API.
+- Agent token is stored in plaintext in both backup.cfg and gatekeeper.cfg
+  for Phase 1. Encrypted storage is a Phase 2/3 improvement.
+- Authentication: pre-shared token in `Authorization: Bearer <token>` header,
+  validated with `secrets.compare_digest` to prevent timing attacks.
+- Agent → gatekeeper communication uses the LAN URL (e.g. http://192.168.1.50:8081).
+  Cluster → cluster communication uses Tailscale hostnames.
+
+---
+
 _BackupBuddy DECISIONS.md_
 _Read relevant ADRs before implementing any related feature._

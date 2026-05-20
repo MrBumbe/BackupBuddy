@@ -463,7 +463,7 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 
 ## 1.6 — Agent core
 
-### [ ] 1.6.1 — Agent startup and gatekeeper registration
+### [x] 1.6.1 — Agent startup and gatekeeper registration
 
 **Reads:** docs/architecture.md → Agent, docs/configuration.md → backup.cfg
 **Creates:** `agent/main.py`, `agent/gatekeeper_client.py`
@@ -484,7 +484,18 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 - Unit test: agent registration, token authentication
 
 ```
-> Kludde: <!-- -->
+> Kludde: agent/gatekeeper_client.py — async HTTP client (register, send_fragment)
+> + local file ops (store_lifeboat, get_lifeboat — 0600 perms). agent/main.py —
+> reads backup.cfg, calls register() non-fatally, starts config watcher, file
+> watcher stub. Gatekeeper dual-listener added (ADR-017): GUI on Tailscale IP:8080,
+> agent API on LAN IP:8081. Agent API: token auth via secrets.compare_digest +
+> LAN-IP source check. backup.cfg extended with required [gatekeeper] section
+> (url, token, name, lifeboat_path). gatekeeper.cfg extended with optional
+> [agent_api] section (enabled, port, token). Registered agents kept in-memory
+> dict — persistent storage added in 1.8.3 when lifeboat distribution needs it.
+> store_lifeboat/get_lifeboat are local file ops; gatekeeper→agent HTTP transport
+> for lifeboat push is implemented in task 1.8.3.
+> 30 new unit tests (30 pass, 1 skip Windows chmod). Full suite: 278 pass, 10 skip.
 ```
 
 ---
@@ -662,6 +673,15 @@ project-docs/onboarding.md → Setup complete
   Scheduled every `lifeboat.interval` (default: 1h) via APScheduler
   If distribution fails for any agent: log warning, continue with others
   If verification fails: log error, send critical alert
+- **NOTE (from 1.6.1):** `GatekeeperClient.store_lifeboat()` and
+  `GatekeeperClient.get_lifeboat()` are already implemented as local file ops
+  in `agent/gatekeeper_client.py`. This task must add the HTTP transport:
+  a POST /lifeboat endpoint on the agent (or push from gatekeeper) that calls
+  `store_lifeboat()`, and a GET /lifeboat endpoint (or pull) that calls
+  `get_lifeboat()`. The agent will need a minimal HTTP listener for this.
+  The registered agents dict in `gatekeeper/main.py:_registered_agents` must
+  also be persisted (to cluster.db or a new table) so the gatekeeper knows
+  which agents to push to after restart.
 **Done when:**
 - Bundle created and distributed to all agents
 - Verification passes after distribution

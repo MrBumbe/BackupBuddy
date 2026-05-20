@@ -33,10 +33,20 @@ def _make_backup_dir(tmp_path: Path, name: str = "documents") -> Path:
     return d
 
 
+_GATEKEEPER_SECTION = """\
+[gatekeeper]
+url = http://192.168.1.50:8081
+token = test-token
+name = test-agent
+"""
+
+
 def _minimal_cfg(backup_path: str) -> str:
     return f"""\
         [backup]
         {backup_path}
+
+        {_GATEKEEPER_SECTION}
     """
 
 
@@ -92,6 +102,8 @@ class TestValidConfig:
 
             [node]
             share_log = true
+
+            {_GATEKEEPER_SECTION}
         """
         cfg_file = _write_cfg(tmp_path, content)
         cfg = load_config(cfg_file)
@@ -137,6 +149,8 @@ class TestValidConfig:
             *.db-journal
             Thumbs.db
             .DS_Store
+
+            {_GATEKEEPER_SECTION}
         """
         cfg_file = _write_cfg(tmp_path, content)
         cfg = load_config(cfg_file)
@@ -165,14 +179,14 @@ class TestMissingRequiredFields:
 
 class TestBackupPathValidation:
     def test_relative_path_raises(self, tmp_path):
-        content = "[backup]\nrelative/path\n"
+        content = f"[backup]\nrelative/path\n\n{_GATEKEEPER_SECTION}"
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="absolute"):
             load_config(cfg_file)
 
     def test_nonexistent_path_raises(self, tmp_path):
         nonexistent = tmp_path / "does" / "not" / "exist"
-        content = f"[backup]\n{nonexistent}\n"
+        content = f"[backup]\n{nonexistent}\n\n{_GATEKEEPER_SECTION}"
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="does not exist"):
             load_config(cfg_file)
@@ -180,7 +194,7 @@ class TestBackupPathValidation:
     def test_file_not_directory_raises(self, tmp_path):
         not_a_dir = tmp_path / "file.txt"
         not_a_dir.write_text("hello")
-        content = f"[backup]\n{not_a_dir}\n"
+        content = f"[backup]\n{not_a_dir}\n\n{_GATEKEEPER_SECTION}"
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="not a directory"):
             load_config(cfg_file)
@@ -190,7 +204,7 @@ class TestBackupPathValidation:
         reason="/etc does not exist on this platform",
     )
     def test_critical_path_etc_raises(self, tmp_path):
-        content = "[backup]\n/etc\n"
+        content = f"[backup]\n/etc\n\n{_GATEKEEPER_SECTION}"
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="system-critical"):
             load_config(cfg_file)
@@ -200,7 +214,7 @@ class TestBackupPathValidation:
         reason="/proc does not exist on this platform",
     )
     def test_critical_path_proc_raises(self, tmp_path):
-        content = "[backup]\n/proc\n"
+        content = f"[backup]\n/proc\n\n{_GATEKEEPER_SECTION}"
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="system-critical"):
             load_config(cfg_file)
@@ -208,7 +222,7 @@ class TestBackupPathValidation:
     def test_multiple_paths_all_validated(self, tmp_path):
         good = _make_backup_dir(tmp_path, "good")
         bad = tmp_path / "does_not_exist"
-        content = f"[backup]\n{good}\n{bad}\n"
+        content = f"[backup]\n{good}\n{bad}\n\n{_GATEKEEPER_SECTION}"
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="does not exist"):
             load_config(cfg_file)
@@ -219,7 +233,7 @@ class TestBackupPathValidation:
 class TestExcludePatternValidation:
     def test_null_byte_in_pattern_raises(self, tmp_path):
         d = _make_backup_dir(tmp_path)
-        content = f"[backup]\n{d}\n\n[exclude]\n*.tmp\0bad\n"
+        content = f"[backup]\n{d}\n\n[exclude]\n*.tmp\0bad\n\n{_GATEKEEPER_SECTION}"
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="null byte"):
             load_config(cfg_file)
@@ -246,7 +260,7 @@ class TestWatchConfig:
         try:
             # Give the watcher thread a moment to start, then modify the file.
             time.sleep(0.1)
-            new_content = f"[backup]\n{d}\n{d2}\n"
+            new_content = f"[backup]\n{d}\n{d2}\n\n{_GATEKEEPER_SECTION}"
             cfg_file.write_text(textwrap.dedent(new_content), encoding="utf-8")
             # Wait for the watcher to pick up the change.
             deadline = time.monotonic() + 2.0
@@ -292,7 +306,9 @@ class TestWatchConfig:
             time.sleep(0.2)
             # Now write a valid config — watcher should recover.
             d2 = _make_backup_dir(tmp_path, "recovered")
-            cfg_file.write_text(f"[backup]\n{d}\n{d2}\n", encoding="utf-8")
+            cfg_file.write_text(
+                f"[backup]\n{d}\n{d2}\n\n{_GATEKEEPER_SECTION}", encoding="utf-8"
+            )
             deadline = time.monotonic() + 2.0
             while not reloaded and time.monotonic() < deadline:
                 time.sleep(0.05)

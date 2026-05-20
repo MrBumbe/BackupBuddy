@@ -181,6 +181,15 @@ class WebConfig(BaseModel):
     bind: str = "tailscale"  # literal selector, not an IP address
 
 
+class AgentApiConfig(BaseModel):
+    # LAN-only listener for agent registration and fragment upload (ADR-017).
+    # token must be a non-empty string to enable the agent API; an empty
+    # string disables it (all requests return 401).
+    enabled: bool = True
+    port: int = 8081
+    token: str = ""  # plaintext, Phase 1 — see ADR-017
+
+
 # ── Top-level config ──────────────────────────────────────────────────────────
 
 class GatekeeperConfig(BaseModel):
@@ -198,8 +207,10 @@ class GatekeeperConfig(BaseModel):
     alerts: AlertsConfig = AlertsConfig()
     notify: NotifyConfig = NotifyConfig()
     web: WebConfig = WebConfig()
-    # Populated at startup by gatekeeper/tailscale.py — None until resolved
+    agent_api: AgentApiConfig = AgentApiConfig()
+    # Populated at startup — None until resolved
     tailscale_ip: Optional[str] = None
+    lan_ip: Optional[str] = None
 
 
 # ── INI parsing ───────────────────────────────────────────────────────────────
@@ -377,6 +388,14 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
         bind=web_raw.get("bind", "tailscale"),
     )
 
+    # [agent_api]
+    aa_raw = sec("agent_api")
+    agent_api = AgentApiConfig(
+        enabled=_bool(aa_raw.get("enabled", "true")),
+        port=int(aa_raw.get("port", 8081)),
+        token=aa_raw.get("token", ""),
+    )
+
     return GatekeeperConfig(
         node=node,
         tahoe=tahoe,
@@ -392,6 +411,7 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
         alerts=alerts,
         notify=notify,
         web=web,
+        agent_api=agent_api,
     )
 
 

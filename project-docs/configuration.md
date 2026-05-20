@@ -131,6 +131,14 @@ url      = https://discord.com/api/webhooks/...
 enabled = true
 port    = 8080
 bind    = tailscale    # listen on Tailscale interface only
+
+# ── Agent API ─────────────────────────────────────────
+# LAN-only listener for agent registration and fragment upload (ADR-017).
+# token must be non-empty to activate; agents use the same token in backup.cfg.
+[agent_api]
+enabled = true
+port    = 8081
+token   = changeme-generate-at-setup
 ```
 
 ---
@@ -142,6 +150,16 @@ Configuration file per agent device. Located at:
 `C:\ProgramData\BackupBuddy\backup.cfg` (Windows)
 
 ```ini
+# ── Gatekeeper connection ──────────────────────────────
+# Required. The agent talks to its gatekeeper over the local LAN (ADR-017).
+# token: pre-shared secret generated at setup time — plaintext in Phase 1
+[gatekeeper]
+url           = http://192.168.1.50:8081
+token         = changeme-generate-at-setup
+name          = anders-laptop
+# lifeboat_path is optional; default shown below
+lifeboat_path = /etc/backup-buddy/lifeboat.enc
+
 # ── Schedule ──────────────────────────────────────────
 [schedule]
 # Backup is event-driven (file watcher), not scheduled.

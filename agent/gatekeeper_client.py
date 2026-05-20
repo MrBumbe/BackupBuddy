@@ -1,0 +1,120 @@
+"""
+GatekeeperClient — agent-side interface for agent→gatekeeper communication.
+
+HTTP methods (register, send_fragment) POST to the gatekeeper's LAN agent
+API at the URL configured in backup.cfg [gatekeeper].
+
+Lifeboat methods (store_lifeboat, get_lifeboat) are local file operations.
+The gatekeeper pushes encrypted bundles to the agent via the agent's own
+HTTP endpoint, which calls store_lifeboat() as a handler.  The transport
+for that direction is implemented in task 1.8.3 — see the note there.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from pathlib import Path
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_LIFEBOAT_PATH = Path("/etc/backup-buddy/lifeboat.enc")
+
+
+class RegistrationError(Exception):
+    """Raised when the agent fails to register with the gatekeeper."""
+
+
+class GatekeeperClient:
+    """Async HTTP client and local lifeboat store for one agent."""
+
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        agent_name: str,
+        lifeboat_path: Path | str = _DEFAULT_LIFEBOAT_PATH,
+    ) -> None:
+        self._url = url.rstrip("/")
+        self._agent_name = agent_name
+        self._lifeboat_path = Path(lifeboat_path)
+        self._client = httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
+
+    # ── HTTP operations (agent → gatekeeper) ──────────────────────────────────
+
+    async def register(self) -> None:
+        """Announce this agent to the gatekeeper.
+
+        Raises RegistrationError if the gatekeeper rejects the request or is
+        unreachable.  Callers should treat this as non-fatal and retry later.
+        """
+        try:
+            resp = await self._client.post(
+                f"{self._url}/api/agents/register",
+                json={"agent_name": self._agent_name},
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RegistrationError(
+                f"Gatekeeper rejected registration (HTTP {exc.response.status_code})"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise RegistrationError(
+                f"Cannot reach gatekeeper at {self._url}: {type(exc).__name__}"
+            ) from exc
+
+    async def send_fragment(self, fragment_data: bytes, metadata: dict) -> None:
+        """Send a file fragment and its metadata to the gatekeeper for upload.
+
+        Metadata is passed as a JSON-encoded header so the body can be a raw
+        byte stream.  Raises IOError on transport or HTTP failure.
+        """
+        try:
+            resp = await self._client.post(
+                f"{self._url}/api/agents/fragments",
+                content=fragment_data,
+                headers={"X-Fragment-Metadata": json.dumps(metadata)},
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise IOError(
+                f"Failed to send fragment to gatekeeper: {type(exc).__name__}"
+            ) from exc
+
+    # ── Local file operations (gatekeeper → agent lifeboat store) ─────────────
+
+    def store_lifeboat(self, encrypted_bundle: bytes) -> None:
+        """Write the encrypted lifeboat bundle to disk with 0600 permissions.
+
+        Called by the agent's lifeboat HTTP endpoint (task 1.8.3) when the
+        gatekeeper distributes a new bundle.
+        """
+        self._lifeboat_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lifeboat_path.write_bytes(encrypted_bundle)
+        try:
+            os.chmod(self._lifeboat_path, 0o600)
+        except (OSError, NotImplementedError):
+            pass
+        logger.info("Lifeboat bundle stored (%d bytes)", len(encrypted_bundle))
+
+    def get_lifeboat(self) -> bytes:
+        """Read and return the stored lifeboat bundle from disk.
+
+        Raises FileNotFoundError if no bundle has been stored yet.
+        """
+        if not self._lifeboat_path.exists():
+            raise FileNotFoundError(
+                f"Lifeboat bundle not found at {self._lifeboat_path}"
+            )
+        return self._lifeboat_path.read_bytes()
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    async def aclose(self) -> None:
+        await self._client.aclose()

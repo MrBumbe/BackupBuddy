@@ -40,6 +40,33 @@ def get_tailscale_ip() -> str | None:
     return None
 
 
+def get_lan_ip() -> str | None:
+    """Return the best LAN IPv4 address for binding the agent API listener.
+
+    Scans all IPv4 interfaces and returns the first private, non-loopback
+    address that is NOT in the Tailscale CGNAT block (100.64.0.0/10).
+    Returns None if no suitable interface is found.
+
+    Used by the gatekeeper to bind the agent API to the local LAN (ADR-017).
+    """
+    for _iface, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if addr.family != socket.AF_INET:
+                continue
+            try:
+                ip = ipaddress.ip_address(addr.address)
+            except ValueError:
+                continue
+            if ip.is_loopback:
+                continue
+            if ip in _TAILSCALE_CGNAT:
+                continue
+            if not ip.is_private:
+                continue
+            return addr.address
+    return None
+
+
 def assert_tailscale_running() -> str:
     """Return the Tailscale IP or raise TailscaleNotRunning.
 

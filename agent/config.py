@@ -48,6 +48,13 @@ class NodeConfig(BaseModel):
     share_log: bool = False
 
 
+class GatekeeperConnectionConfig(BaseModel):
+    url: str                                                    # e.g. http://192.168.1.50:8081
+    token: str                                                  # pre-shared token (plaintext, Phase 1 — ADR-017)
+    name: str                                                   # agent display name shown in gatekeeper GUI
+    lifeboat_path: str = "/etc/backup-buddy/lifeboat.enc"
+
+
 # ── Top-level config ──────────────────────────────────────────────────────────
 
 class AgentConfig(BaseModel):
@@ -55,6 +62,7 @@ class AgentConfig(BaseModel):
     backup_paths: list[str]
     excludes: list[str] = []
     node: NodeConfig = NodeConfig()
+    gatekeeper: GatekeeperConnectionConfig
 
 
 # ── Path validation ───────────────────────────────────────────────────────────
@@ -132,11 +140,24 @@ def _parse_ini(parser: configparser.ConfigParser) -> AgentConfig:
         share_log=_bool(node_raw.get("share_log", "false")),
     )
 
+    # [gatekeeper] — required
+    gk_raw = sec("gatekeeper")
+    for required_key in ("url", "token", "name"):
+        if not gk_raw.get(required_key):
+            raise ConfigError(f"[gatekeeper] {required_key!r} is required")
+    gatekeeper = GatekeeperConnectionConfig(
+        url=gk_raw["url"],
+        token=gk_raw["token"],
+        name=gk_raw["name"],
+        lifeboat_path=gk_raw.get("lifeboat_path", "/etc/backup-buddy/lifeboat.enc"),
+    )
+
     return AgentConfig(
         schedule=schedule,
         backup_paths=backup_paths,
         excludes=excludes,
         node=node,
+        gatekeeper=gatekeeper,
     )
 
 

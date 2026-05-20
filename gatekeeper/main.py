@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import logging
+import secrets as _secrets_mod
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from gatekeeper.config import (
     ConfigError,
@@ -41,7 +45,12 @@ from gatekeeper.storage.pool import PoolPathError, StoragePoolManager
 from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
 from gatekeeper.tahoe.storage_node import StorageNode
-from gatekeeper.tailscale import TailscaleNotRunning, assert_tailscale_running
+from gatekeeper.tailscale import (
+    _TAILSCALE_CGNAT,
+    TailscaleNotRunning,
+    assert_tailscale_running,
+    get_lan_ip,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +58,27 @@ logger = logging.getLogger(__name__)
 # StoragePoolManager enforces the real quota; this is Tahoe's own safety valve.
 _TAHOE_RESERVED_BYTES = 1 * 1024**3  # 1 GB
 
-# Populated by main() before uvicorn starts; consumed by lifespan.
+# Populated by main() before servers start; consumed by lifespan.
 _state: dict[str, Any] = {}
+
+# In-memory registry of connected agents (keyed by agent_name).
+# Persisted storage will be added when lifeboat distribution (task 1.8.3) needs it.
+_registered_agents: dict[str, dict] = {}
+
+
+# ── Agent API helpers ─────────────────────────────────────────────────────────
+
+class _AgentRegisterMessage(BaseModel):
+    agent_name: str
+
+
+def _is_lan_ip(ip_str: str) -> bool:
+    """Return True if ip_str is a private, non-loopback, non-Tailscale address."""
+    try:
+        ip = ipaddress.IPv4Address(ip_str)
+    except ValueError:
+        return False
+    return ip.is_private and not ip.is_loopback and ip not in _TAILSCALE_CGNAT
 
 
 # ── Key derivation ─────────────────────────────────────────────────────────────
@@ -240,6 +268,78 @@ def _create_app() -> FastAPI:
     return app
 
 
+# ── Agent API (LAN-only — ADR-017) ───────────────────────────────────────────
+
+def _create_agent_api_app(cfg: GatekeeperConfig) -> FastAPI:
+    """Build the FastAPI app that listens on the LAN interface for agent calls.
+
+    Requests are accepted only from private, non-Tailscale IPv4 addresses and
+    must carry a valid Bearer token matching cfg.agent_api.token.
+    """
+    app = FastAPI(title="BackupBuddy Agent API", docs_url=None, redoc_url=None)
+
+    @app.post("/api/agents/register")
+    async def register_agent(
+        request: Request,
+        message: _AgentRegisterMessage,
+    ) -> JSONResponse:
+        client_ip = request.client.host if request.client else ""
+
+        if not _is_lan_ip(client_ip):
+            logger.warning(
+                "Agent registration rejected: non-LAN source %s", client_ip
+            )
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+        auth = request.headers.get("authorization", "")
+        expected = cfg.agent_api.token
+        if (
+            not expected
+            or not auth.startswith("Bearer ")
+            or not _secrets_mod.compare_digest(auth[7:], expected)
+        ):
+            logger.warning(
+                "Agent registration rejected: invalid token from %s", client_ip
+            )
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        _registered_agents[message.agent_name] = {
+            "registered_at": datetime.now(timezone.utc).isoformat(),
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+            "ip": client_ip,
+        }
+        logger.info("Agent registered: '%s' from %s", message.agent_name, client_ip)
+        return JSONResponse({"status": "registered"})
+
+    return app
+
+
+# ── Multi-server runner ───────────────────────────────────────────────────────
+
+async def _run_servers(
+    gui_app: FastAPI,
+    gui_host: str,
+    gui_port: int,
+    agent_app: FastAPI | None,
+    agent_host: str | None,
+    agent_port: int,
+    log_level: str,
+) -> None:
+    """Run GUI and (optionally) agent API servers concurrently."""
+    gui_cfg = uvicorn.Config(
+        gui_app, host=gui_host, port=gui_port, log_level=log_level
+    )
+    coroutines = [uvicorn.Server(gui_cfg).serve()]
+
+    if agent_app is not None and agent_host is not None:
+        agent_cfg = uvicorn.Config(
+            agent_app, host=agent_host, port=agent_port, log_level=log_level
+        )
+        coroutines.append(uvicorn.Server(agent_cfg).serve())
+
+    await asyncio.gather(*coroutines)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
@@ -316,14 +416,44 @@ def main() -> None:
         lambda new_cfg: _state.update({"config": new_cfg}),
     )
 
-    app = _create_app()
+    gui_app = _create_app()
 
-    # GUI binds to Tailscale interface only — never 0.0.0.0 (ADR-002, SECURITY.md §3)
-    uvicorn.run(
-        app,
-        host=tailscale_ip,
-        port=config.web.port,
-        log_level=args.log_level.lower(),
+    # Detect LAN IP for the agent API listener (ADR-017)
+    lan_ip = get_lan_ip()
+    config = config.model_copy(update={"lan_ip": lan_ip})
+    _state["config"] = config
+
+    agent_app: FastAPI | None = None
+    if config.agent_api.enabled:
+        if not config.agent_api.token:
+            logger.warning(
+                "Agent API enabled but [agent_api] token is not set — "
+                "configure agent_api.token in gatekeeper.cfg to accept agent connections"
+            )
+        elif lan_ip is None:
+            logger.warning(
+                "Agent API enabled but no LAN interface found — "
+                "agent registration unavailable"
+            )
+        else:
+            logger.info(
+                "Agent API will listen on %s:%d (LAN only)",
+                lan_ip,
+                config.agent_api.port,
+            )
+            agent_app = _create_agent_api_app(config)
+
+    # GUI binds to Tailscale only; agent API binds to LAN only (ADR-002, ADR-017)
+    asyncio.run(
+        _run_servers(
+            gui_app=gui_app,
+            gui_host=tailscale_ip,
+            gui_port=config.web.port,
+            agent_app=agent_app,
+            agent_host=lan_ip,
+            agent_port=config.agent_api.port,
+            log_level=args.log_level.lower(),
+        )
     )
 
 
