@@ -500,7 +500,7 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 
 ---
 
-### [ ] 1.6.2 — File watcher with stability detection
+### [x] 1.6.2 — File watcher with stability detection
 
 **Reads:** docs/design.md → File watcher, SECURITY.md → Section 5
 **Creates:** `agent/watcher.py`
@@ -525,7 +525,20 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 - Unit tests: stable file queued, unstable file not queued, excluded file skipped
 
 ```
-> Kludde: <!-- -->
+> Kludde: FileWatcher in agent/watcher.py — polling-based (no inotify in Phase 1; portable
+> across Linux/Windows/macOS). Stability detection: mtime + size unchanged since stable_since,
+> no open handles (psutil). _scan_once() returns list[str] instead of writing to asyncio.Queue
+> directly — asyncio.Queue is not thread-safe; run() puts results on the queue from the event
+> loop thread after asyncio.to_thread() returns. nice+19 / ionice best-effort (no-op on
+> Windows/permission errors). stability_minutes added to backup.cfg [schedule] as a plain
+> integer (not a duration string — different from full_scan format). Storage pool paths passed
+> as excluded_pool_paths parameter (not imported from gatekeeper.storage.pool) because agent
+> and gatekeeper run on different machines in production. catalog_check is a callable
+> defaulting to always-False — catalog.db lives on the gatekeeper; agent cannot query it
+> directly. Both are TODO for wiring up via registration response. 15 unit tests pass
+> (incl. async integration test via anyio). _has_open_handles patched in most tests —
+> psutil process enumeration is slow on Windows (several seconds per scan).
+> Full suite: 39 pass, 2 skip (POSIX critical-path tests, /etc and /proc absent on Windows).
 ```
 
 ---
