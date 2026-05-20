@@ -358,7 +358,7 @@ docs/configuration.md → cluster.db
 
 ---
 
-### [ ] 1.5.2 — Storage pool manager
+### [x] 1.5.2 — Storage pool manager
 
 **Reads:** DECISIONS.md → ADR-005, SECURITY.md → Section 5,
 docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
@@ -381,7 +381,17 @@ docs/architecture.md → Storage pool, docs/configuration.md → storage-pool
 - Unit tests: path selection, quota enforcement, exclusion set contents
 
 ```
-> Kludde: <!-- -->
+> Kludde: StoragePoolManager in gatekeeper/storage/pool.py. Reads StoragePoolEntry list
+> from config; resolves all paths via os.path.realpath before use. Startup validation:
+> must exist, be a directory, be writable (PoolPathError otherwise). _used_bytes seeded
+> from filesystem via os.walk(followlinks=False) at init; updated in-memory via
+> register_fragment / remove_fragment for the current session. Note: orphan cleanup
+> (1.10.2) must call remove_fragment() to avoid counter drift.
+> get_target_path(size_bytes) returns path with most remaining quota; raises
+> QuotaExceeded if none qualify. Module-level EXCLUDED_PATHS: frozenset[str] set once
+> by __init__ (global reassignment of immutable frozenset); self.excluded_paths mirrors
+> it for instance access. All mutations protected by a threading.Lock.
+> 23 tests pass, 2 skipped (Windows: chmod + symlinks). Full suite: 206 pass, 7 skip.
 ```
 
 ---
