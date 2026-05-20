@@ -227,7 +227,7 @@ docs/configuration.md → catalog.db
 
 ---
 
-### [ ] 1.3.2 — cluster.db schema and access layer
+### [x] 1.3.2 — cluster.db schema and access layer
 
 **Reads:** SECURITY.md → Section 4, DECISIONS.md → ADR-014,
 docs/configuration.md → cluster.db
@@ -250,7 +250,18 @@ docs/configuration.md → cluster.db
 - Unit tests for each table's CRUD operations
 
 ```
-> Kludde: <!-- -->
+> Kludde: ClusterDB in gatekeeper/db/cluster.py — four tables: members, invites,
+> votes, orphan_tags. No encryption (cluster.db holds operational metadata, not key
+> material). All queries parameterized; updatable columns whitelisted per table with
+> frozenset guards; update_* methods raise ValueError on unknown fields.
+> vote_type used instead of type (reserved-word footgun). Composite PK on
+> orphan_tags(fragment_id, owner_node_id) prevents duplicate tagging.
+> Migration runner collision fixed: moved 001_catalog_init.sql to
+> migrations/catalog/ and placed 001_cluster_init.sql in migrations/cluster/;
+> each DB class points to its own subdir. catalog.py updated accordingly.
+> 63 unit tests pass (1 skipped — POSIX perms on Windows dev machine).
+> Cross-contamination verified: files table absent from cluster.db, members absent
+> from catalog.db.
 ```
 
 ---
