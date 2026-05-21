@@ -811,7 +811,7 @@ project-docs/onboarding.md → Setup complete
 
 ---
 
-### [ ] 1.9.2 — Cluster join flow
+### [x] 1.9.2 — Cluster join flow
 
 **Reads:** DECISIONS.md → ADR-009, docs/design.md → Invite system,
 docs/architecture.md → Introducer node
@@ -836,7 +836,15 @@ docs/architecture.md → Introducer node
 - Unit tests: successful join, invalid code, expired code
 
 ```
-> Kludde: <!-- -->
+> Kludde: Created gatekeeper/cluster/join.py with NodeInfo (Pydantic, validated),
+> JoinRequest, _JoinResponseBody (untrusted HTTP response validator), JoinAcceptResponse,
+> JoinResult. accept_join consumes the invite atomically before insert_member to prevent
+> double-use. initiate_join is async (httpx), validates the response with Pydantic before
+> returning. POST /api/cluster/join added to the Tailscale-bound GUI app; introducer_furl
+> stored in app.state (not logged). Added member_url param to initiate_join — the spec
+> omitted it (a joining node has no known members). Tahoe client config is out of scope
+> here; the onboarding wizard (1.15.2) handles that using the returned introducer_furl.
+> 26 new unit tests pass. Full suite: 458 pass, 11 skip. Commit: fcdf58d.
 ```
 
 ---
