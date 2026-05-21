@@ -893,7 +893,7 @@ docs/architecture.md → Introducer node
 
 ---
 
-### [ ] 1.10.2 — Orphan fragment tracking and cleanup
+### [x] 1.10.2 — Orphan fragment tracking and cleanup
 
 **Reads:** DECISIONS.md → ADR-012, docs/design.md → Orphan fragment cleanup
 **Creates:** `gatekeeper/cluster/orphans.py`
@@ -917,7 +917,14 @@ docs/architecture.md → Introducer node
 - Unit tests: mark, cleanup (re-frag complete), cleanup blocked (re-frag pending)
 
 ```
-> Kludde: <!-- -->
+> Kludde: gatekeeper/cluster/orphans.py — tre publika funktioner: mark_orphan (idempotent,
+> loggar warning om taggen redan finns), cleanup_orphans (daily-job med injectable
+> is_refrag_complete och delete_fragment — blockerar borttagning om re-frag ej klar,
+> loggar exception utan att avbryta loopen, skickar alert per borttagen fragment),
+> extend_orphan_grace (förlänger marked_orphan_at för alla pending orphans av en ägare).
+> delete_fragment är injicerbar — måste anropa StoragePoolManager.remove_fragment() (task 1.5.2).
+> Inga nya migrations behövdes; orphan_tags-tabellen finns sedan migration 001.
+> 21 unit tests pass. Full suite: 520 pass, 11 skip. Commit: 0fa2798.
 ```
 
 ---
