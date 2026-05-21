@@ -591,7 +591,7 @@ CLAUDE.md → Every file hash verification
 
 ---
 
-### [ ] 1.7.2 — Upload queue worker
+### [x] 1.7.2 — Upload queue worker
 
 **Reads:** docs/design.md → File watcher, docs/architecture.md → Data flow backup
 **Creates:** `gatekeeper/fragmenter/queue_worker.py`
@@ -609,7 +609,17 @@ CLAUDE.md → Every file hash verification
 - Unit test: successful queue processing, retry logic, failure notification
 
 ```
-> Kludde: <!-- -->
+> Kludde: UploadItem dataclass + UploadQueueWorker in gatekeeper/fragmenter/queue_worker.py.
+> N independent worker tasks (not Semaphore) — cleaner backpressure and fair fan-out.
+> Retry: 1 initial + MAX_RETRIES=3 = 4 attempts total; backoff min(60, 2^attempt) seconds inline
+> (not re-queue, to preserve order). Only FragmentationError caught; CancelledError/OSError
+> propagate. queue.get() outside try/finally so cancellation during get() does not call
+> task_done(). send_alert injectable callable (same pattern as catalog_check in agent/watcher.py);
+> logs critical when None — wired to gatekeeper.notify.dispatcher in task 1.13.1.
+> Security §6: failure logs contain only agent name, attempt count, error type, file size.
+> 19 unit tests pass (backoff values, alert-once, alert-failure-handling, non-FragError propagation).
+> Pre-existing test_agent_main.py failures unchanged (2 fail, unrelated to this task).
+> Full suite: 343 pass, 10 skip, 2 pre-existing failures.
 ```
 
 ---
