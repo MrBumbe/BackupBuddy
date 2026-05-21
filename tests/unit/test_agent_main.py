@@ -64,12 +64,12 @@ class TestAgentApiRegister:
     ('testclient' is not a valid IPv4 address → _is_lan_ip returns False → 403).
     """
 
-    def _app(self, token: str = "test-secret") -> TestClient:
-        app = _create_agent_api_app(_make_agent_api_config(token))
+    def _app(self, tmp_path: Path, token: str = "test-secret") -> TestClient:
+        app = _create_agent_api_app(_make_agent_api_config(token), tmp_path)
         return TestClient(app, raise_server_exceptions=True)
 
-    def test_valid_token_and_lan_ip_returns_registered(self) -> None:
-        client = self._app()
+    def test_valid_token_and_lan_ip_returns_registered(self, tmp_path) -> None:
+        client = self._app(tmp_path)
         with patch("gatekeeper.main._is_lan_ip", return_value=True):
             resp = client.post(
                 "/api/agents/register",
@@ -79,9 +79,9 @@ class TestAgentApiRegister:
         assert resp.status_code == 200
         assert resp.json() == {"status": "registered"}
 
-    def test_agent_name_stored_in_registered_agents(self) -> None:
+    def test_agent_name_stored_in_registered_agents(self, tmp_path) -> None:
         _registered_agents.clear()
-        client = self._app()
+        client = self._app(tmp_path)
         with patch("gatekeeper.main._is_lan_ip", return_value=True):
             client.post(
                 "/api/agents/register",
@@ -90,8 +90,8 @@ class TestAgentApiRegister:
             )
         assert "storage-pc" in _registered_agents
 
-    def test_wrong_token_returns_401(self) -> None:
-        client = self._app()
+    def test_wrong_token_returns_401(self, tmp_path) -> None:
+        client = self._app(tmp_path)
         with patch("gatekeeper.main._is_lan_ip", return_value=True):
             resp = client.post(
                 "/api/agents/register",
@@ -100,8 +100,8 @@ class TestAgentApiRegister:
             )
         assert resp.status_code == 401
 
-    def test_missing_token_returns_401(self) -> None:
-        client = self._app()
+    def test_missing_token_returns_401(self, tmp_path) -> None:
+        client = self._app(tmp_path)
         with patch("gatekeeper.main._is_lan_ip", return_value=True):
             resp = client.post(
                 "/api/agents/register",
@@ -109,8 +109,8 @@ class TestAgentApiRegister:
             )
         assert resp.status_code == 401
 
-    def test_empty_configured_token_returns_401(self) -> None:
-        client = self._app(token="")
+    def test_empty_configured_token_returns_401(self, tmp_path) -> None:
+        client = self._app(tmp_path, token="")
         with patch("gatekeeper.main._is_lan_ip", return_value=True):
             resp = client.post(
                 "/api/agents/register",
@@ -119,9 +119,9 @@ class TestAgentApiRegister:
             )
         assert resp.status_code == 401
 
-    def test_non_lan_source_returns_403(self) -> None:
+    def test_non_lan_source_returns_403(self, tmp_path) -> None:
         # 'testclient' is not a valid IPv4 address → _is_lan_ip returns False → 403
-        app = _create_agent_api_app(_make_agent_api_config())
+        app = _create_agent_api_app(_make_agent_api_config(), tmp_path)
         tc = TestClient(app)
         resp = tc.post(
             "/api/agents/register",

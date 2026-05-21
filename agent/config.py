@@ -56,6 +56,11 @@ class GatekeeperConnectionConfig(BaseModel):
     lifeboat_path: str = "/etc/backup-buddy/lifeboat.enc"
 
 
+class LifeboatServerConfig(BaseModel):
+    enabled: bool = True
+    port: int = 8082
+
+
 # ── Top-level config ──────────────────────────────────────────────────────────
 
 class AgentConfig(BaseModel):
@@ -64,6 +69,7 @@ class AgentConfig(BaseModel):
     excludes: list[str] = []
     node: NodeConfig = NodeConfig()
     gatekeeper: GatekeeperConnectionConfig
+    lifeboat_server: LifeboatServerConfig = LifeboatServerConfig()
 
 
 # ── Path validation ───────────────────────────────────────────────────────────
@@ -164,12 +170,20 @@ def _parse_ini(parser: configparser.ConfigParser) -> AgentConfig:
         lifeboat_path=gk_raw.get("lifeboat_path", "/etc/backup-buddy/lifeboat.enc"),
     )
 
+    # [lifeboat_server]
+    lb_raw = sec("lifeboat_server")
+    lifeboat_server = LifeboatServerConfig(
+        enabled=_bool(lb_raw.get("enabled", "true")),
+        port=int(lb_raw.get("port", 8082)),
+    )
+
     return AgentConfig(
         schedule=schedule,
         backup_paths=backup_paths,
         excludes=excludes,
         node=node,
         gatekeeper=gatekeeper,
+        lifeboat_server=lifeboat_server,
     )
 
 

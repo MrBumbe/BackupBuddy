@@ -223,6 +223,11 @@ class CatalogDB:
         )
         self._conn.commit()
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """Expose the raw SQLite connection (e.g. for WAL-safe backups in bundle.py)."""
+        return self._conn
+
     def close(self) -> None:
         self._conn.close()
         logger.info("CatalogDB closed")

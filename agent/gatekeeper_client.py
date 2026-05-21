@@ -48,16 +48,23 @@ class GatekeeperClient:
 
     # ── HTTP operations (agent → gatekeeper) ──────────────────────────────────
 
-    async def register(self) -> None:
+    async def register(self, lifeboat_port: int | None = None) -> None:
         """Announce this agent to the gatekeeper.
+
+        Args:
+            lifeboat_port: Port the agent's lifeboat HTTP server is listening on.
+                           If provided, the gatekeeper records the lifeboat push URL.
 
         Raises RegistrationError if the gatekeeper rejects the request or is
         unreachable.  Callers should treat this as non-fatal and retry later.
         """
+        payload: dict = {"agent_name": self._agent_name}
+        if lifeboat_port is not None:
+            payload["lifeboat_port"] = lifeboat_port
         try:
             resp = await self._client.post(
                 f"{self._url}/api/agents/register",
-                json={"agent_name": self._agent_name},
+                json=payload,
             )
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:

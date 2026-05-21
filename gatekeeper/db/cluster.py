@@ -32,6 +32,8 @@ _VOTE_UPDATABLE = frozenset({"votes_yes", "votes_no", "resolved"})
 
 _ORPHAN_UPDATABLE = frozenset({"cleaned_at"})
 
+_AGENT_UPDATABLE = frozenset({"ip", "lifeboat_url", "last_seen"})
+
 
 class ClusterDB:
     """SQLite-backed store for cluster state.
@@ -286,6 +288,64 @@ class ClusterDB:
             (*fields.values(), fragment_id, owner_node_id),
         )
         self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # agents
+    # ------------------------------------------------------------------
+
+    def upsert_agent(
+        self,
+        agent_name: str,
+        ip: str,
+        lifeboat_url: str | None,
+        registered_at: float,
+        last_seen: float,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO agents (agent_name, ip, lifeboat_url, registered_at, last_seen) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(agent_name) DO UPDATE SET "
+            "ip=excluded.ip, lifeboat_url=excluded.lifeboat_url, last_seen=excluded.last_seen",
+            (agent_name, ip, lifeboat_url, registered_at, last_seen),
+        )
+        self._conn.commit()
+
+    def get_agent(self, agent_name: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM agents WHERE agent_name = ?", (agent_name,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_agents(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM agents ORDER BY registered_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # lifeboat_status
+    # ------------------------------------------------------------------
+
+    def insert_lifeboat_status(
+        self,
+        distributed_at: float,
+        agent_count: int,
+        success_count: int,
+        status: str,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO lifeboat_status "
+            "(distributed_at, agent_count, success_count, status) "
+            "VALUES (?, ?, ?, ?)",
+            (distributed_at, agent_count, success_count, status),
+        )
+        self._conn.commit()
+
+    def get_last_lifeboat_status(self) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM lifeboat_status ORDER BY distributed_at DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
 
     # ------------------------------------------------------------------
     # Lifecycle

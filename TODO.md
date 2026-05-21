@@ -702,7 +702,7 @@ project-docs/onboarding.md → Setup complete
 
 ---
 
-### [ ] 1.8.3 — Lifeboat bundle creation and distribution
+### [x] 1.8.3 — Lifeboat bundle creation and distribution
 
 **Reads:** DECISIONS.md → ADR-007, project-docs/design.md → Lifeboat mechanism
 **Creates:** `gatekeeper/lifeboat/bundle.py`, `gatekeeper/lifeboat/distributor.py`
@@ -739,7 +739,23 @@ project-docs/onboarding.md → Setup complete
 - Unit tests: bundle round-trip, distribution, verification, failed agent handled
 
 ```
-> Kludde: <!-- -->
+> Kludde: bundle.py — create_bundle(data_dir, config_path, catalog_conn, *, key=None) → bytes;
+> extract_bundle(encrypted_data, *, key=None) → dict. JSON payload: version, node_privkey,
+> root_dir_cap, catalog_db_b64 (WAL-safe via Connection.backup() to tempfile), gatekeeper_cfg.
+> Encrypted with AES-256-GCM runtime key from keystore (key param for testability).
+> distributor.py — LifeboatDistributor: distribute() creates bundle, verifies locally,
+> POSTs to each agent's lifeboat_url (stored in cluster.db agents table), records result in
+> lifeboat_status table. run_scheduler() loops with asyncio.sleep; skips cycle if previous
+> still in flight (asyncio.Lock). Per-agent failures logged but do not abort distribution.
+> cluster.db migration 002: agents table (agent_name, ip, lifeboat_url, registered_at,
+> last_seen) + lifeboat_status table. ClusterDB.upsert_agent() uses ON CONFLICT DO UPDATE.
+> Agent lifeboat HTTP server: POST /lifeboat + GET /lifeboat on LAN IP:8082 (token auth,
+> reuses gatekeeper.token pre-shared key). Agent detects LAN IP via psutil at startup and
+> advertises lifeboat_port in registration; gatekeeper constructs lifeboat_url from client IP.
+> _AgentRegisterMessage extended with lifeboat_port: int | None = None.
+> _create_agent_api_app now accepts data_dir; opens own ClusterDB connection (WAL safe).
+> CatalogDB.connection property added for WAL-safe snapshot access.
+> 21 new tests. Full suite: 404 pass, 11 skip.
 ```
 
 ---

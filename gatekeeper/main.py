@@ -43,6 +43,7 @@ from gatekeeper.db.catalog import CatalogDB
 from gatekeeper.db.cluster import ClusterDB
 from gatekeeper.fragmenter.fragmenter import Fragmenter, derive_metadata_key
 from gatekeeper.fragmenter.profiles import get_profile
+from gatekeeper.lifeboat.distributor import LifeboatDistributor
 from gatekeeper.storage.pool import PoolPathError, StoragePoolManager
 from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
@@ -72,6 +73,7 @@ _registered_agents: dict[str, dict] = {}
 
 class _AgentRegisterMessage(BaseModel):
     agent_name: str
+    lifeboat_port: int | None = None
 
 
 def _is_lan_ip(ip_str: str) -> bool:
@@ -102,10 +104,6 @@ async def _watcher_stub() -> None:
     logger.info("Watcher scheduler: pending implementation (task 1.6.2)")
 
 
-async def _lifeboat_stub() -> None:
-    logger.info("Lifeboat scheduler: pending implementation (task 1.8.3)")
-
-
 async def _rebalance_stub() -> None:
     logger.info("Rebalance scheduler: pending implementation (task 1.11.2)")
 
@@ -114,11 +112,18 @@ async def _verify_stub() -> None:
     logger.info("Verify scheduler: pending implementation (task 1.13.2)")
 
 
-def _register_background_tasks() -> None:
-    asyncio.create_task(_watcher_stub(), name="watcher")
-    asyncio.create_task(_lifeboat_stub(), name="lifeboat")
-    asyncio.create_task(_rebalance_stub(), name="rebalance")
-    asyncio.create_task(_verify_stub(), name="verify")
+def _register_background_tasks(
+    lifeboat_distributor: LifeboatDistributor | None = None,
+) -> list[asyncio.Task]:
+    tasks: list[asyncio.Task] = []
+    tasks.append(asyncio.create_task(_watcher_stub(), name="watcher"))
+    if lifeboat_distributor is not None:
+        tasks.append(
+            asyncio.create_task(lifeboat_distributor.run_scheduler(), name="lifeboat")
+        )
+    tasks.append(asyncio.create_task(_rebalance_stub(), name="rebalance"))
+    tasks.append(asyncio.create_task(_verify_stub(), name="verify"))
+    return tasks
 
 
 # ── FastAPI lifespan ──────────────────────────────────────────────────────────
@@ -137,6 +142,7 @@ async def lifespan(app: FastAPI):
     """
     config: GatekeeperConfig = _state["config"]
     data_dir: Path = _state["data_dir"]
+    config_path: Path = _state.get("config_path", data_dir / "gatekeeper.cfg")
 
     storage_node: StorageNode | None = None
     introducer: IntroducerNode | None = None
@@ -235,10 +241,19 @@ async def lifespan(app: FastAPI):
             logger.info("Fragmenter ready (profile=%s k=%d n=%d)",
                         active_profile, shares_k, shares_n)
 
-            # Step 8 — background scheduler stubs
-            # TODO: store task refs on app.state.background_tasks to prevent GC
-            # once stubs become long-running coroutines (tasks 1.6.2, 1.8.3, 1.11.2, 1.13.2)
-            _register_background_tasks()
+            # Step 8 — background schedulers
+            lifeboat_distributor: LifeboatDistributor | None = None
+            if config.lifeboat.enabled and config.agent_api.token:
+                lifeboat_distributor = LifeboatDistributor(
+                    data_dir=data_dir,
+                    config_path=config_path,
+                    catalog_conn=catalog_db.connection,  # type: ignore[union-attr]
+                    cluster_db=cluster_db,  # type: ignore[arg-type]
+                    agent_token=config.agent_api.token,
+                    interval_seconds=config.lifeboat.interval_seconds,
+                )
+            background_tasks = _register_background_tasks(lifeboat_distributor)
+            app.state.background_tasks = background_tasks  # keep refs to prevent GC
 
         # Expose shared state to route handlers (None in setup mode)
         app.state.setup_required = setup_required
@@ -306,12 +321,17 @@ def _create_app() -> FastAPI:
 
 # ── Agent API (LAN-only — ADR-017) ───────────────────────────────────────────
 
-def _create_agent_api_app(cfg: GatekeeperConfig) -> FastAPI:
+def _create_agent_api_app(cfg: GatekeeperConfig, data_dir: Path) -> FastAPI:
     """Build the FastAPI app that listens on the LAN interface for agent calls.
 
     Requests are accepted only from private, non-Tailscale IPv4 addresses and
     must carry a valid Bearer token matching cfg.agent_api.token.
+
+    Opens its own ClusterDB connection at creation time (SQLite WAL mode allows
+    multiple concurrent readers/writers).
     """
+    _cluster_db = ClusterDB(str(data_dir / "cluster.db"))
+
     app = FastAPI(title="BackupBuddy Agent API", docs_url=None, redoc_url=None)
 
     @app.post("/api/agents/register")
@@ -339,12 +359,31 @@ def _create_agent_api_app(cfg: GatekeeperConfig) -> FastAPI:
             )
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
+        now = datetime.now(timezone.utc).timestamp()
+        lifeboat_url: str | None = None
+        if message.lifeboat_port is not None:
+            lifeboat_url = f"http://{client_ip}:{message.lifeboat_port}/lifeboat"
+
+        _cluster_db.upsert_agent(
+            agent_name=message.agent_name,
+            ip=client_ip,
+            lifeboat_url=lifeboat_url,
+            registered_at=now,
+            last_seen=now,
+        )
+
         _registered_agents[message.agent_name] = {
             "registered_at": datetime.now(timezone.utc).isoformat(),
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "ip": client_ip,
+            "lifeboat_url": lifeboat_url,
         }
-        logger.info("Agent registered: '%s' from %s", message.agent_name, client_ip)
+        logger.info(
+            "Agent registered: '%s' from %s (lifeboat_url=%s)",
+            message.agent_name,
+            client_ip,
+            lifeboat_url or "none",
+        )
         return JSONResponse({"status": "registered"})
 
     return app
@@ -445,6 +484,7 @@ def main() -> None:
     # Steps 3–9 run inside lifespan (above)
     _state["config"] = config
     _state["data_dir"] = data_dir
+    _state["config_path"] = config_path
 
     # Reload config on SIGHUP (no-op on Windows)
     install_sighup_handler(
@@ -477,7 +517,7 @@ def main() -> None:
                 lan_ip,
                 config.agent_api.port,
             )
-            agent_app = _create_agent_api_app(config)
+            agent_app = _create_agent_api_app(config, data_dir)
 
     # GUI binds to Tailscale only; agent API binds to LAN only (ADR-002, ADR-017)
     asyncio.run(
