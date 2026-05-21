@@ -960,7 +960,7 @@ docs/architecture.md → Introducer node
 
 ---
 
-### [ ] 1.11.2 — Rebalance scheduler
+### [x] 1.11.2 — Rebalance scheduler
 
 **Reads:** DECISIONS.md → ADR-011, docs/design.md → Re-fragmentation policy
 **Creates:** `gatekeeper/rebalance/scheduler.py`, `gatekeeper/rebalance/worker.py`
@@ -993,7 +993,12 @@ docs/architecture.md → Introducer node
 - Unit tests: hysteresis boundary, stability threshold, priority ordering
 
 ```
-> Kludde: <!-- -->
+> Kludde: Migration 004 adds rebalance_state singleton. worker.py downloads
+> each file to an isolated 0700 temp dir, re-uploads, overwrites the Tahoe
+> directory entry via link_file (same SHA-256 entry_name as fragmenter),
+> and updates catalog.db with the new cap and current k/n per ADR-018.
+> scheduler.py evaluates hysteresis + stability nightly; critical files
+> (k > cluster_size) bypass both checks per ADR-011. 27 unit tests pass.
 ```
 
 ---
