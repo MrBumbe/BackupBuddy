@@ -1,5 +1,5 @@
 """
-Unit tests for gatekeeper/lifeboat/crypto.py and gatekeeper/lifeboat/keystore.py.
+Unit tests for gatekeeper/lifeboat/crypto.py, keystore.py, and recovery_kit.py.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from gatekeeper.lifeboat.crypto import IntegrityError, decrypt, encrypt
+from gatekeeper.lifeboat.recovery_kit import create_recovery_kit, extract_recovery_kit
 from gatekeeper.lifeboat.keystore import (
     KeyNotFoundError,
     KeystoreError,
@@ -179,3 +180,94 @@ class TestLoadKey:
         loaded = load_key(key_path)
         ciphertext = encrypt(_MSG, loaded)
         assert decrypt(ciphertext, key) == _MSG
+
+
+# ── recovery_kit.py ─────────────────────────────────────────────────────────────
+#
+# Argon2id with time_cost=3 and memory_cost=65536 KiB takes ~200–400 ms per call.
+# We use a session-scoped fixture to derive the key and create one kit once, then
+# reuse the resulting bytes across tests that only need to verify structure or
+# tamper with the ciphertext.  Tests that *must* call create_recovery_kit
+# independently (salt randomness, wrong-passphrase) each pay the full cost.
+
+_PASSPHRASE = "correct-horse-battery-staple"
+_NODE_PRIVKEY = "priv-v0-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa="
+_ROOT_DIR_CAP = "URI:DIR2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbb"
+
+
+@pytest.fixture(scope="session")
+def recovery_kit_bytes():
+    """Create one kit for the session — avoid paying Argon2 cost repeatedly."""
+    return create_recovery_kit(_PASSPHRASE, _NODE_PRIVKEY, _ROOT_DIR_CAP)
+
+
+class TestCreateRecoveryKit:
+    def test_returns_bytes(self, recovery_kit_bytes):
+        assert isinstance(recovery_kit_bytes, bytes)
+
+    def test_minimum_length(self, recovery_kit_bytes):
+        # salt(16) + nonce(16) + AES-GCM tag(16) minimum
+        assert len(recovery_kit_bytes) >= 48
+
+    def test_salt_randomness(self):
+        """Two kits with identical inputs must differ (independent random salts)."""
+        kit_a = create_recovery_kit(_PASSPHRASE, _NODE_PRIVKEY, _ROOT_DIR_CAP)
+        kit_b = create_recovery_kit(_PASSPHRASE, _NODE_PRIVKEY, _ROOT_DIR_CAP)
+        assert kit_a != kit_b
+        # Salts (first 16 bytes) differ
+        assert kit_a[:16] != kit_b[:16]
+
+    def test_payload_not_in_plaintext(self, recovery_kit_bytes):
+        assert _NODE_PRIVKEY.encode() not in recovery_kit_bytes
+        assert _ROOT_DIR_CAP.encode() not in recovery_kit_bytes
+        assert _PASSPHRASE.encode() not in recovery_kit_bytes
+
+
+class TestExtractRecoveryKit:
+    def test_roundtrip(self, recovery_kit_bytes):
+        result = extract_recovery_kit(recovery_kit_bytes, _PASSPHRASE)
+        assert result["node_privkey"] == _NODE_PRIVKEY
+        assert result["root_dir_cap"] == _ROOT_DIR_CAP
+
+    def test_returns_dict_with_expected_keys(self, recovery_kit_bytes):
+        result = extract_recovery_kit(recovery_kit_bytes, _PASSPHRASE)
+        assert set(result.keys()) == {"node_privkey", "root_dir_cap"}
+
+    def test_wrong_passphrase_raises_integrity_error(self, recovery_kit_bytes):
+        with pytest.raises(IntegrityError):
+            extract_recovery_kit(recovery_kit_bytes, "wrong-passphrase")
+
+    def test_tampered_ciphertext_raises_integrity_error(self, recovery_kit_bytes):
+        tampered = bytearray(recovery_kit_bytes)
+        tampered[-1] ^= 0xFF
+        with pytest.raises(IntegrityError):
+            extract_recovery_kit(bytes(tampered), _PASSPHRASE)
+
+    def test_tampered_nonce_raises_integrity_error(self, recovery_kit_bytes):
+        tampered = bytearray(recovery_kit_bytes)
+        tampered[16] ^= 0x01  # first nonce byte (after the 16-byte salt)
+        with pytest.raises(IntegrityError):
+            extract_recovery_kit(bytes(tampered), _PASSPHRASE)
+
+    def test_tampered_salt_raises_integrity_error(self, recovery_kit_bytes):
+        tampered = bytearray(recovery_kit_bytes)
+        tampered[0] ^= 0x01  # first salt byte
+        with pytest.raises(IntegrityError):
+            extract_recovery_kit(bytes(tampered), _PASSPHRASE)
+
+    def test_truncated_input_raises_integrity_error_without_argon2(self):
+        # Data shorter than salt+nonce+tag must be rejected before Argon2 runs
+        with pytest.raises(IntegrityError):
+            extract_recovery_kit(b"\x00" * 10, _PASSPHRASE)
+
+    def test_empty_passphrase_roundtrip(self):
+        """Empty passphrase is technically valid — Argon2 handles it."""
+        kit = create_recovery_kit("", _NODE_PRIVKEY, _ROOT_DIR_CAP)
+        result = extract_recovery_kit(kit, "")
+        assert result["node_privkey"] == _NODE_PRIVKEY
+
+    def test_integrity_error_is_from_crypto_module(self, recovery_kit_bytes):
+        """recovery_kit reuses crypto.IntegrityError — not a separate exception."""
+        from gatekeeper.lifeboat.crypto import IntegrityError as CryptoIntegrityError
+        with pytest.raises(CryptoIntegrityError):
+            extract_recovery_kit(recovery_kit_bytes, "bad-passphrase")
