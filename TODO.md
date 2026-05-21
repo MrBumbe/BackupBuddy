@@ -1005,7 +1005,7 @@ docs/architecture.md → Introducer node
 
 ## 1.12 — Restore
 
-### [ ] 1.12.1 — Normal restore flow
+### [x] 1.12.1 — Normal restore flow
 
 **Reads:** docs/architecture.md → Data flow restore, docs/design.md → Restore,
 SECURITY.md (full)
@@ -1032,7 +1032,16 @@ SECURITY.md (full)
 - Unit tests: successful restore, hash mismatch, temp cleanup on failure
 
 ```
-> Kludde: <!-- -->
+> Kludde: restore.py — restore_file() and restore_folder() with hash verification.
+> _restore_from_record() internal helper avoids double catalog lookup in folder restore.
+> Retry once on hash mismatch (Tahoe may use different fragments); after two failures:
+> send_alert + raise RestoreIntegrityError. No Tahoe internals in error messages.
+> Temp dir: tempfile.mkdtemp() + 0700 chmod (POSIX); cleaned via shutil.rmtree in finally.
+> _check_temp_dir_not_in_pool() warns if temp dir overlaps storage pool (EXCLUDED_PATHS).
+> restore_folder: get_all_files() + Python-side prefix filter (HMAC blind index prevents
+> SQL prefix search on encrypted paths). TahoeError propagates from restore_file.
+> send_alert injectable callable; None → log at ERROR. Same pattern as queue_worker.py.
+> 22 unit tests (21 pass, 1 skip POSIX perms). Full suite: 588 pass, 12 skip.
 ```
 
 ---
