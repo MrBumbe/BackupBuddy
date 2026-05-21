@@ -626,7 +626,7 @@ CLAUDE.md → Every file hash verification
 
 ## 1.8 — Lifeboat
 
-### [ ] 1.8.1 — Lifeboat key generation and runtime encryption
+### [x] 1.8.1 — Lifeboat key generation and runtime encryption
 
 **Reads:** SECURITY.md → Sections 1, 7, DECISIONS.md → ADR-007
 **Creates:** `gatekeeper/lifeboat/crypto.py`, `gatekeeper/lifeboat/keystore.py`
@@ -650,7 +650,13 @@ CLAUDE.md → Every file hash verification
 - Unit tests: generate, load, encrypt/decrypt, wrong key, missing key file
 
 ```
-> Kludde: <!-- -->
+> Kludde: crypto.py — encrypt/decrypt with AES-256-GCM; 16-byte random nonce prepended to output;
+> IntegrityError raised on wrong key, tampered data, or truncated input. No passphrase involved —
+> raw 32-byte key from keystore only. keystore.py — generate_key() writes 32 random bytes to
+> /etc/backup-buddy/lifeboat.key (0600, POSIX; skipped on Windows); load_key() reads file and
+> validates length; KeyNotFoundError (subclass of KeystoreError) logged at CRITICAL and raised
+> if file absent — never auto-generates. Key path injectable for testability (same pattern as
+> CatalogDB/SecretsStore). 25 unit tests pass, 1 skip (POSIX perms on Windows dev machine).
 ```
 
 ---
