@@ -24,6 +24,7 @@ _MIGRATIONS_DIR = Path(__file__).parent / "migrations" / "cluster"
 _MEMBER_UPDATABLE = frozenset({
     "display_name", "tailscale_hostname",
     "contribution_bytes", "usage_bytes", "profile", "status",
+    "grace_started_at", "grace_days",
 })
 
 _INVITE_UPDATABLE = frozenset({"used", "revoked"})
@@ -193,12 +194,15 @@ class ClusterDB:
         proposed_by: str,
         proposed_at: float,
         closes_at: float,
+        grace_extension_days: int | None = None,
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO votes "
-            "(vote_type, target_node_id, proposed_by, proposed_at, closes_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (vote_type, target_node_id, proposed_by, proposed_at, closes_at),
+            "(vote_type, target_node_id, proposed_by, proposed_at, closes_at, "
+            "grace_extension_days) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (vote_type, target_node_id, proposed_by, proposed_at, closes_at,
+             grace_extension_days),
         )
         self._conn.commit()
         return cursor.lastrowid
@@ -231,6 +235,36 @@ class ClusterDB:
             (*fields.values(), vote_id),
         )
         self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # vote_ballots
+
+    def insert_ballot(
+        self,
+        vote_id: int,
+        voter_node_id: str,
+        voted_at: float,
+        choice: int,
+    ) -> None:
+        """Insert a ballot. Raises ValueError if the voter already voted."""
+        try:
+            self._conn.execute(
+                "INSERT INTO vote_ballots (vote_id, voter_node_id, voted_at, choice) "
+                "VALUES (?, ?, ?, ?)",
+                (vote_id, voter_node_id, voted_at, choice),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                f"Node {voter_node_id!r} has already voted on vote {vote_id}"
+            ) from exc
+
+    def list_ballots(self, vote_id: int) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM vote_ballots WHERE vote_id = ? ORDER BY voted_at",
+            (vote_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # orphan_tags

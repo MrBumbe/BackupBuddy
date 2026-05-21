@@ -851,7 +851,7 @@ docs/architecture.md → Introducer node
 
 ## 1.10 — Node removal and orphan cleanup
 
-### [ ] 1.10.1 — Removal vote mechanism
+### [x] 1.10.1 — Removal vote mechanism
 
 **Reads:** DECISIONS.md → ADR-010, docs/design.md → Node removal
 **Creates:** `gatekeeper/cluster/removal.py`
@@ -880,7 +880,15 @@ docs/architecture.md → Introducer node
 - Unit tests: vote passes, vote fails, vote expires, grace period extension
 
 ```
-> Kludde: <!-- -->
+> Kludde: Created migration 003 adding vote_ballots (PRIMARY KEY enforces no double-voting),
+> grace_extension_days on votes, grace_started_at and grace_days on members. Extended
+> ClusterDB with insert_ballot/list_ballots methods and insert_vote grace_extension_days
+> param. Created gatekeeper/cluster/removal.py with VoteResult enum, VoteRecord dataclass,
+> and six public functions: propose_removal, cast_vote, check_vote_result,
+> start_grace_period, extend_grace_period, apply_grace_extension. Target not notified
+> until start_grace_period (as required by ADR-010). vote_id is int (schema uses
+> INTEGER PRIMARY KEY AUTOINCREMENT; TODO.md comment "str" is a typo). 41 unit tests,
+> all pass. Full suite: 499 passed, 11 skipped.
 ```
 
 ---
