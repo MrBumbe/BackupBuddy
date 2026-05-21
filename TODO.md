@@ -661,7 +661,7 @@ CLAUDE.md → Every file hash verification
 
 ---
 
-### [ ] 1.8.2 — Recovery kit (disaster recovery only)
+### [x] 1.8.2 — Recovery kit (disaster recovery only)
 
 **Reads:** SECURITY.md → Sections 1, 7, DECISIONS.md → ADR-007,
 project-docs/onboarding.md → Setup complete
@@ -688,7 +688,16 @@ project-docs/onboarding.md → Setup complete
 - Unit tests: create, extract, wrong passphrase, tampered data
 
 ```
-> Kludde: <!-- -->
+> Kludde: recovery_kit.py — create_recovery_kit(passphrase, node_privkey, root_dir_cap) → bytes;
+> extract_recovery_kit(data, passphrase) → dict. Argon2id (time_cost=3, memory_cost=65536 KiB,
+> parallelism=4) key derivation; AES-256-GCM encryption; wire format: salt(16)||nonce(16)||ciphertext.
+> IntegrityError imported from crypto.py (no duplication). Length check before Argon2 to avoid
+> spending ~200 ms on obviously invalid input. Passphrase not logged; exception messages contain
+> no passphrase material. node_privkey and root_dir_cap passed as str parameters (dependency
+> injection pattern — onboarding wizard has them in memory). Both stored as JSON in the payload.
+> Tahoe node.privkey is a UTF-8 string in tahoe.cfg (ed25519.string_from_signing_key output).
+> 13 unit tests via session-scoped fixture (kit created once to minimise Argon2 cost per run).
+> Full suite: 381 pass, 11 skip, 2 pre-existing agent test failures (unchanged).
 ```
 
 ---
