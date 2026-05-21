@@ -168,23 +168,41 @@ of raw k/n parameters. Profiles map to Tahoe-LAFS shares.needed/happy/total valu
 
 **Status:** Accepted
 
-**Decision:** The Adaptiv profile maintains a constant 1/3 ratio (any 1/3 of
+**Decision:** The Adaptiv profile maintains an approximate 1/3 ratio (any ~1/3 of
 fragments sufficient for restore) and scales k and n with cluster size.
 
+Small-cluster rules (applied before the formula):
+- 1–2 nodes: k = n = node_count (all-of-n encoding — no redundancy possible)
+
+Formula for 3+ nodes:
 ```
-3 buddies  → k=1, n=3
-6 buddies  → k=2, n=6
-9 buddies  → k=3, n=9
+n = min(node_count, max_n)
+k = max(round(n × ratio), min_k)
 ```
 
-Parameters: ratio=0.33, min_k=2, max_n=20.
+Reference table (ratio=0.33, min_k=1, max_n=20):
+```
+1 buddy    → k=1, n=1  (all-of-n)
+2 buddies  → k=2, n=2  (all-of-n)
+3 buddies  → k=1, n=3
+4 buddies  → k=1, n=4
+5 buddies  → k=2, n=5
+6 buddies  → k=2, n=6
+9 buddies  → k=3, n=9
+20 buddies → k=7, n=20
+25 buddies → k=7, n=20  (max_n cap)
+```
+
+Parameters: ratio=0.33, min_k=1, max_n=20.
 
 **Rationale:**
 - Each buddy holds exactly one fragment regardless of cluster size
 - Scales naturally without manual reconfiguration as the group grows
 - 1/3 threshold provides meaningful redundancy without excessive overhead
-- min_k=2 prevents a degenerate 1-of-3 scenario in very small clusters
+- min_k=1 allows honest 1-of-3 encoding for small clusters (3–4 nodes)
+  rather than forcing k=2 and effectively requiring majority-of-cluster for restore
 - max_n=20 prevents fragment count from becoming unmanageable in large clusters
+- All-of-n for 1–2 nodes: with so few nodes there is no redundancy anyway
 
 **Consequences:**
 - Nightly rebalance job required to adjust k/n as cluster size changes

@@ -45,7 +45,7 @@ class TestProfiles(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             get_profile("adaptive")
         self.assertIn("adaptive", str(ctx.exception))
-        self.assertIn("task 1.11.1", str(ctx.exception))
+        self.assertIn("adaptive.py", str(ctx.exception))
 
     def test_profile_is_named_tuple(self):
         p = get_profile("balanced")

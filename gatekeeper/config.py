@@ -73,7 +73,7 @@ class TahoeConfig(BaseModel):
 
 class AdaptiveConfig(BaseModel):
     ratio: float = 0.33
-    min_k: int = 2
+    min_k: int = 1
     max_n: int = 20
     rebalance_time: time = time(3, 0)
 
@@ -249,7 +249,7 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
     }
     adaptive = AdaptiveConfig(
         ratio=float(adaptive_raw.get("ratio", 0.33)),
-        min_k=int(adaptive_raw.get("min_k", 2)),
+        min_k=int(adaptive_raw.get("min_k", 1)),
         max_n=int(adaptive_raw.get("max_n", 20)),
         rebalance_time=(
             _parse_time_str(adaptive_raw["rebalance_time"])

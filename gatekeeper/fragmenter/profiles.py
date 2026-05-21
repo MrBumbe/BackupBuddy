@@ -28,7 +28,7 @@ PROFILES: dict[str, Profile] = {
 }
 
 # "adaptive" is intentionally absent — k/n is computed at runtime from cluster
-# size by gatekeeper/fragmenter/adaptive.py (task 1.11.1).
+# size by gatekeeper/fragmenter/adaptive.py.
 
 _VALID_NAMES = frozenset(PROFILES)
 
@@ -44,7 +44,7 @@ def get_profile(name: str) -> Profile:
     except KeyError:
         if name == "adaptive":
             raise ValueError(
-                "adaptive profile: k/n resolved at runtime by adaptive.py (task 1.11.1)"
+                "adaptive profile: k/n resolved at runtime by adaptive.py"
             )
         raise ValueError(
             f"Unknown profile {name!r}. Valid non-adaptive profiles: {sorted(_VALID_NAMES)}"

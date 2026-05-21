@@ -931,7 +931,7 @@ docs/architecture.md → Introducer node
 
 ## 1.11 — Re-fragmentation scheduler
 
-### [ ] 1.11.1 — Adaptiv profile k/n calculation
+### [x] 1.11.1 — Adaptiv profile k/n calculation
 
 **Reads:** DECISIONS.md → ADR-006a, docs/design.md → Adaptiv profile
 **Creates:** `gatekeeper/fragmenter/adaptive.py`
@@ -951,7 +951,11 @@ docs/architecture.md → Introducer node
 - Unit tests: 3 nodes, 6 nodes, 9 nodes, 20+ nodes, min_k boundary, max_n boundary
 
 ```
-> Kludde: <!-- -->
+> Kludde: Created gatekeeper/fragmenter/adaptive.py with compute_adaptive_kn() and
+> get_current_kn(). Special case for <3 nodes (all-of-n). Formula for 3+ nodes:
+> n=min(node_count, max_n), k=max(round(n*ratio), min_k). Updated AdaptiveConfig
+> default min_k from 2→1 (matches Johan's 1:3 design intent). Updated ADR-006a in
+> DECISIONS.md with correct reference table and rationale. 20 unit tests pass.
 ```
 
 ---
