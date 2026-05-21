@@ -273,7 +273,7 @@ the HTTP client layer has no knowledge of directory structure or encryption keys
 **Decision:** Any cluster member can generate an invite code. Codes are single-use,
 expire after 48 hours, and are revocable before use. No designated admin role.
 
-Code format: three words + number (e.g. kaffe-trumpet-7). Human-readable,
+Code format: two words + number (e.g. kaffe-trumpet-7). Human-readable,
 easy to transmit via any channel.
 
 Under the hood: wraps Tahoe-LAFS `tahoe invite` / `tahoe create-client --join`.

@@ -762,7 +762,7 @@ project-docs/onboarding.md → Setup complete
 
 ## 1.9 — Cluster and invite system
 
-### [ ] 1.9.1 — Invite code generation and management
+### [x] 1.9.1 — Invite code generation and management
 
 **Reads:** DECISIONS.md → ADR-009, project-docs/design.md → Invite system
 **Creates:** `gatekeeper/cluster/invites.py`, `gatekeeper/cluster/wordlist.txt`
@@ -798,7 +798,15 @@ project-docs/onboarding.md → Setup complete
 - Unit tests: generate, validate, expire, revoke, consume, fallback format
 
 ```
-> Kludde: <!-- -->
+> Kludde: invites.py — policy layer over ClusterDB (generate_invite, validate_invite,
+> revoke_invite, consume_invite). InviteCode dataclass. Codes in format word-word-N
+> using EFF Short Wordlist #1 (1294 words bundled in wordlist.txt; "yo-yo" excluded —
+> hyphen breaks format). Fallback bb-{8hex} logged as warning when wordlist missing.
+> Randomness: secrets.choice + secrets.randbelow (never random module).
+> validate_invite checks revoked → used → expired in that order.
+> revoke_invite raises ValueError on used codes (cannot un-use).
+> ADR-009 corrected: "three words" → "two words" (typo confirmed by Johan 2026-05-21).
+> 28 unit tests pass. Full suite: 432 pass, 11 skip.
 ```
 
 ---
