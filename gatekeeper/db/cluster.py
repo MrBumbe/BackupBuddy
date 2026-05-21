@@ -31,7 +31,7 @@ _INVITE_UPDATABLE = frozenset({"used", "revoked"})
 
 _VOTE_UPDATABLE = frozenset({"votes_yes", "votes_no", "resolved"})
 
-_ORPHAN_UPDATABLE = frozenset({"cleaned_at"})
+_ORPHAN_UPDATABLE = frozenset({"cleaned_at", "marked_orphan_at"})
 
 _AGENT_UPDATABLE = frozenset({"ip", "lifeboat_url", "last_seen"})
 
