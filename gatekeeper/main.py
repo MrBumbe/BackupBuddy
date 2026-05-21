@@ -33,6 +33,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from gatekeeper.cluster.join import JoinAcceptResponse, JoinRequest, accept_join
 from gatekeeper.config import (
     ConfigError,
     GatekeeperConfig,
@@ -164,6 +165,7 @@ async def lifespan(app: FastAPI):
             else None
         )
         setup_required = not root_dir_cap
+        introducer_furl = ""
 
         if setup_required:
             logger.warning(
@@ -264,6 +266,8 @@ async def lifespan(app: FastAPI):
         app.state.storage_node = storage_node
         app.state.tahoe_client = tahoe_client
         app.state.fragmenter = fragmenter
+        # FURL is internal — available to the join route but never logged or shown to users
+        app.state.introducer_furl = introducer_furl
 
         logger.info(
             "Gatekeeper '%s' %s — GUI at http://%s:%d",
@@ -303,6 +307,39 @@ def _register_routes(app: FastAPI) -> None:
             "status": "ok",
             "node": cfg.node.name,
             "display_name": cfg.node.display_name,
+        })
+
+    @app.post("/api/cluster/join")
+    async def cluster_join(request: Request, body: JoinRequest) -> JSONResponse:
+        """Accept a cluster join request from a new gatekeeper node.
+
+        Validates the invite code, registers the node as a cluster member, and
+        returns the introducer FURL and current member list so the joining node
+        can configure its local Tahoe client.
+
+        Bound to the Tailscale interface only (ADR-002) — callers must be on
+        the Tailscale network.
+        """
+        if request.app.state.setup_required:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+
+        db = request.app.state.cluster_db
+        if db is None:
+            return JSONResponse({"error": "Cluster database not available"}, status_code=503)
+
+        furl: str = request.app.state.introducer_furl
+        if not furl:
+            logger.warning("Cluster join attempted but introducer_furl is not configured")
+            return JSONResponse({"error": "Introducer not configured"}, status_code=503)
+
+        try:
+            result: JoinAcceptResponse = accept_join(db, body.invite_code, body.node_info, furl)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        return JSONResponse({
+            "introducer_furl": result.introducer_furl,
+            "members": result.members,
         })
 
 
