@@ -35,6 +35,11 @@ _ORPHAN_UPDATABLE = frozenset({"cleaned_at", "marked_orphan_at"})
 
 _AGENT_UPDATABLE = frozenset({"ip", "lifeboat_url", "last_seen"})
 
+_REBALANCE_UPDATABLE = frozenset({
+    "baseline_count", "current_tracked_count", "size_stable_since",
+    "last_run_at", "in_progress",
+})
+
 
 class ClusterDB:
     """SQLite-backed store for cluster state.
@@ -355,6 +360,27 @@ class ClusterDB:
             "SELECT * FROM agents ORDER BY registered_at"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # rebalance_state
+    # ------------------------------------------------------------------
+
+    def get_rebalance_state(self) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM rebalance_state WHERE id = 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_rebalance_state(self, **fields: Any) -> None:
+        _check_fields(fields, _REBALANCE_UPDATABLE)
+        if not fields:
+            return
+        set_clause = ", ".join(f"{col} = ?" for col in fields)
+        self._conn.execute(  # noqa: S608
+            f"UPDATE rebalance_state SET {set_clause} WHERE id = 1",  # noqa: S608
+            (*fields.values(),),
+        )
+        self._conn.commit()
 
     # ------------------------------------------------------------------
     # lifeboat_status
