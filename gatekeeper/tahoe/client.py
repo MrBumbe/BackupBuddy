@@ -207,6 +207,34 @@ class TahoeClient:
         logger.debug("mkdir complete, ref length=%d", len(ref))
         return ref
 
+    async def check_cap(self, file_ref: str) -> dict | None:
+        """Check that a file reference is accessible and has sufficient shares.
+
+        Returns a dict with keys:
+          accessible    (bool) — True if the file is reachable
+          shares_good   (int)  — number of shares confirmed available
+          shares_needed (int)  — minimum shares needed to reconstruct the file
+
+        Returns None if the check itself fails (network error, ref not found).
+        Never raises — callers use the return value to decide next steps.
+        """
+        encoded_ref = urlquote(file_ref, safe="")
+        try:
+            response = await self._http.get(
+                f"{self._node_url}/uri/{encoded_ref}",
+                params={"t": "check", "output": "json"},
+            )
+            _raise_for_tahoe_error(response, "check_cap")
+            data = response.json()
+            results = data.get("results", {})
+            return {
+                "accessible": True,
+                "shares_good": results.get("count-shares-good", 0),
+                "shares_needed": results.get("count-shares-needed", 0),
+            }
+        except Exception:
+            return None
+
     async def link_file(
         self,
         dir_ref: str,

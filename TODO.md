@@ -1128,7 +1128,7 @@ docs/configuration.md → notify
 
 ---
 
-### [ ] 1.13.2 — Nightly verification job
+### [x] 1.13.2 — Nightly verification job
 
 **Reads:** docs/design.md → Verification and test restore,
 docs/configuration.md → verify, SECURITY.md → Section 8
@@ -1170,6 +1170,15 @@ docs/configuration.md → verify, SECURITY.md → Section 8
 ```
 > Kludde: <!-- -->
 ```
+
+**Implementation notes:**
+- `gatekeeper/verify/nightly.py` — `NightlyVerifier` class with four isolated layers
+- `TahoeClient.check_cap()` added to `gatekeeper/tahoe/client.py` (uses `t=check&output=json`)
+- Layer 3 temp dir created under `test_restore_path` with 0700 permissions (POSIX); always cleaned in finally
+- Layer 4 uses `extract_bundle()` to decrypt + verify `root_dir_cap` match
+- Alert suppression respects `notify_on_success/warning/failure/corrupt` flags
+- `run_scheduler()` sleeps to next `daily_check_time` using `datetime.combine`; skips if previous run still in progress
+- 35 unit tests: each layer independently + combined run isolation
 
 ---
 
