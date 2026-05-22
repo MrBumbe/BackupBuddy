@@ -1219,7 +1219,7 @@ CLAUDE.md → Every GUI route
 
 ---
 
-### [ ] 1.14.2 — Dashboard
+### [x] 1.14.2 — Dashboard
 
 **Reads:** docs/design.md → Web GUI → Dashboard
 **Creates:** `gatekeeper/gui/routes/dashboard.py`, `gatekeeper/gui/templates/dashboard.html`
@@ -1238,7 +1238,17 @@ CLAUDE.md → Every GUI route
 - Polling updates data without full page reload
 
 ```
-> Kludde: <!-- -->
+> Kludde: dashboard.py — _build_dashboard_data() reads cluster.db and catalog.db; no
+> live cluster calls on page load. Cluster section: member list with online_count,
+> ratio (contribution/usage), row-warning (<1.2x) and row-error (<1.0x) CSS classes.
+> Storage pool section: per-path used/quota/free with progress bar (warning >75%,
+> error >90%) and total summary row. Agents section: per-agent last_backup_at and
+> file_count from catalog; online/offline badge (15-minute threshold). Jobs section:
+> rebalance in_progress/last_run_at and lifeboat distributed_at/success_count. Upload
+> queue progress not tracked in DB (in-memory only in Phase 1 — no persistent state).
+> GET / renders SSR HTML; GET /api/dashboard returns JSON; dashboard.html polls
+> /api/dashboard every 30 s and patches sections without full reload.
+> 31 unit tests pass. Full suite: 740 pass, 12 skip.
 ```
 
 ---
