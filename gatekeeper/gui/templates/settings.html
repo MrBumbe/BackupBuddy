@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — BackupBuddy{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+</div>
+
+{% if data.setup_required %}
+<p>The gatekeeper has not been configured yet. Complete setup before changing settings.</p>
+{% else %}
+
+{# ── Fragmentation profile ────────────────────────────────────────────────── #}
+<section class="card">
+    <h2>Fragmentation profile</h2>
+    <p class="section-summary">Controls how many copies of each file fragment are stored across the cluster. Changes take effect on the next backup; the Tahoe process must be restarted for k/n values to update.</p>
+    <div class="profile-grid">
+        {% for p in [("balanced", "Balanced", "3-of-5 — good redundancy, moderate storage overhead."),
+                     ("secure",   "Secure",   "4-of-7 — higher redundancy, more storage overhead."),
+                     ("paranoid", "Paranoid", "6-of-10 — maximum redundancy, requires 10+ nodes."),
+                     ("adaptive", "Adaptive", "Adjusts k/n automatically based on cluster size.")] %}
+        {% set is_current = (data.current_profile == p[0]) %}
+        {% set is_paranoid = (p[0] == "paranoid") %}
+        {% set paranoid_disabled = (is_paranoid and data.member_count < data.paranoid_min_nodes) %}
+        <button class="profile-btn{% if is_current %} profile-btn-active{% endif %}{% if paranoid_disabled %} profile-btn-disabled{% endif %}"
+                data-profile="{{ p[0] }}"
+                {% if paranoid_disabled %}disabled title="Paranoid requires at least {{ data.paranoid_min_nodes }} nodes (cluster has {{ data.member_count }})"{% endif %}>
+            <span class="profile-btn-name">{{ p[1] }}</span>
+            <span class="profile-btn-desc">{{ p[2] }}</span>
+        </button>
+        {% endfor %}
+    </div>
+    <div id="profile-status" class="job-status" hidden></div>
+</section>
+
+{# ── Storage pool ─────────────────────────────────────────────────────────── #}
+<section class="card">
+    <h2>Storage pool</h2>
+    <p class="section-summary">Paths where incoming fragments from buddy nodes are stored. Changes take effect after the next gatekeeper restart.</p>
+
+    {% if data.pool_usage %}
+    <table id="pool-table">
+        <thead>
+            <tr>
+                <th>Path</th>
+                <th>Used</th>
+                <th>Quota</th>
+                <th>Usage</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for p in data.pool_usage %}
+        {% set pct = (p.used_bytes / p.quota_bytes * 100) | round(1) if p.quota_bytes > 0 else 0 %}
+        <tr data-path="{{ p.path }}">
+            <td class="path">{{ p.path }}</td>
+            <td>{{ (p.used_bytes / 1073741824) | round(2) }} GiB</td>
+            <td>{{ (p.quota_bytes / 1073741824) | round(1) }} GiB</td>
+            <td>
+                <span class="progress-bar"><span class="progress-fill{% if pct >= 95 %} progress-fill-error{% elif pct >= 85 %} progress-fill-warning{% endif %}" style="width:{{ [pct, 100] | min }}%"></span></span>
+                {{ pct }}%
+            </td>
+            <td>
+                <button class="btn btn-sm btn-danger pool-remove-btn" data-path="{{ p.path }}">Remove</button>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No storage pool paths configured.</p>
+    {% endif %}
+
+    <div id="pool-remove-status" class="job-status" hidden></div>
+
+    <form id="pool-add-form" style="margin-top:1rem">
+        <div class="form-row">
+            <label for="pool-path">New path</label>
+            <input type="text" id="pool-path" class="form-input" placeholder="/mnt/disk1/backupbuddy" required>
+        </div>
+        <div class="form-row">
+            <label for="pool-quota">Quota</label>
+            <input type="text" id="pool-quota" class="form-input" placeholder="2000 GB" required>
+        </div>
+        <button type="submit" class="btn">Add path</button>
+    </form>
+    <div id="pool-add-status" class="job-status" hidden></div>
+</section>
+
+{# ── Notifications ────────────────────────────────────────────────────────── #}
+<section class="card">
+    <h2>Notifications</h2>
+
+    <h3 style="font-size:0.875rem;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.04em;margin:0 0 0.75rem">SMTP email</h3>
+    <form id="smtp-form">
+        <div class="form-row">
+            <label for="smtp-enabled">Enabled</label>
+            <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal">
+                <input type="checkbox" id="smtp-enabled"{% if data.smtp.enabled %} checked{% endif %}>
+                Send email alerts
+            </label>
+        </div>
+        <div class="form-row">
+            <label for="smtp-host">SMTP host</label>
+            <input type="text" id="smtp-host" class="form-input" value="{{ data.smtp.host }}" placeholder="smtp.example.com">
+        </div>
+        <div class="form-row">
+            <label for="smtp-port">Port</label>
+            <input type="number" id="smtp-port" class="form-input" value="{{ data.smtp.port }}" min="1" max="65535" style="max-width:8rem">
+        </div>
+        <div class="form-row">
+            <label for="smtp-user">Username</label>
+            <input type="text" id="smtp-user" class="form-input" value="{{ data.smtp.user }}" placeholder="you@example.com" autocomplete="username">
+        </div>
+        <div class="form-row">
+            <label for="smtp-to">Send alerts to</label>
+            <input type="text" id="smtp-to" class="form-input" value="{{ data.smtp.to }}" placeholder="alerts@example.com">
+        </div>
+        <div class="form-row">
+            <label for="smtp-password">Password</label>
+            <input type="password" id="smtp-password" class="form-input" placeholder="Leave blank to keep existing" autocomplete="new-password">
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.25rem">
+            <button type="submit" class="btn">Save SMTP settings</button>
+            <button type="button" id="smtp-test-btn" class="btn">Send test email</button>
+        </div>
+    </form>
+    <div id="smtp-status" class="job-status" hidden></div>
+
+    <hr style="border:none;border-top:1px solid #e2e4e9;margin:1.25rem 0">
+
+    <h3 style="font-size:0.875rem;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.04em;margin:0 0 0.75rem">Webhook</h3>
+    <p class="section-summary">Compatible with Slack, Discord, Ntfy, Gotify, and similar. The URL is stored encrypted on disk, never in config or form fields.</p>
+    <form id="webhook-form">
+        <div class="form-row">
+            <label for="webhook-enabled">Enabled</label>
+            <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal">
+                <input type="checkbox" id="webhook-enabled"{% if data.webhook_enabled %} checked{% endif %}>
+                Send webhook alerts
+            </label>
+        </div>
+        <div class="form-row">
+            <label for="webhook-url">Webhook URL</label>
+            <input type="password" id="webhook-url" class="form-input" placeholder="Leave blank to keep existing" autocomplete="new-password">
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.25rem">
+            <button type="submit" class="btn">Save webhook settings</button>
+            <button type="button" id="webhook-test-btn" class="btn">Send test webhook</button>
+        </div>
+    </form>
+    <div id="webhook-status" class="job-status" hidden></div>
+</section>
+
+{# ── Lifeboat ─────────────────────────────────────────────────────────────── #}
+<section class="card">
+    <h2>Lifeboat</h2>
+    <p class="section-summary">The lifeboat is an encrypted bundle of critical gatekeeper data distributed to all agents. It enables recovery after a total gatekeeper failure without the passphrase-based recovery kit.</p>
+
+    <dl class="job-list" style="margin-bottom:1rem">
+        <dt>Last distributed</dt>
+        <dd>
+            {% if data.lifeboat.distributed_at %}
+            {{ data.lifeboat.distributed_at | ts_format }}
+            {% else %}
+            <span class="text-muted">Never</span>
+            {% endif %}
+        </dd>
+        <dt>Status</dt>
+        <dd>
+            {% if data.lifeboat.status == "ok" %}
+            <span class="badge badge-ok">OK</span>
+            {% elif data.lifeboat.status == "partial" %}
+            <span class="badge badge-warning">Partial</span>
+            {% elif data.lifeboat.status == "failed" %}
+            <span class="badge badge-error">Failed</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+        </dd>
+        {% if data.lifeboat.agent_count is not none %}
+        <dt>Agents</dt>
+        <dd>{{ data.lifeboat.success_count }} / {{ data.lifeboat.agent_count }} reached</dd>
+        {% endif %}
+    </dl>
+
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
+        <button id="lifeboat-bundle-btn" class="btn">Test bundle decryption</button>
+    </div>
+    <div id="lifeboat-bundle-status" class="job-status" hidden></div>
+
+    <form id="lifeboat-kit-form" style="margin-top:1rem">
+        <p style="margin:0 0 0.75rem;font-size:0.875rem;color:#555">
+            {% if data.has_recovery_kit %}
+            A local recovery kit is present. Enter your passphrase to verify it can be decrypted.
+            {% else %}
+            No local recovery kit found. Save your recovery kit from the setup wizard and keep it safe.
+            {% endif %}
+        </p>
+        {% if data.has_recovery_kit %}
+        <div class="form-row">
+            <label for="kit-passphrase">Passphrase</label>
+            <input type="password" id="kit-passphrase" class="form-input" placeholder="Your recovery passphrase" autocomplete="new-password" required>
+        </div>
+        <button type="submit" class="btn">Test recovery kit</button>
+        {% endif %}
+    </form>
+    <div id="lifeboat-kit-status" class="job-status" hidden></div>
+</section>
+
+<script>
+(function () {
+    'use strict';
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function showStatus(el, ok, message) {
+        el.hidden = false;
+        if (ok) {
+            el.innerHTML = '<span class="badge badge-ok">OK</span> ' + esc(message);
+        } else {
+            el.innerHTML = '<span class="badge badge-error">Error</span> ' + esc(message);
+        }
+    }
+
+    function apiPost(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        }).then(function (r) { return r.json(); });
+    }
+
+    // ── Fragmentation profile ──────────────────────────────────────────────────
+
+    var profileBtns = document.querySelectorAll('.profile-btn:not(:disabled)');
+    var profileStatus = document.getElementById('profile-status');
+
+    profileBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var profile = btn.dataset.profile;
+            profileBtns.forEach(function (b) { b.disabled = true; });
+
+            apiPost('/api/settings/profile', {profile: profile})
+                .then(function (data) {
+                    if (data.ok) {
+                        profileBtns.forEach(function (b) {
+                            b.classList.toggle('profile-btn-active', b.dataset.profile === profile);
+                            if (!b.classList.contains('profile-btn-disabled')) { b.disabled = false; }
+                        });
+                        showStatus(profileStatus, true, data.message);
+                    } else {
+                        showStatus(profileStatus, false, data.error || 'Failed to save profile.');
+                        profileBtns.forEach(function (b) {
+                            if (!b.classList.contains('profile-btn-disabled')) { b.disabled = false; }
+                        });
+                    }
+                })
+                .catch(function () {
+                    showStatus(profileStatus, false, 'Request failed.');
+                    profileBtns.forEach(function (b) {
+                        if (!b.classList.contains('profile-btn-disabled')) { b.disabled = false; }
+                    });
+                });
+        });
+    });
+
+    // ── Storage pool — remove ──────────────────────────────────────────────────
+
+    var poolRemoveStatus = document.getElementById('pool-remove-status');
+
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.pool-remove-btn');
+        if (!btn) { return; }
+        var path = btn.dataset.path;
+        if (!confirm('Remove "' + path + '" from the storage pool?\nChange takes effect after restart.')) { return; }
+        btn.disabled = true;
+
+        apiPost('/api/settings/storage-pool/remove', {path: path})
+            .then(function (data) {
+                if (data.ok) {
+                    var row = btn.closest('tr');
+                    if (row) { row.remove(); }
+                    showStatus(poolRemoveStatus, true, data.message);
+                } else {
+                    showStatus(poolRemoveStatus, false, data.error || 'Failed to remove path.');
+                    btn.disabled = false;
+                }
+            })
+            .catch(function () {
+                showStatus(poolRemoveStatus, false, 'Request failed.');
+                btn.disabled = false;
+            });
+    });
+
+    // ── Storage pool — add ─────────────────────────────────────────────────────
+
+    var poolAddStatus = document.getElementById('pool-add-status');
+
+    document.getElementById('pool-add-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var path = document.getElementById('pool-path').value.trim();
+        var quota = document.getElementById('pool-quota').value.trim();
+        var submitBtn = this.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+
+        apiPost('/api/settings/storage-pool/add', {path: path, quota: quota})
+            .then(function (data) {
+                submitBtn.disabled = false;
+                if (data.ok) {
+                    showStatus(poolAddStatus, true, data.message);
+                    document.getElementById('pool-path').value = '';
+                    document.getElementById('pool-quota').value = '';
+                } else {
+                    showStatus(poolAddStatus, false, data.error || 'Failed to add path.');
+                }
+            })
+            .catch(function () {
+                submitBtn.disabled = false;
+                showStatus(poolAddStatus, false, 'Request failed.');
+            });
+    });
+
+    // ── SMTP — save ────────────────────────────────────────────────────────────
+
+    var smtpStatus = document.getElementById('smtp-status');
+
+    function smtpFields() {
+        return {
+            enabled: document.getElementById('smtp-enabled').checked,
+            host: document.getElementById('smtp-host').value.trim(),
+            port: parseInt(document.getElementById('smtp-port').value, 10) || 587,
+            user: document.getElementById('smtp-user').value.trim(),
+            to: document.getElementById('smtp-to').value.trim(),
+            password: document.getElementById('smtp-password').value,
+        };
+    }
+
+    document.getElementById('smtp-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var submitBtn = this.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+
+        apiPost('/api/settings/smtp', smtpFields())
+            .then(function (data) {
+                submitBtn.disabled = false;
+                if (data.ok) {
+                    showStatus(smtpStatus, true, 'SMTP settings saved.');
+                    document.getElementById('smtp-password').value = '';
+                } else {
+                    showStatus(smtpStatus, false, data.error || 'Failed to save SMTP settings.');
+                }
+            })
+            .catch(function () {
+                submitBtn.disabled = false;
+                showStatus(smtpStatus, false, 'Request failed.');
+            });
+    });
+
+    document.getElementById('smtp-test-btn').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+        showStatus(smtpStatus, true, 'Sending test email…');
+        smtpStatus.querySelector('.badge').className = 'badge badge-warning';
+
+        var fields = smtpFields();
+        apiPost('/api/settings/smtp/test', {
+            host: fields.host,
+            port: fields.port,
+            user: fields.user,
+            to: fields.to,
+            password: fields.password,
+        })
+            .then(function (data) {
+                btn.disabled = false;
+                showStatus(smtpStatus, data.ok, data.message || data.error || 'Unknown result.');
+            })
+            .catch(function () {
+                btn.disabled = false;
+                showStatus(smtpStatus, false, 'Request failed.');
+            });
+    });
+
+    // ── Webhook — save ─────────────────────────────────────────────────────────
+
+    var webhookStatus = document.getElementById('webhook-status');
+
+    document.getElementById('webhook-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var submitBtn = this.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+
+        apiPost('/api/settings/webhook', {
+            enabled: document.getElementById('webhook-enabled').checked,
+            url: document.getElementById('webhook-url').value,
+        })
+            .then(function (data) {
+                submitBtn.disabled = false;
+                if (data.ok) {
+                    showStatus(webhookStatus, true, 'Webhook settings saved.');
+                    document.getElementById('webhook-url').value = '';
+                } else {
+                    showStatus(webhookStatus, false, data.error || 'Failed to save webhook settings.');
+                }
+            })
+            .catch(function () {
+                submitBtn.disabled = false;
+                showStatus(webhookStatus, false, 'Request failed.');
+            });
+    });
+
+    document.getElementById('webhook-test-btn').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+        var url = document.getElementById('webhook-url').value;
+
+        apiPost('/api/settings/webhook/test', {url: url})
+            .then(function (data) {
+                btn.disabled = false;
+                showStatus(webhookStatus, data.ok, data.message || data.error || 'Unknown result.');
+            })
+            .catch(function () {
+                btn.disabled = false;
+                showStatus(webhookStatus, false, 'Request failed.');
+            });
+    });
+
+    // ── Lifeboat — test bundle ─────────────────────────────────────────────────
+
+    var bundleStatus = document.getElementById('lifeboat-bundle-status');
+
+    document.getElementById('lifeboat-bundle-btn').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+        showStatus(bundleStatus, true, 'Testing bundle — this may take a moment…');
+        bundleStatus.querySelector('.badge').className = 'badge badge-warning';
+
+        fetch('/api/settings/lifeboat/test-bundle', {method: 'POST'})
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                btn.disabled = false;
+                showStatus(bundleStatus, data.ok, data.message || data.error || 'Unknown result.');
+            })
+            .catch(function () {
+                btn.disabled = false;
+                showStatus(bundleStatus, false, 'Request failed.');
+            });
+    });
+
+    // ── Lifeboat — test recovery kit ───────────────────────────────────────────
+
+    var kitStatus = document.getElementById('lifeboat-kit-status');
+    var kitForm = document.getElementById('lifeboat-kit-form');
+
+    if (kitForm.querySelector('button')) {
+        kitForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var passphrase = document.getElementById('kit-passphrase').value;
+            var submitBtn = kitForm.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+
+            apiPost('/api/settings/lifeboat/test-kit', {passphrase: passphrase})
+                .then(function (data) {
+                    submitBtn.disabled = false;
+                    showStatus(kitStatus, data.ok, data.message || data.error || 'Unknown result.');
+                    if (data.ok) { document.getElementById('kit-passphrase').value = ''; }
+                })
+                .catch(function () {
+                    submitBtn.disabled = false;
+                    showStatus(kitStatus, false, 'Request failed.');
+                });
+        });
+    }
+
+}());
+</script>
+
+{% endif %}
+{% endblock %}

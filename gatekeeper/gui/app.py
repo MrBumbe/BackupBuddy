@@ -27,6 +27,7 @@ from starlette.responses import Response
 
 from gatekeeper.gui.routes.dashboard import create_dashboard_router
 from gatekeeper.gui.routes.restore import create_restore_router
+from gatekeeper.gui.routes.settings import create_settings_router
 from gatekeeper.tailscale import _TAILSCALE_CGNAT
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ def setup_gui(app: Any) -> None:
     """
     app.include_router(create_dashboard_router())
     app.include_router(create_restore_router())
+    app.include_router(create_settings_router())
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     async def _404_handler(request: Request, exc: Exception) -> HTMLResponse:

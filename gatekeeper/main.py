@@ -261,6 +261,8 @@ async def lifespan(app: FastAPI):
         # Expose shared state to route handlers (None in setup mode)
         app.state.setup_required = setup_required
         app.state.config = config
+        app.state.config_path = config_path
+        app.state.data_dir = data_dir
         app.state.pool = pool
         app.state.catalog_db = catalog_db
         app.state.cluster_db = cluster_db

@@ -407,3 +407,49 @@ tr.row-error {
     font-size: 0.8rem;
     margin-left: 0.25rem;
 }
+
+/* ── Profile buttons ──────────────────────────────────────────────────────── */
+
+.profile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.profile-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.75rem 1rem;
+    border: 2px solid #e2e4e9;
+    border-radius: 0.4rem;
+    background: #fff;
+    cursor: pointer;
+    text-align: left;
+}
+
+.profile-btn:hover:not(:disabled) {
+    border-color: #1a1a2e;
+}
+
+.profile-btn-active {
+    border-color: #1a1a2e;
+    background: #f0f1f6;
+}
+
+.profile-btn-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.profile-btn-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #1a1a2e;
+}
+
+.profile-btn-desc {
+    font-size: 0.8rem;
+    color: #666;
+}
