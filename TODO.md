@@ -1253,7 +1253,7 @@ CLAUDE.md → Every GUI route
 
 ---
 
-### [ ] 1.14.3 — Restore UI
+### [x] 1.14.3 — Restore UI
 
 **Reads:** docs/design.md → Web GUI → Restore, docs/onboarding.md
 **Creates:** `gatekeeper/gui/routes/restore.py`, `gatekeeper/gui/templates/restore.html`
@@ -1273,7 +1273,18 @@ CLAUDE.md → Every GUI route
 - Hash verification result visible per file
 
 ```
-> Kludde: <!-- -->
+> Kludde: Three-tab restore UI: Find a file, Restore a folder, Emergency restore.
+> routes/restore.py: 6 routes (GET /restore, GET /api/restore/catalog, POST /api/restore/start/file,
+> POST /api/restore/start/folder, POST /api/restore/emergency, GET /api/restore/jobs/{job_id}).
+> In-memory job registry capped at 50 entries, oldest completed jobs evicted first.
+> Catalog search is O(catalog) — HMAC blind index prevents SQL prefix search; intentional Phase 1.
+> Emergency restore writes to main catalog only when empty (409 if records exist — ADR Option A).
+> Dest path validation: must be absolute on original path (not resolved), no storage pool overlap.
+> Bug found and fixed: original _validate_dest_path checked os.path.isabs on realpath result
+> which is always True — moved check to original dest_path before realpath resolution.
+> base.html updated with nav links. app.py registers create_restore_router().
+> CSS: tabs, form controls, buttons, job status, search row, inline restore form.
+> 42 unit tests pass. Full suite: 782 pass, 12 skip.
 ```
 
 ---

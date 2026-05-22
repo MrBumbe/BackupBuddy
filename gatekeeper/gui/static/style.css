@@ -228,3 +228,182 @@ tr.row-error {
     text-align: right;
     margin: 0;
 }
+
+/* ── Nav links ────────────────────────────────────────────────────────────── */
+
+.nav-link {
+    color: #cdd0d8;
+    text-decoration: none;
+    font-size: 0.9rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.2rem;
+}
+
+.nav-link:hover {
+    color: #ffffff;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+
+.tab-bar {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid #e2e4e9;
+}
+
+.tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #666;
+    cursor: pointer;
+}
+
+.tab-btn:hover {
+    color: #1a1a2e;
+}
+
+.tab-btn.tab-active {
+    color: #1a1a2e;
+    border-bottom-color: #1a1a2e;
+    font-weight: 600;
+}
+
+.tab-pane {
+    display: block;
+}
+
+.tab-hidden {
+    display: none !important;
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────── */
+
+.form-row {
+    display: grid;
+    grid-template-columns: 9rem 1fr;
+    gap: 0.5rem 1rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.form-row label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #555;
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #d0d3da;
+    border-radius: 0.3rem;
+    font-size: 0.875rem;
+    font-family: inherit;
+    color: #1a1a2e;
+    background: #fff;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+    outline: none;
+    border-color: #1a1a2e;
+    box-shadow: 0 0 0 2px rgba(26, 26, 46, 0.12);
+}
+
+.form-textarea {
+    resize: vertical;
+    font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+    font-size: 0.8rem;
+}
+
+.btn {
+    display: inline-block;
+    padding: 0.4rem 0.9rem;
+    border: none;
+    border-radius: 0.3rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: #1a1a2e;
+    color: #fff;
+}
+
+.btn:hover {
+    background: #2a2a4e;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+}
+
+.btn-danger {
+    background: #c0392b;
+}
+
+.btn-danger:hover {
+    background: #a93226;
+}
+
+/* ── Search row ───────────────────────────────────────────────────────────── */
+
+.search-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.search-row .form-input {
+    flex: 1;
+    min-width: 12rem;
+}
+
+.search-row .form-select {
+    width: auto;
+    min-width: 8rem;
+}
+
+/* ── Inline restore form ──────────────────────────────────────────────────── */
+
+.inline-restore-form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.5rem 0;
+    flex-wrap: wrap;
+}
+
+.inline-restore-form .form-input {
+    flex: 1;
+    min-width: 14rem;
+}
+
+/* ── Job status ───────────────────────────────────────────────────────────── */
+
+.job-status {
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+}
+
+.job-status-inline {
+    font-size: 0.8rem;
+    margin-left: 0.25rem;
+}

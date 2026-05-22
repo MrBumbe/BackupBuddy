@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}Restore — BackupBuddy{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Restore</h1>
+</div>
+
+{% if setup_required %}
+<p>The gatekeeper has not been configured yet. Complete setup before restoring files.</p>
+{% else %}
+
+<div class="tab-bar">
+    <button class="tab-btn tab-active" data-tab="find">Find a file</button>
+    <button class="tab-btn" data-tab="folder">Restore a folder</button>
+    <button class="tab-btn" data-tab="emergency">Emergency restore</button>
+</div>
+
+{# ── Find a file ────────────────────────────────────────────────────────────── #}
+<div id="tab-find" class="tab-pane">
+    <section class="card">
+        <h2>Find a file</h2>
+        <div class="search-row">
+            <input type="text" id="search-q" class="form-input" placeholder="File name or path…">
+            <select id="search-agent" class="form-select">
+                <option value="">All agents</option>
+                {% for agent in agents %}
+                <option value="{{ agent }}">{{ agent }}</option>
+                {% endfor %}
+            </select>
+            <button id="search-btn" class="btn">Search</button>
+        </div>
+        <div id="search-results"></div>
+    </section>
+</div>
+
+{# ── Restore a folder ───────────────────────────────────────────────────────── #}
+<div id="tab-folder" class="tab-pane tab-hidden">
+    <section class="card">
+        <h2>Restore a folder</h2>
+        <form id="folder-form">
+            <div class="form-row">
+                <label for="folder-agent">Agent</label>
+                {% if agents %}
+                <select id="folder-agent" class="form-select" required>
+                    {% for agent in agents %}
+                    <option value="{{ agent }}">{{ agent }}</option>
+                    {% endfor %}
+                </select>
+                {% else %}
+                <input type="text" id="folder-agent" class="form-input" placeholder="Agent name" required>
+                {% endif %}
+            </div>
+            <div class="form-row">
+                <label for="folder-path">Folder path</label>
+                <input type="text" id="folder-path" class="form-input" placeholder="/home/user/Documents" required>
+            </div>
+            <div class="form-row">
+                <label for="folder-dest">Restore to</label>
+                <input type="text" id="folder-dest" class="form-input" placeholder="/tmp/restore" required>
+            </div>
+            <button type="submit" class="btn">Restore folder</button>
+        </form>
+        <div id="folder-status" class="job-status" hidden></div>
+    </section>
+</div>
+
+{# ── Emergency restore ──────────────────────────────────────────────────────── #}
+<div id="tab-emergency" class="tab-pane tab-hidden">
+    <section class="card">
+        <h2>Emergency restore</h2>
+        <p>Use this only if your catalog database is lost or empty and cannot be recovered by other means.
+           Reconstruction reads your recovery key and rebuilds the catalog from your backup storage.
+           This will fail if the catalog already contains records.</p>
+        <form id="emergency-form">
+            <div class="form-row">
+                <label for="emergency-key">Recovery key</label>
+                <textarea id="emergency-key" class="form-textarea" rows="4"
+                          placeholder="Paste your recovery key here…" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-danger">Reconstruct catalog</button>
+        </form>
+        <div id="emergency-status" class="job-status" hidden></div>
+    </section>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    // ── Tab switching ──────────────────────────────────────────────────────────
+
+    var tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            tabBtns.forEach(function (b) { b.classList.remove('tab-active'); });
+            document.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.add('tab-hidden'); });
+            btn.classList.add('tab-active');
+            document.getElementById('tab-' + btn.dataset.tab).classList.remove('tab-hidden');
+        });
+    });
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function humanBytes(n) {
+        if (n == null) return '—';
+        var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        var i = 0;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return n.toFixed(1) + ' ' + units[i];
+    }
+
+    function humanTime(ts) {
+        if (!ts) return '—';
+        var d = new Date(ts * 1000);
+        return d.toUTCString().replace(' GMT', ' UTC').replace(/:\d\d UTC$/, ' UTC');
+    }
+
+    // ── Job polling ────────────────────────────────────────────────────────────
+
+    function pollJob(jobId, statusEl) {
+        var iv = setInterval(function () {
+            fetch('/api/restore/jobs/' + jobId)
+                .then(function (r) { return r.json(); })
+                .then(function (job) {
+                    renderJobStatus(job, statusEl);
+                    if (job.status !== 'running') { clearInterval(iv); }
+                })
+                .catch(function () {});
+        }, 2000);
+    }
+
+    function renderJobStatus(job, el) {
+        el.hidden = false;
+        var html = '';
+        if (job.status === 'running') {
+            html = '<span class="badge badge-warning">Running…</span>';
+            if (job.total) { html += ' ' + job.progress + ' / ' + job.total + ' files'; }
+        } else if (job.status === 'done') {
+            html = '<span class="badge badge-ok">Done</span>';
+            if (job.results && job.results.length) {
+                var r = job.results[0];
+                if (r.files_reconstructed != null) {
+                    html += ' ' + r.files_reconstructed + ' file(s) reconstructed.';
+                } else if (r.dest) {
+                    html += ' Restored to: <span class="path">' + esc(r.dest) + '</span>';
+                }
+            }
+            if (job.total) { html += ' (' + job.total + ' file(s))'; }
+        } else {
+            html = '<span class="badge badge-error">Failed</span> ' + esc(job.error || 'Unknown error.');
+        }
+        el.innerHTML = html;
+    }
+
+    // ── File search ────────────────────────────────────────────────────────────
+
+    function doSearch() {
+        var q = document.getElementById('search-q').value.trim();
+        var agent = document.getElementById('search-agent').value;
+        var url = '/api/restore/catalog?limit=200';
+        if (q) { url += '&q=' + encodeURIComponent(q); }
+        if (agent) { url += '&agent=' + encodeURIComponent(agent); }
+
+        var resultsEl = document.getElementById('search-results');
+        resultsEl.innerHTML = '<p class="text-muted">Searching…</p>';
+
+        fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (data) { renderSearchResults(data, resultsEl); })
+            .catch(function () { resultsEl.innerHTML = '<p class="text-error">Search failed. Check the gatekeeper log.</p>'; });
+    }
+
+    document.getElementById('search-btn').addEventListener('click', doSearch);
+    document.getElementById('search-q').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { doSearch(); }
+    });
+
+    function renderSearchResults(data, el) {
+        if (!data.results || !data.results.length) {
+            el.innerHTML = '<p class="empty">No files found.</p>';
+            return;
+        }
+        var html = '';
+        if (data.truncated) {
+            html += '<p class="text-warning" style="margin-bottom:0.75rem">Showing first '
+                + data.results.length + ' results — refine your search to narrow down.</p>';
+        }
+        html += '<table><thead><tr><th>File</th><th>Agent</th><th>Backed up</th><th>Size</th><th></th></tr></thead><tbody>';
+        data.results.forEach(function (f, i) {
+            html += '<tr>'
+                + '<td class="path">' + esc(f.original_path) + '</td>'
+                + '<td>' + esc(f.agent) + '</td>'
+                + '<td>' + humanTime(f.backed_up_at) + '</td>'
+                + '<td>' + humanBytes(f.size_bytes) + '</td>'
+                + '<td><button class="btn btn-sm restore-trigger-btn"'
+                + ' data-idx="' + i + '"'
+                + ' data-path="' + esc(f.original_path) + '"'
+                + ' data-agent="' + esc(f.agent) + '"'
+                + '>Restore</button></td>'
+                + '</tr>'
+                + '<tr id="restore-form-row-' + i + '" class="restore-form-row tab-hidden">'
+                + '<td colspan="5"><div class="inline-restore-form">'
+                + '<input type="text" id="restore-dest-' + i + '" class="form-input"'
+                + ' placeholder="Destination path (e.g. /tmp/restore)">'
+                + '<button class="btn do-restore-btn"'
+                + ' data-idx="' + i + '"'
+                + ' data-path="' + esc(f.original_path) + '"'
+                + ' data-agent="' + esc(f.agent) + '"'
+                + '>Restore here</button>'
+                + '<span id="restore-inline-status-' + i + '" class="job-status-inline"></span>'
+                + '</div></td>'
+                + '</tr>';
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    }
+
+    document.getElementById('search-results').addEventListener('click', function (e) {
+        var btn = e.target.closest('button');
+        if (!btn) { return; }
+
+        if (btn.classList.contains('restore-trigger-btn')) {
+            var idx = btn.dataset.idx;
+            var row = document.getElementById('restore-form-row-' + idx);
+            if (row) { row.classList.toggle('tab-hidden'); }
+            return;
+        }
+
+        if (btn.classList.contains('do-restore-btn')) {
+            var idx2 = btn.dataset.idx;
+            var dest = document.getElementById('restore-dest-' + idx2).value.trim();
+            var statusEl = document.getElementById('restore-inline-status-' + idx2);
+            if (!dest) {
+                statusEl.innerHTML = '<span class="text-error">Enter a destination path.</span>';
+                return;
+            }
+            btn.disabled = true;
+            fetch('/api/restore/start/file', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    original_path: btn.dataset.path,
+                    agent: btn.dataset.agent,
+                    dest_path: dest,
+                }),
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.error) {
+                    statusEl.innerHTML = '<span class="text-error">' + esc(data.error) + '</span>';
+                    btn.disabled = false;
+                    return;
+                }
+                statusEl.innerHTML = '<span class="badge badge-warning">Running…</span>';
+                pollJob(data.job_id, statusEl);
+            })
+            .catch(function () {
+                statusEl.innerHTML = '<span class="text-error">Request failed.</span>';
+                btn.disabled = false;
+            });
+        }
+    });
+
+    // ── Folder restore ─────────────────────────────────────────────────────────
+
+    document.getElementById('folder-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var agent = document.getElementById('folder-agent').value.trim();
+        var folderPath = document.getElementById('folder-path').value.trim();
+        var dest = document.getElementById('folder-dest').value.trim();
+        var statusEl = document.getElementById('folder-status');
+
+        fetch('/api/restore/start/folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({folder_path: folderPath, agent: agent, dest_path: dest}),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            statusEl.hidden = false;
+            if (data.error) {
+                statusEl.innerHTML = '<span class="badge badge-error">Error</span> ' + esc(data.error);
+                return;
+            }
+            statusEl.innerHTML = '<span class="badge badge-warning">Running…</span>';
+            pollJob(data.job_id, statusEl);
+        })
+        .catch(function () {
+            statusEl.hidden = false;
+            statusEl.innerHTML = '<span class="badge badge-error">Request failed.</span>';
+        });
+    });
+
+    // ── Emergency restore ──────────────────────────────────────────────────────
+
+    document.getElementById('emergency-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var key = document.getElementById('emergency-key').value.trim();
+        var statusEl = document.getElementById('emergency-status');
+
+        fetch('/api/restore/emergency', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({recovery_key: key}),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            statusEl.hidden = false;
+            if (data.error) {
+                statusEl.innerHTML = '<span class="badge badge-error">Error</span> ' + esc(data.error);
+                return;
+            }
+            statusEl.innerHTML = '<span class="badge badge-warning">Reconstructing catalog…</span>';
+            pollJob(data.job_id, statusEl);
+        })
+        .catch(function () {
+            statusEl.hidden = false;
+            statusEl.innerHTML = '<span class="badge badge-error">Request failed.</span>';
+        });
+    });
+
+}());
+</script>
+
+{% endif %}
+{% endblock %}

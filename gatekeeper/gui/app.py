@@ -7,6 +7,8 @@ Registered components:
   /static                  — CSS and assets, no external CDN
   /                        — dashboard (cluster status, storage, agents, jobs)
   /api/dashboard           — JSON snapshot for 30-second polling
+  /restore                 — file/folder/emergency restore UI
+  /api/restore/*           — restore job API
 
 All components are wired into the main FastAPI app via setup_gui(app).
 """
@@ -24,6 +26,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from gatekeeper.gui.routes.dashboard import create_dashboard_router
+from gatekeeper.gui.routes.restore import create_restore_router
 from gatekeeper.tailscale import _TAILSCALE_CGNAT
 
 logger = logging.getLogger(__name__)
@@ -81,6 +84,7 @@ def setup_gui(app: Any) -> None:
       2. add_middleware(RequestLoggingMiddleware) — outer, logs all requests including rejections
     """
     app.include_router(create_dashboard_router())
+    app.include_router(create_restore_router())
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     async def _404_handler(request: Request, exc: Exception) -> HTMLResponse:
