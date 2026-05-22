@@ -1084,7 +1084,7 @@ docs/architecture.md → Data flow restore (call home)
 
 ## 1.13 — Verification and notifications
 
-### [ ] 1.13.1 — Notification dispatcher
+### [x] 1.13.1 — Notification dispatcher
 
 **Reads:** SECURITY.md → Section 6, docs/design.md → Monitoring and notifications,
 docs/configuration.md → notify
@@ -1110,7 +1110,20 @@ docs/configuration.md → notify
 - Unit tests: dispatch to smtp, dispatch to webhook, failed smtp handled gracefully
 
 ```
-> Kludde: <!-- -->
+> Kludde: AlertDispatcher in gatekeeper/notify/dispatcher.py — routes alerts to SMTP
+> and/or webhook channels based on per-event config flags (on_backup_failure etc.).
+> send_alert(level, message, detail=None, *, event=None): event maps to notify.on_*
+> config key; None event = always dispatch; critical level bypasses event filter.
+> Channel failures isolated via asyncio.gather(return_exceptions=True).
+> smtp.py: aiosmtplib, STARTTLS port 587 / implicit TLS port 465; password from
+> SecretsStore key "smtp_password"; test_smtp() accepts explicit password for pre-save
+> testing. webhook.py: httpx AsyncClient, 5 s timeout, JSON payload {level, message,
+> detail, timestamp, node}; URL from SecretsStore key "webhook_url"; test_webhook()
+> accepts explicit URL. Neither module logs passwords or URLs.
+> Design note: send_alert gains optional event= param (spec omitted it but per-event
+> filtering requires it). Existing callers (queue_worker, orphans, restore) use
+> inconsistent injectable signatures — will be aligned when wired in main.py.
+> 38 unit tests pass. Full suite: 647 pass, 12 skip. Commit: e1875650b.
 ```
 
 ---
