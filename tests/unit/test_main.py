@@ -129,7 +129,7 @@ class TestLifespanSetupMode:
 
         with patch("gatekeeper.main.StoragePoolManager", return_value=_mock_pool()):
             app = _create_app()
-            with TestClient(app, raise_server_exceptions=True) as client:
+            with TestClient(app, raise_server_exceptions=True, client=("100.64.0.1", 12345)) as client:
                 response = client.get("/api/status")
 
         assert response.status_code == 503
@@ -144,7 +144,7 @@ class TestLifespanSetupMode:
 
         with patch("gatekeeper.main.StoragePoolManager", mock_pool_cls):
             app = _create_app()
-            with TestClient(app) as client:
+            with TestClient(app, client=("100.64.0.1", 12345)) as client:
                 client.get("/api/status")
 
         mock_pool_cls.assert_called_once()
@@ -174,7 +174,7 @@ class TestLifespanNormalMode:
         patches, _, _ = self._patches()
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
             app = _create_app()
-            with TestClient(app) as client:
+            with TestClient(app, client=("100.64.0.1", 12345)) as client:
                 response = client.get("/api/status")
 
         assert response.status_code == 200
@@ -193,7 +193,7 @@ class TestLifespanNormalMode:
 
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
             app = _create_app()
-            with TestClient(app) as client:
+            with TestClient(app, client=("100.64.0.1", 12345)) as client:
                 client.get("/api/status")
 
         mock_tc.aclose.assert_awaited_once()
@@ -209,7 +209,7 @@ class TestLifespanNormalMode:
 
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
             app = _create_app()
-            with TestClient(app) as client:
+            with TestClient(app, client=("100.64.0.1", 12345)) as client:
                 client.get("/api/status")
 
         mock_sn.stop.assert_awaited_once()
@@ -231,7 +231,7 @@ class TestLifespanNormalMode:
             patch("gatekeeper.main.TahoeClient", return_value=_mock_tahoe_client()),
         ):
             app = _create_app()
-            with TestClient(app) as client:
+            with TestClient(app, client=("100.64.0.1", 12345)) as client:
                 client.get("/api/status")
 
         mock_catalog.close.assert_called_once()
@@ -260,7 +260,7 @@ class TestLifespanNormalMode:
             patch("gatekeeper.main.TahoeClient", return_value=_mock_tahoe_client()),
         ):
             app = _create_app()
-            with TestClient(app) as client:
+            with TestClient(app, client=("100.64.0.1", 12345)) as client:
                 client.get("/api/status")
 
         mock_introducer.start.assert_awaited_once()
@@ -284,7 +284,7 @@ class TestLifespanNormalMode:
             patch("gatekeeper.main.TahoeClient", mock_tc_cls),
         ):
             app = _create_app()
-            with TestClient(app) as client:
+            with TestClient(app, client=("100.64.0.1", 12345)) as client:
                 client.get("/api/status")
 
         mock_tc_cls.assert_called_once_with(expected_url)

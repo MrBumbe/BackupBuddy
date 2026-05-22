@@ -49,6 +49,7 @@ from gatekeeper.storage.pool import PoolPathError, StoragePoolManager
 from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
 from gatekeeper.tahoe.storage_node import StorageNode
+from gatekeeper.gui.app import setup_gui
 from gatekeeper.tailscale import (
     _TAILSCALE_CGNAT,
     TailscaleNotRunning,
@@ -353,6 +354,7 @@ def _create_app() -> FastAPI:
         lifespan=lifespan,
     )
     _register_routes(app)
+    setup_gui(app)
     return app
 
 

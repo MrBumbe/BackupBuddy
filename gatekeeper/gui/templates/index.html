@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — BackupBuddy{% endblock %}
+
+{% block content %}
+{% if setup_required %}
+<span class="badge badge-warning">Setup required</span>
+<p>The gatekeeper has not been configured yet. Open the setup wizard to complete onboarding.</p>
+{% else %}
+<span class="badge badge-ok">Running</span>
+<p>The gatekeeper is operational.</p>
+{% endif %}
+{% endblock %}

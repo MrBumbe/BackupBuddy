@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block title %}Error {{ code }} — BackupBuddy{% endblock %}
+
+{% block content %}
+<h1>{{ code }}</h1>
+<p>{{ message }}</p>
+<p><a href="/">Back to dashboard</a></p>
+{% endblock %}
