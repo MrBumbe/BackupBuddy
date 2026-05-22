@@ -9,6 +9,8 @@ Registered components:
   /api/dashboard           — JSON snapshot for 30-second polling
   /restore                 — file/folder/emergency restore UI
   /api/restore/*           — restore job API
+  /buddies                 — cluster member management, invites, votes
+  /api/buddies/*           — buddies API
 
 All components are wired into the main FastAPI app via setup_gui(app).
 """
@@ -25,6 +27,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from gatekeeper.gui.routes.buddies import create_buddies_router
 from gatekeeper.gui.routes.dashboard import create_dashboard_router
 from gatekeeper.gui.routes.restore import create_restore_router
 from gatekeeper.gui.routes.settings import create_settings_router
@@ -87,6 +90,7 @@ def setup_gui(app: Any) -> None:
     app.include_router(create_dashboard_router())
     app.include_router(create_restore_router())
     app.include_router(create_settings_router())
+    app.include_router(create_buddies_router())
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     async def _404_handler(request: Request, exc: Exception) -> HTMLResponse:

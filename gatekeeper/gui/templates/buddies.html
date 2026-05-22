@@ -1,0 +1,611 @@
+{% extends "base.html" %}
+
+{% block title %}Buddies — BackupBuddy{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>
+        Buddies
+        {% if not data.setup_required %}
+        <span id="member-count-badge" class="badge badge-ok">
+            {{ data.members | length }} member{% if data.members | length != 1 %}s{% endif %}
+        </span>
+        {% endif %}
+    </h1>
+</div>
+
+{% if data.setup_required %}
+<p>The gatekeeper has not been configured yet. Complete the setup wizard first.</p>
+{% else %}
+
+<!-- Cluster Members -->
+<section class="card" id="members-section">
+    <h2>Cluster Members</h2>
+    {% if data.total_capacity_bytes > 0 %}
+    <p class="section-summary">
+        {{ data.total_used_bytes | filesizeformat(true) }} used of
+        {{ data.total_capacity_bytes | filesizeformat(true) }} total
+        ({{ data.total_percent }}%)
+    </p>
+    {% endif %}
+    {% if data.members %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Contributes</th>
+                <th>Uses</th>
+                <th>Ratio</th>
+                <th>Profile</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in data.members %}
+            <tr{% if m.error %} class="row-error"{% elif m.warning %} class="row-warning"{% endif %}>
+                <td>
+                    {{ m.display_name }}
+                    {% if m.is_self %}<span class="text-muted"> (you)</span>{% endif %}
+                </td>
+                <td>
+                    {% if m.status == "active" %}
+                    <span class="badge badge-ok">active</span>
+                    {% elif m.status == "grace" %}
+                    <span class="badge badge-warning">grace</span>
+                    {% else %}
+                    <span class="badge badge-error">{{ m.status }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ m.contribution_bytes | filesizeformat(true) }}</td>
+                <td>{{ m.usage_bytes | filesizeformat(true) }}</td>
+                <td>
+                    {% if m.ratio != none %}
+                    <span class="{% if m.error %}text-error{% elif m.warning %}text-warning{% endif %}">
+                        {{ "%.2f" | format(m.ratio) }}x
+                    </span>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>{{ m.profile }}</td>
+                <td>
+                    {% if m.can_propose_removal %}
+                    <button class="btn btn-sm btn-danger removal-btn"
+                            data-node-id="{{ m.node_id }}"
+                            data-name="{{ m.display_name }}">Remove</button>
+                    {% endif %}
+                    {% if m.can_propose_grace_extension %}
+                    <button class="btn btn-sm extend-btn"
+                            data-node-id="{{ m.node_id }}"
+                            data-name="{{ m.display_name }}">Extend grace</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No cluster members yet.</p>
+    {% endif %}
+</section>
+
+<!-- Invites -->
+<section class="card" id="invites-section">
+    <h2>Invites</h2>
+    <div style="margin-bottom:1rem">
+        <button class="btn" id="generate-invite-btn">Generate invite</button>
+        <span id="invite-gen-status" class="text-muted"
+              style="margin-left:0.5rem;font-size:0.875rem"></span>
+    </div>
+    <div id="invites-list">
+        {% if data.invites %}
+        <table>
+            <thead>
+                <tr><th>Code</th><th>Created by</th><th>Expires</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for inv in data.invites %}
+                <tr{% if inv.is_expired %} class="row-warning"{% endif %}>
+                    <td class="path">{{ inv.code }}</td>
+                    <td>{{ inv.created_by }}</td>
+                    <td>
+                        {% if inv.is_expired %}
+                        <span class="text-warning">Expired</span>
+                        {% else %}
+                        {{ inv.expires_at | ts_format }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-danger revoke-btn"
+                                data-code="{{ inv.code_raw }}">Revoke</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty">No active invites.</p>
+        {% endif %}
+    </div>
+</section>
+
+<!-- Active Votes -->
+<section class="card" id="votes-section">
+    <h2>Active Votes</h2>
+    <div id="votes-list">
+        {% if data.votes %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Target</th>
+                    <th>Proposed by</th>
+                    <th>Yes</th>
+                    <th>No</th>
+                    <th>Closes</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in data.votes %}
+                <tr>
+                    <td>
+                        {% if v.vote_type == "removal" %}Removal
+                        {% else %}Grace extension{% if v.grace_extension_days %} (+{{ v.grace_extension_days }}d){% endif %}
+                        {% endif %}
+                    </td>
+                    <td>{{ v.target_display_name }}</td>
+                    <td>{{ v.proposed_by_display_name }}</td>
+                    <td>{{ v.votes_yes }}</td>
+                    <td>{{ v.votes_no }}</td>
+                    <td>{{ v.closes_at | ts_format }}</td>
+                    <td>
+                        {% if v.already_voted %}
+                        <span class="text-muted">Voted</span>
+                        {% elif v.can_vote %}
+                        <button class="btn btn-sm vote-yes-btn"
+                                data-vote-id="{{ v.vote_id }}">Yes</button>
+                        <button class="btn btn-sm btn-danger vote-no-btn"
+                                data-vote-id="{{ v.vote_id }}">No</button>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty">No active votes.</p>
+        {% endif %}
+    </div>
+</section>
+
+<p class="last-updated">
+    Auto-refreshing every 30 seconds.
+    Last updated: <span id="last-updated-time">—</span>
+</p>
+
+<!-- Invite code modal -->
+<div id="invite-modal" class="modal-overlay modal-hidden" role="dialog" aria-modal="true">
+    <div class="modal-box">
+        <h3>New invite code</h3>
+        <p>Share this code with the person joining your cluster.
+           It expires in 48 hours and can only be used once.</p>
+        <div class="modal-code" id="invite-code-text"></div>
+        <p class="text-muted" style="font-size:0.8rem">
+            Expires: <span id="invite-expiry-text">—</span>
+        </p>
+        <div style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap">
+            <button class="btn btn-sm" id="copy-invite-btn">Copy code</button>
+            <button class="btn btn-sm" id="close-invite-modal-btn">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Propose removal confirmation modal -->
+<div id="removal-modal" class="modal-overlay modal-hidden" role="dialog" aria-modal="true">
+    <div class="modal-box">
+        <h3>Propose removal</h3>
+        <p>Propose removing <strong id="removal-target-name"></strong> from the cluster?</p>
+        <p class="text-muted" style="font-size:0.875rem">
+            This opens a 48-hour majority vote. All other members will be notified.
+        </p>
+        <div id="removal-status" style="font-size:0.875rem;margin-top:0.5rem;color:#721c24"></div>
+        <div style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap">
+            <button class="btn btn-danger" id="confirm-removal-btn">Propose removal</button>
+            <button class="btn" id="cancel-removal-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Grace extension modal -->
+<div id="extend-modal" class="modal-overlay modal-hidden" role="dialog" aria-modal="true">
+    <div class="modal-box">
+        <h3>Propose grace extension</h3>
+        <p>Extend the grace period for <strong id="extend-target-name"></strong>.</p>
+        <div class="form-row">
+            <label for="extend-days">Additional days</label>
+            <input type="number" id="extend-days" class="form-input"
+                   value="7" min="1" max="90">
+        </div>
+        <div id="extend-status" style="font-size:0.875rem;margin-top:0.5rem;color:#721c24"></div>
+        <div style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap">
+            <button class="btn" id="confirm-extend-btn">Propose extension</button>
+            <button class="btn" id="cancel-extend-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+    var POLL_MS = 30000;
+    var _pendingRemovalNodeId = null;
+    var _pendingExtendNodeId = null;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function humanBytes(n) {
+        if (n == null) return '—';
+        var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        var i = 0;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return n.toFixed(1) + ' ' + units[i];
+    }
+
+    function humanTime(ts) {
+        if (!ts) return '—';
+        var d = new Date(ts * 1000);
+        return d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+    }
+
+    // ── modals ───────────────────────────────────────────────────────────────
+
+    function openModal(id) {
+        document.getElementById(id).classList.remove('modal-hidden');
+    }
+    function closeModal(id) {
+        document.getElementById(id).classList.add('modal-hidden');
+    }
+
+    document.querySelectorAll('.modal-overlay').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+            if (e.target === el) closeModal(el.id);
+        });
+    });
+
+    document.getElementById('close-invite-modal-btn').addEventListener('click', function () {
+        closeModal('invite-modal');
+    });
+    document.getElementById('cancel-removal-btn').addEventListener('click', function () {
+        closeModal('removal-modal');
+    });
+    document.getElementById('cancel-extend-btn').addEventListener('click', function () {
+        closeModal('extend-modal');
+    });
+
+    // ── invite generation ─────────────────────────────────────────────────────
+
+    function handleGenerateInvite() {
+        var btn = document.getElementById('generate-invite-btn');
+        var statusEl = document.getElementById('invite-gen-status');
+        if (!btn) return;
+        btn.disabled = true;
+        if (statusEl) statusEl.textContent = 'Generating…';
+        fetch('/api/buddies/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            btn.disabled = false;
+            if (data.error) {
+                if (statusEl) statusEl.textContent = data.error;
+                return;
+            }
+            if (statusEl) statusEl.textContent = '';
+            document.getElementById('invite-code-text').textContent = data.code;
+            document.getElementById('invite-expiry-text').textContent = humanTime(data.expires_at);
+            openModal('invite-modal');
+            pollNow();
+        })
+        .catch(function () {
+            btn.disabled = false;
+            if (statusEl) statusEl.textContent = 'Error generating invite.';
+        });
+    }
+
+    document.getElementById('copy-invite-btn').addEventListener('click', function () {
+        var code = document.getElementById('invite-code-text').textContent;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(code).then(function () {
+                var btn = document.getElementById('copy-invite-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(function () { btn.textContent = 'Copy code'; }, 2000);
+            });
+        }
+    });
+
+    // ── delegated listeners survive innerHTML replacement ─────────────────────
+
+    document.getElementById('invites-section').addEventListener('click', function (e) {
+        if (e.target.id === 'generate-invite-btn' ||
+                e.target.closest && e.target.closest('#generate-invite-btn')) {
+            handleGenerateInvite();
+            return;
+        }
+        var revokeBtn = e.target.closest && e.target.closest('.revoke-btn');
+        if (revokeBtn) {
+            revokeBtn.disabled = true;
+            fetch('/api/buddies/invite/' + encodeURIComponent(revokeBtn.dataset.code) + '/revoke',
+                { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.error) { alert(data.error); revokeBtn.disabled = false; return; }
+                pollNow();
+            })
+            .catch(function () { revokeBtn.disabled = false; });
+        }
+    });
+
+    document.getElementById('members-section').addEventListener('click', function (e) {
+        var remBtn = e.target.closest && e.target.closest('.removal-btn');
+        if (remBtn) {
+            _pendingRemovalNodeId = remBtn.dataset.nodeId;
+            document.getElementById('removal-target-name').textContent = remBtn.dataset.name;
+            document.getElementById('removal-status').textContent = '';
+            document.getElementById('confirm-removal-btn').disabled = false;
+            openModal('removal-modal');
+            return;
+        }
+        var extBtn = e.target.closest && e.target.closest('.extend-btn');
+        if (extBtn) {
+            _pendingExtendNodeId = extBtn.dataset.nodeId;
+            document.getElementById('extend-target-name').textContent = extBtn.dataset.name;
+            document.getElementById('extend-status').textContent = '';
+            document.getElementById('confirm-extend-btn').disabled = false;
+            openModal('extend-modal');
+        }
+    });
+
+    document.getElementById('votes-section').addEventListener('click', function (e) {
+        var voteBtn = e.target.closest && e.target.closest('.vote-yes-btn, .vote-no-btn');
+        if (!voteBtn) return;
+        var choice = voteBtn.classList.contains('vote-yes-btn');
+        voteBtn.disabled = true;
+        fetch('/api/buddies/vote/' + voteBtn.dataset.voteId + '/cast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ choice: choice })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.error) { alert(data.error); voteBtn.disabled = false; return; }
+            pollNow();
+        })
+        .catch(function () { voteBtn.disabled = false; });
+    });
+
+    // ── modal confirms ────────────────────────────────────────────────────────
+
+    document.getElementById('confirm-removal-btn').addEventListener('click', function () {
+        if (!_pendingRemovalNodeId) return;
+        var btn = this;
+        btn.disabled = true;
+        document.getElementById('removal-status').textContent = 'Submitting…';
+        fetch('/api/buddies/removal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_node_id: _pendingRemovalNodeId })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.error) {
+                document.getElementById('removal-status').textContent = data.error;
+                btn.disabled = false;
+            } else {
+                closeModal('removal-modal');
+                _pendingRemovalNodeId = null;
+                pollNow();
+            }
+        })
+        .catch(function () {
+            document.getElementById('removal-status').textContent = 'Request failed.';
+            btn.disabled = false;
+        });
+    });
+
+    document.getElementById('confirm-extend-btn').addEventListener('click', function () {
+        if (!_pendingExtendNodeId) return;
+        var days = parseInt(document.getElementById('extend-days').value, 10);
+        if (isNaN(days) || days < 1) {
+            document.getElementById('extend-status').textContent = 'Enter a positive number of days.';
+            return;
+        }
+        var btn = this;
+        btn.disabled = true;
+        document.getElementById('extend-status').textContent = 'Submitting…';
+        fetch('/api/buddies/grace-extend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_node_id: _pendingExtendNodeId, days: days })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.error) {
+                document.getElementById('extend-status').textContent = data.error;
+                btn.disabled = false;
+            } else {
+                closeModal('extend-modal');
+                _pendingExtendNodeId = null;
+                pollNow();
+            }
+        })
+        .catch(function () {
+            document.getElementById('extend-status').textContent = 'Request failed.';
+            btn.disabled = false;
+        });
+    });
+
+    // ── rendering for poll updates ────────────────────────────────────────────
+
+    function renderMembers(data) {
+        var html = '<h2>Cluster Members</h2>';
+        if (data.total_capacity_bytes > 0) {
+            html += '<p class="section-summary">'
+                + humanBytes(data.total_used_bytes) + ' used of '
+                + humanBytes(data.total_capacity_bytes) + ' total ('
+                + data.total_percent + '%)</p>';
+        }
+        if (!data.members.length) {
+            return html + '<p class="empty">No cluster members yet.</p>';
+        }
+        html += '<table><thead><tr>'
+            + '<th>Name</th><th>Status</th><th>Contributes</th><th>Uses</th>'
+            + '<th>Ratio</th><th>Profile</th><th></th>'
+            + '</tr></thead><tbody>';
+        data.members.forEach(function (m) {
+            var rowCls = m.error ? ' class="row-error"' : m.warning ? ' class="row-warning"' : '';
+            var nameCell = esc(m.display_name) + (m.is_self ? ' <span class="text-muted">(you)</span>' : '');
+            var badge = m.status === 'active'
+                ? '<span class="badge badge-ok">active</span>'
+                : m.status === 'grace'
+                    ? '<span class="badge badge-warning">grace</span>'
+                    : '<span class="badge badge-error">' + esc(m.status) + '</span>';
+            var ratio, ratioCls;
+            if (m.ratio != null) {
+                ratio = m.ratio.toFixed(2) + 'x';
+                ratioCls = m.error ? ' class="text-error"' : m.warning ? ' class="text-warning"' : '';
+            } else {
+                ratio = '—'; ratioCls = ' class="text-muted"';
+            }
+            var actions = '';
+            if (m.can_propose_removal) {
+                actions += '<button class="btn btn-sm btn-danger removal-btn"'
+                    + ' data-node-id="' + esc(m.node_id) + '"'
+                    + ' data-name="' + esc(m.display_name) + '">Remove</button> ';
+            }
+            if (m.can_propose_grace_extension) {
+                actions += '<button class="btn btn-sm extend-btn"'
+                    + ' data-node-id="' + esc(m.node_id) + '"'
+                    + ' data-name="' + esc(m.display_name) + '">Extend grace</button>';
+            }
+            html += '<tr' + rowCls + '>'
+                + '<td>' + nameCell + '</td>'
+                + '<td>' + badge + '</td>'
+                + '<td>' + humanBytes(m.contribution_bytes) + '</td>'
+                + '<td>' + humanBytes(m.usage_bytes) + '</td>'
+                + '<td><span' + ratioCls + '>' + ratio + '</span></td>'
+                + '<td>' + esc(m.profile) + '</td>'
+                + '<td>' + actions + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+    }
+
+    function renderInvites(data) {
+        var html = '<h2>Invites</h2>'
+            + '<div style="margin-bottom:1rem">'
+            + '<button class="btn" id="generate-invite-btn">Generate invite</button>'
+            + '<span id="invite-gen-status" class="text-muted"'
+            + ' style="margin-left:0.5rem;font-size:0.875rem"></span>'
+            + '</div>'
+            + '<div id="invites-list">';
+        if (!data.invites.length) {
+            html += '<p class="empty">No active invites.</p>';
+        } else {
+            html += '<table><thead><tr>'
+                + '<th>Code</th><th>Created by</th><th>Expires</th><th></th>'
+                + '</tr></thead><tbody>';
+            data.invites.forEach(function (inv) {
+                var rowCls = inv.is_expired ? ' class="row-warning"' : '';
+                var expiry = inv.is_expired
+                    ? '<span class="text-warning">Expired</span>'
+                    : humanTime(inv.expires_at);
+                html += '<tr' + rowCls + '>'
+                    + '<td class="path">' + esc(inv.code) + '</td>'
+                    + '<td>' + esc(inv.created_by) + '</td>'
+                    + '<td>' + expiry + '</td>'
+                    + '<td><button class="btn btn-sm btn-danger revoke-btn"'
+                    + ' data-code="' + esc(inv.code_raw) + '">Revoke</button></td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function renderVotes(data) {
+        var html = '<h2>Active Votes</h2><div id="votes-list">';
+        if (!data.votes.length) {
+            return html + '<p class="empty">No active votes.</p></div>';
+        }
+        html += '<table><thead><tr>'
+            + '<th>Type</th><th>Target</th><th>Proposed by</th>'
+            + '<th>Yes</th><th>No</th><th>Closes</th><th></th>'
+            + '</tr></thead><tbody>';
+        data.votes.forEach(function (v) {
+            var typeLabel = v.vote_type === 'removal'
+                ? 'Removal'
+                : 'Grace extension' + (v.grace_extension_days ? ' (+' + v.grace_extension_days + 'd)' : '');
+            var actions;
+            if (v.already_voted) {
+                actions = '<span class="text-muted">Voted</span>';
+            } else if (v.can_vote) {
+                actions = '<button class="btn btn-sm vote-yes-btn" data-vote-id="' + v.vote_id + '">Yes</button> '
+                    + '<button class="btn btn-sm btn-danger vote-no-btn" data-vote-id="' + v.vote_id + '">No</button>';
+            } else {
+                actions = '<span class="text-muted">—</span>';
+            }
+            html += '<tr>'
+                + '<td>' + esc(typeLabel) + '</td>'
+                + '<td>' + esc(v.target_display_name) + '</td>'
+                + '<td>' + esc(v.proposed_by_display_name) + '</td>'
+                + '<td>' + v.votes_yes + '</td>'
+                + '<td>' + v.votes_no + '</td>'
+                + '<td>' + humanTime(v.closes_at) + '</td>'
+                + '<td>' + actions + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+        return html;
+    }
+
+    // ── polling ───────────────────────────────────────────────────────────────
+
+    function pollNow() {
+        fetch('/api/buddies')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.setup_required) return;
+                var badge = document.getElementById('member-count-badge');
+                if (badge) {
+                    badge.textContent = data.members.length
+                        + ' member' + (data.members.length !== 1 ? 's' : '');
+                }
+                document.getElementById('members-section').innerHTML = renderMembers(data);
+                document.getElementById('invites-section').innerHTML = renderInvites(data);
+                document.getElementById('votes-section').innerHTML = renderVotes(data);
+                var ts = document.getElementById('last-updated-time');
+                if (ts) ts.textContent = new Date().toLocaleTimeString();
+            })
+            .catch(function () {});
+    }
+
+    setInterval(pollNow, POLL_MS);
+    var tsEl = document.getElementById('last-updated-time');
+    if (tsEl) tsEl.textContent = new Date().toLocaleTimeString();
+})();
+</script>
+
+{% endif %}
+{% endblock %}

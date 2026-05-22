@@ -180,6 +180,15 @@ async def lifespan(app: FastAPI):
             catalog_db = CatalogDB(str(data_dir / "catalog.db"), catalog_key)
             cluster_db = ClusterDB(str(data_dir / "cluster.db"))
 
+            # Register local node in cluster.db so it can cast votes and
+            # generate invites (config.node.name is the local node's node_id).
+            cluster_db.upsert_self_member(
+                node_id=config.node.name,
+                display_name=config.node.display_name,
+                tailscale_hostname=config.tailscale_ip or config.node.name,
+                profile=config.fragmentation.profile,
+            )
+
             # Step 6 — introducer (only on the designated introducer node)
             introducer_furl = config.tahoe.introducer
             if config.tahoe.run_introducer:
@@ -271,6 +280,7 @@ async def lifespan(app: FastAPI):
         app.state.fragmenter = fragmenter
         # FURL is internal — available to the join route but never logged or shown to users
         app.state.introducer_furl = introducer_furl
+        app.state.local_node_id = config.node.name
 
         logger.info(
             "Gatekeeper '%s' %s — GUI at http://%s:%d",

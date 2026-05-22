@@ -453,3 +453,49 @@ tr.row-error {
     font-size: 0.8rem;
     color: #666;
 }
+
+/* ── Modals ───────────────────────────────────────────────────────────────── */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-hidden {
+    display: none !important;
+}
+
+.modal-box {
+    background: #ffffff;
+    border-radius: 0.5rem;
+    padding: 1.5rem 2rem;
+    max-width: 28rem;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.modal-box h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+.modal-code {
+    font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #1a1a2e;
+    background: #f0f1f6;
+    border-radius: 0.3rem;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    word-break: break-all;
+    user-select: all;
+}

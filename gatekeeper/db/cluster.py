@@ -14,6 +14,7 @@ import re
 import sqlite3
 import stat
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +116,32 @@ class ClusterDB:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (node_id, display_name, tailscale_hostname, joined_at,
              contribution_bytes, usage_bytes, profile, status),
+        )
+        self._conn.commit()
+
+    def upsert_self_member(
+        self,
+        node_id: str,
+        display_name: str,
+        tailscale_hostname: str,
+        profile: str,
+    ) -> None:
+        """Ensure the local gatekeeper node has a row in the members table.
+
+        Called once at startup.  If the row already exists, updates
+        display_name, tailscale_hostname, and profile without touching
+        status, resource accounting, or grace columns.
+        """
+        self._conn.execute(
+            "INSERT INTO members "
+            "(node_id, display_name, tailscale_hostname, joined_at, "
+            "contribution_bytes, usage_bytes, profile, status) "
+            "VALUES (?, ?, ?, ?, 0, 0, ?, 'active') "
+            "ON CONFLICT(node_id) DO UPDATE SET "
+            "display_name       = excluded.display_name, "
+            "tailscale_hostname = excluded.tailscale_hostname, "
+            "profile            = excluded.profile",
+            (node_id, display_name, tailscale_hostname, time.time(), profile),
         )
         self._conn.commit()
 
