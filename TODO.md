@@ -1046,7 +1046,7 @@ SECURITY.md (full)
 
 ---
 
-### [ ] 1.12.2 — "Call home" catalog reconstruction
+### [x] 1.12.2 — "Call home" catalog reconstruction
 
 **Reads:** DECISIONS.md → ADR-008, docs/design.md → Call home,
 docs/architecture.md → Data flow restore (call home)
@@ -1071,7 +1071,13 @@ docs/architecture.md → Data flow restore (call home)
 - Unit test: reconstruct from tree, verify entry count, verify paths
 
 ```
-> Kludde: <!-- -->
+> Kludde: reconstruct.py — reconstruct_catalog(root_dir_cap, *, catalog, tahoe, progress_queue=None) → int.
+> Adds TahoeClient.ls_with_metadata() (returns name/file_ref/metadata/size per filenode; skips
+> subdirectories). Decrypts original_path_enc and agent_enc using derive_metadata_key(root_dir_cap)
+> (reused from fragmenter). Sentinel values for unknown fields: sha256="", profile="unknown", k=0, n=0.
+> Files with missing or unreadable metadata inserted with original_path=None (ADR-008 design intent).
+> restore.py _download_with_retry() short-circuits on sha256="" — downloads and returns actual digest
+> with a warning instead of raising RestoreIntegrityError. 21 new tests; 609 pass, 12 skipped.
 ```
 
 ---
