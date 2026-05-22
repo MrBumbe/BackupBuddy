@@ -1168,17 +1168,18 @@ docs/configuration.md → verify, SECURITY.md → Section 8
 - Unit tests: each layer independently, combined run
 
 ```
-> Kludde: <!-- -->
+> Kludde: NightlyVerifier in gatekeeper/verify/nightly.py — four isolated layers run in order;
+> exception in one layer does not prevent others from running. Layer 1: ls() root_dir.cap,
+> critical alert on TahoeError. Layer 2: check_cap() per file in catalog; warns on under-replication
+> (shares_good < shares_needed), errors on inaccessible; shares_needed=0 skipped (unknown k).
+> Layer 3: random sample of N restorable files restored to 0700 temp dir under test_restore_path;
+> always cleaned in finally; original_path=None excluded. Layer 4: lifeboat age check then fetch
+> from first agent with lifeboat_url and decrypt with runtime key (load_key); root_dir_cap match
+> verified; critical alert on any failure. Alert suppression via notify_on_success/warning/failure/
+> corrupt flags. run_scheduler() sleeps to next daily_check_time; skips if previous run in progress.
+> TahoeClient.check_cap() (t=check&output=json) and ClusterDB.get_last_lifeboat_status() already
+> existed from prior tasks. 35 unit tests pass. Full suite: 682 pass, 12 skip. Commit: 23f0188fc.
 ```
-
-**Implementation notes:**
-- `gatekeeper/verify/nightly.py` — `NightlyVerifier` class with four isolated layers
-- `TahoeClient.check_cap()` added to `gatekeeper/tahoe/client.py` (uses `t=check&output=json`)
-- Layer 3 temp dir created under `test_restore_path` with 0700 permissions (POSIX); always cleaned in finally
-- Layer 4 uses `extract_bundle()` to decrypt + verify `root_dir_cap` match
-- Alert suppression respects `notify_on_success/warning/failure/corrupt` flags
-- `run_scheduler()` sleeps to next `daily_check_time` using `datetime.combine`; skips if previous run still in progress
-- 35 unit tests: each layer independently + combined run isolation
 
 ---
 
