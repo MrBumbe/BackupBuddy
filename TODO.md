@@ -1289,7 +1289,7 @@ CLAUDE.md → Every GUI route
 
 ---
 
-### [ ] 1.14.4 — Settings UI
+### [x] 1.14.4 — Settings UI
 
 **Reads:** docs/design.md → Web GUI → Settings, docs/configuration.md
 **Creates:** `gatekeeper/gui/routes/settings.py`, `gatekeeper/gui/templates/settings.html`
@@ -1313,7 +1313,13 @@ CLAUDE.md → Every GUI route
 - Lifeboat decryption test works
 
 ```
-> Kludde: <!-- -->
+> Kludde: 10 routes across settings.py. Profile buttons with Paranoid guard (< 10 nodes).
+> Config write-back via configparser (atomic tempfile rename). Passwords/URLs only in SecretsStore,
+> never in config or form values. Storage pool remove blocks with 409 if used_bytes > 0.
+> EXCLUDED_PATHS and pool manager updates require restart; UI shows this message.
+> Lifeboat test: create+decrypt local bundle (validates keystore key). Recovery kit test:
+> decrypt data_dir/recovery_kit.enc with user passphrase. app.state.config_path and
+> app.state.data_dir added to lifespan. 37 unit tests pass. Full suite: 819 pass, 12 skip.
 ```
 
 ---
