@@ -268,6 +268,17 @@ async def _download_with_retry(
     Raises RestoreIntegrityError if all attempts fail.
     Raises TahoeError if the download itself fails.
     """
+    # Reconstructed records (ADR-008) have sha256="" — hash unknown.
+    # Download and return the actual digest without comparing.
+    if not expected_sha256:
+        actual = await tahoe.download(file_ref, tmp_file)
+        logger.warning(
+            "Hash verification skipped: sha256 unknown for reconstructed record. "
+            "agent=%s actual=%.16s…",
+            agent, actual,
+        )
+        return actual
+
     for attempt in range(_MAX_RETRIES + 1):
         try:
             actual = await tahoe.download(file_ref, tmp_file)

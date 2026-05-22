@@ -143,6 +143,51 @@ class TahoeClient:
 
         return result
 
+    async def ls_with_metadata(self, dir_ref: str) -> list[dict]:
+        """
+        List the immediate file children of a Tahoe directory,
+        returning the stored metadata dict alongside each entry.
+
+        Returns a list of dicts with keys:
+          name     (str)  — entry name in the directory
+          file_ref (str)  — opaque reference to the file
+          metadata (dict) — arbitrary dict stored with the entry (may be {})
+          size     (int)  — file size in bytes (0 if unavailable)
+
+        Only filenodes are included; subdirectories are skipped.
+        Used by catalog reconstruction (ADR-008) to recover encrypted
+        metadata tags written by the fragmenter.
+
+        Raises TahoeError if dir_ref does not refer to a directory.
+        """
+        encoded_ref = urlquote(dir_ref, safe="")
+        response = await self._http.get(
+            f"{self._node_url}/uri/{encoded_ref}",
+            params={"t": "json"},
+        )
+        _raise_for_tahoe_error(response, "ls_with_metadata")
+
+        data = response.json()
+        if not isinstance(data, list) or data[0] != "dirnode":
+            raise TahoeError(f"ls_with_metadata: expected dirnode, got {data[0]!r}")
+
+        children = data[1].get("children", {})
+        result: list[dict] = []
+        for name, (node_type, node_info) in children.items():
+            if node_type != "filenode":
+                continue
+            file_ref = node_info.get("ro_uri") or node_info.get("rw_uri", "")
+            metadata = node_info.get("metadata") or {}
+            size = node_info.get("size", 0)
+            result.append({
+                "name": name,
+                "file_ref": file_ref,
+                "metadata": metadata,
+                "size": size,
+            })
+
+        return result
+
     async def mkdir(self) -> str:
         """
         Create a new mutable directory in the Tahoe grid.
