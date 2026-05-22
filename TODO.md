@@ -1185,7 +1185,7 @@ docs/configuration.md → verify, SECURITY.md → Section 8
 
 ## 1.14 — Web GUI
 
-### [ ] 1.14.1 — FastAPI application setup
+### [x] 1.14.1 — FastAPI application setup
 
 **Reads:** DECISIONS.md → ADR-015, SECURITY.md → Section 3,
 CLAUDE.md → Every GUI route
@@ -1206,7 +1206,15 @@ CLAUDE.md → Every GUI route
 - Unit test: request from Tailscale IP accepted, from other IP rejected
 
 ```
-> Kludde: <!-- -->
+> Kludde: Implemented in gatekeeper/gui/app.py. TailscaleOnlyMiddleware rejects
+> non-Tailscale IPs with 404 (information-leak-safe). RequestLoggingMiddleware
+> logs method + path + status only — query string is never logged. Starlette 1.0.0
+> changed TemplateResponse to require request as first arg; updated accordingly.
+> setup_gui(app) wires middleware, router, /static mount, and 404/500 error handlers
+> into the main app. All 8 TestClient calls in test_main.py updated with
+> client=("100.64.0.1", 12345) so they pass through the new IP filter.
+> 43 new tests in test_gui_app.py covering _is_tailscale_ip, both middleware classes,
+> and full integration (routes, static files, template rendering). 709 tests pass.
 ```
 
 ---
