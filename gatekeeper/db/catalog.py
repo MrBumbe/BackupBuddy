@@ -223,6 +223,17 @@ class CatalogDB:
         )
         self._conn.commit()
 
+    def get_last_backup_per_agent(self) -> list[dict]:
+        """Return the most recent backup timestamp and file count per agent.
+
+        Uses only plaintext columns — no decryption required.
+        """
+        rows = self._conn.execute(
+            "SELECT agent, MAX(backed_up_at) AS last_backup_at, COUNT(*) AS file_count "
+            "FROM files GROUP BY agent"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     @property
     def connection(self) -> sqlite3.Connection:
         """Expose the raw SQLite connection (e.g. for WAL-safe backups in bundle.py)."""

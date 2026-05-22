@@ -19,7 +19,6 @@ from gatekeeper.gui.app import (
     RequestLoggingMiddleware,
     TailscaleOnlyMiddleware,
     _is_tailscale_ip,
-    create_gui_router,
     setup_gui,
 )
 

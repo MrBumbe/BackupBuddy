@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — BackupBuddy{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>
+        {{ data.node_name }}
+        {% if data.setup_required %}
+        <span class="badge badge-warning">Setup required</span>
+        {% else %}
+        <span class="badge badge-ok">Running</span>
+        {% endif %}
+    </h1>
+</div>
+
+{% if data.setup_required %}
+<p>The gatekeeper has not been configured yet. Open the setup wizard to complete onboarding.</p>
+{% else %}
+
+<section class="card" id="cluster-section">
+    <h2>Cluster</h2>
+    <p class="section-summary">
+        {{ data.cluster.total_members }} member{% if data.cluster.total_members != 1 %}s{% endif %},
+        {{ data.cluster.online_count }} online
+    </p>
+    {% if data.cluster.members %}
+    <table>
+        <thead>
+            <tr>
+                <th>Node</th>
+                <th>Status</th>
+                <th>Contribution</th>
+                <th>Usage</th>
+                <th>Ratio</th>
+                <th>Profile</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in data.cluster.members %}
+            <tr{% if m.error %} class="row-error"{% elif m.warning %} class="row-warning"{% endif %}>
+                <td>{{ m.display_name }}</td>
+                <td>
+                    {% if m.status == "active" %}
+                    <span class="badge badge-ok">active</span>
+                    {% else %}
+                    <span class="badge badge-warning">{{ m.status }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ m.contribution_bytes | filesizeformat(true) }}</td>
+                <td>{{ m.usage_bytes | filesizeformat(true) }}</td>
+                <td>
+                    {% if m.ratio != none %}
+                    <span class="{% if m.error %}text-error{% elif m.warning %}text-warning{% endif %}">
+                        {{ "%.2f" | format(m.ratio) }}x
+                    </span>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>{{ m.profile }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No cluster members yet.</p>
+    {% endif %}
+</section>
+
+<section class="card" id="storage-section">
+    <h2>Storage Pool</h2>
+    {% if data.storage_pool.paths %}
+    <table>
+        <thead>
+            <tr>
+                <th>Path</th>
+                <th>Quota</th>
+                <th>Used</th>
+                <th>Free</th>
+                <th>Usage</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in data.storage_pool.paths %}
+            <tr>
+                <td class="path">{{ p.path }}</td>
+                <td>{{ p.quota_bytes | filesizeformat(true) }}</td>
+                <td>{{ p.used_bytes | filesizeformat(true) }}</td>
+                <td>{{ p.free_bytes | filesizeformat(true) }}</td>
+                <td>
+                    <div class="progress-bar">
+                        <div class="progress-fill{% if p.percent > 90 %} progress-fill-error{% elif p.percent > 75 %} progress-fill-warning{% endif %}"
+                             style="width: {{ p.percent }}%"></div>
+                    </div>
+                    {{ p.percent }}%
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <th>Total</th>
+                <th>{{ data.storage_pool.total_quota_bytes | filesizeformat(true) }}</th>
+                <th>{{ data.storage_pool.total_used_bytes | filesizeformat(true) }}</th>
+                <th></th>
+                <th>{{ data.storage_pool.total_percent }}%</th>
+            </tr>
+        </tfoot>
+    </table>
+    {% else %}
+    <p class="empty">No storage pool paths configured.</p>
+    {% endif %}
+</section>
+
+<section class="card" id="agents-section">
+    <h2>Agents</h2>
+    {% if data.agents %}
+    <table>
+        <thead>
+            <tr>
+                <th>Agent</th>
+                <th>Status</th>
+                <th>Last backup</th>
+                <th>Files</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in data.agents %}
+            <tr>
+                <td>{{ a.agent_name }}</td>
+                <td>
+                    {% if a.online %}
+                    <span class="badge badge-ok">online</span>
+                    {% else %}
+                    <span class="badge badge-warning">offline</span>
+                    {% endif %}
+                </td>
+                <td>{{ a.last_backup_at | ts_format }}</td>
+                <td>{{ a.file_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No agents registered yet.</p>
+    {% endif %}
+</section>
+
+<section class="card" id="jobs-section">
+    <h2>Background Jobs</h2>
+    <dl class="job-list">
+        <dt>Rebalance</dt>
+        <dd>
+            {% if data.jobs.rebalance.in_progress %}
+            <span class="badge badge-warning">In progress</span>
+            {% elif data.jobs.rebalance.last_run_at %}
+            Last run: {{ data.jobs.rebalance.last_run_at | ts_format }}
+            {% else %}
+            <span class="text-muted">Never run</span>
+            {% endif %}
+        </dd>
+        <dt>Lifeboat</dt>
+        <dd>
+            {% if data.jobs.lifeboat.distributed_at %}
+            Last distributed: {{ data.jobs.lifeboat.distributed_at | ts_format }}
+            ({{ data.jobs.lifeboat.success_count }}/{{ data.jobs.lifeboat.agent_count }} agents)
+            {% else %}
+            <span class="text-muted">Never distributed</span>
+            {% endif %}
+        </dd>
+    </dl>
+</section>
+
+<p class="last-updated">
+    Auto-refreshing every 30 seconds.
+    Last updated: <span id="last-updated-time"></span>
+</p>
+
+<script>
+(function () {
+    'use strict';
+    var POLL_MS = 30000;
+
+    function humanBytes(n) {
+        if (n == null) return '—';
+        var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        var i = 0;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return n.toFixed(1) + ' ' + units[i];
+    }
+
+    function humanTime(ts) {
+        if (!ts) return '—';
+        var d = new Date(ts * 1000);
+        return d.toUTCString().replace(' GMT', ' UTC').replace(/:\d\d UTC$/, ' UTC');
+    }
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function renderCluster(c) {
+        var html = '<h2>Cluster</h2>';
+        html += '<p class="section-summary">' + c.total_members + ' member' + (c.total_members !== 1 ? 's' : '') + ', ' + c.online_count + ' online</p>';
+        if (!c.members.length) {
+            html += '<p class="empty">No cluster members yet.</p>';
+            return html;
+        }
+        html += '<table><thead><tr><th>Node</th><th>Status</th><th>Contribution</th><th>Usage</th><th>Ratio</th><th>Profile</th></tr></thead><tbody>';
+        c.members.forEach(function (m) {
+            var rowCls = m.error ? ' class="row-error"' : m.warning ? ' class="row-warning"' : '';
+            var statusBadge = m.status === 'active'
+                ? '<span class="badge badge-ok">active</span>'
+                : '<span class="badge badge-warning">' + esc(m.status) + '</span>';
+            var ratioText, ratioCls;
+            if (m.ratio != null) {
+                ratioText = m.ratio.toFixed(2) + 'x';
+                ratioCls = m.error ? ' class="text-error"' : m.warning ? ' class="text-warning"' : '';
+            } else {
+                ratioText = '—';
+                ratioCls = ' class="text-muted"';
+            }
+            html += '<tr' + rowCls + '><td>' + esc(m.display_name) + '</td><td>' + statusBadge + '</td>'
+                + '<td>' + humanBytes(m.contribution_bytes) + '</td>'
+                + '<td>' + humanBytes(m.usage_bytes) + '</td>'
+                + '<td><span' + ratioCls + '>' + ratioText + '</span></td>'
+                + '<td>' + esc(m.profile) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+    }
+
+    function renderStorage(s) {
+        var html = '<h2>Storage Pool</h2>';
+        if (!s.paths.length) {
+            html += '<p class="empty">No storage pool paths configured.</p>';
+            return html;
+        }
+        html += '<table><thead><tr><th>Path</th><th>Quota</th><th>Used</th><th>Free</th><th>Usage</th></tr></thead><tbody>';
+        s.paths.forEach(function (p) {
+            var barCls = p.percent > 90 ? ' progress-fill-error' : p.percent > 75 ? ' progress-fill-warning' : '';
+            html += '<tr><td class="path">' + esc(p.path) + '</td>'
+                + '<td>' + humanBytes(p.quota_bytes) + '</td>'
+                + '<td>' + humanBytes(p.used_bytes) + '</td>'
+                + '<td>' + humanBytes(p.free_bytes) + '</td>'
+                + '<td><div class="progress-bar"><div class="progress-fill' + barCls + '" style="width:' + p.percent + '%"></div></div>' + p.percent + '%</td></tr>';
+        });
+        html += '</tbody><tfoot><tr><th>Total</th><th>' + humanBytes(s.total_quota_bytes) + '</th><th>' + humanBytes(s.total_used_bytes) + '</th><th></th><th>' + s.total_percent + '%</th></tr></tfoot></table>';
+        return html;
+    }
+
+    function renderAgents(agents) {
+        var html = '<h2>Agents</h2>';
+        if (!agents.length) {
+            html += '<p class="empty">No agents registered yet.</p>';
+            return html;
+        }
+        html += '<table><thead><tr><th>Agent</th><th>Status</th><th>Last backup</th><th>Files</th></tr></thead><tbody>';
+        agents.forEach(function (a) {
+            var badge = a.online
+                ? '<span class="badge badge-ok">online</span>'
+                : '<span class="badge badge-warning">offline</span>';
+            html += '<tr><td>' + esc(a.agent_name) + '</td><td>' + badge + '</td><td>' + humanTime(a.last_backup_at) + '</td><td>' + a.file_count + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+    }
+
+    function renderJobs(jobs) {
+        var html = '<h2>Background Jobs</h2><dl class="job-list">';
+        html += '<dt>Rebalance</dt><dd>';
+        if (jobs.rebalance.in_progress) {
+            html += '<span class="badge badge-warning">In progress</span>';
+        } else if (jobs.rebalance.last_run_at) {
+            html += 'Last run: ' + humanTime(jobs.rebalance.last_run_at);
+        } else {
+            html += '<span class="text-muted">Never run</span>';
+        }
+        html += '</dd><dt>Lifeboat</dt><dd>';
+        if (jobs.lifeboat.distributed_at) {
+            html += 'Last distributed: ' + humanTime(jobs.lifeboat.distributed_at)
+                + ' (' + jobs.lifeboat.success_count + '/' + jobs.lifeboat.agent_count + ' agents)';
+        } else {
+            html += '<span class="text-muted">Never distributed</span>';
+        }
+        html += '</dd></dl>';
+        return html;
+    }
+
+    function applyUpdate(data) {
+        if (data.setup_required) return;
+        document.getElementById('cluster-section').innerHTML = renderCluster(data.cluster);
+        document.getElementById('storage-section').innerHTML = renderStorage(data.storage_pool);
+        document.getElementById('agents-section').innerHTML = renderAgents(data.agents);
+        document.getElementById('jobs-section').innerHTML = renderJobs(data.jobs);
+        var el = document.getElementById('last-updated-time');
+        if (el) el.textContent = new Date().toLocaleTimeString();
+    }
+
+    function poll() {
+        fetch('/api/dashboard')
+            .then(function (r) { return r.json(); })
+            .then(function (data) { applyUpdate(data); })
+            .catch(function () {});
+    }
+
+    var stamp = document.getElementById('last-updated-time');
+    if (stamp) stamp.textContent = new Date().toLocaleTimeString();
+
+    setInterval(poll, POLL_MS);
+}());
+</script>
+
+{% endif %}
+{% endblock %}

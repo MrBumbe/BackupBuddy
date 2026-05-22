@@ -5,7 +5,8 @@ Registered components:
   TailscaleOnlyMiddleware  — rejects all requests from non-Tailscale IPs (404)
   RequestLoggingMiddleware — logs method + path + status (never query string)
   /static                  — CSS and assets, no external CDN
-  /                        — dashboard placeholder (full content added in task 1.14.2)
+  /                        — dashboard (cluster status, storage, agents, jobs)
+  /api/dashboard           — JSON snapshot for 30-second polling
 
 All components are wired into the main FastAPI app via setup_gui(app).
 """
@@ -16,13 +17,13 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from gatekeeper.gui.routes.dashboard import create_dashboard_router
 from gatekeeper.tailscale import _TAILSCALE_CGNAT
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 
 def _is_tailscale_ip(ip_str: str) -> bool:
-    """Return True if ip_str is an IPv4 address in the Tailscale CGNAT block (100.64.0.0/10)."""
+    """Return True if ip_str falls in the Tailscale CGNAT block (100.64.0.0/10)."""
     try:
         return ipaddress.IPv4Address(ip_str) in _TAILSCALE_CGNAT
     except ValueError:
@@ -69,24 +70,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def create_gui_router() -> APIRouter:
-    """Return the APIRouter for GUI routes.
-
-    Uses APIRouter (not a sub-app mount) so route handlers share app.state
-    with the rest of the gatekeeper (catalog_db, cluster_db, etc.).
-    """
-    router = APIRouter()
-
-    @router.get("/", response_class=HTMLResponse)
-    async def index(request: Request) -> Any:
-        setup_required = getattr(request.app.state, "setup_required", True)
-        return _templates.TemplateResponse(
-            request, "index.html", {"setup_required": setup_required}
-        )
-
-    return router
-
-
 def setup_gui(app: Any) -> None:
     """Wire GUI components into a FastAPI app.
 
@@ -97,7 +80,7 @@ def setup_gui(app: Any) -> None:
       1. add_middleware(TailscaleOnlyMiddleware) — inner, rejects non-Tailscale IPs
       2. add_middleware(RequestLoggingMiddleware) — outer, logs all requests including rejections
     """
-    app.include_router(create_gui_router())
+    app.include_router(create_dashboard_router())
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     async def _404_handler(request: Request, exc: Exception) -> HTMLResponse:
