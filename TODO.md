@@ -1324,7 +1324,7 @@ CLAUDE.md → Every GUI route
 
 ---
 
-### [ ] 1.14.5 — Buddies and cluster management UI
+### [x] 1.14.5 — Buddies and cluster management UI
 
 **Reads:** docs/design.md → Web GUI → Buddies, docs/design.md → Invite system,
 docs/design.md → Node removal
@@ -1345,7 +1345,16 @@ docs/design.md → Node removal
 - Active votes visible and castable
 
 ```
-> Kludde: <!-- -->
+> Kludde: Buddy table (name, status, contribution, usage, ratio, profile) with SSR + 30s JS polling.
+> Cluster storage summary (total capacity/used/percent). Generate invite: POST /api/buddies/invite
+> returns full code once; displayed in modal with copy button; list shows masked code (word-***-N).
+> Revoke button per active invite. Propose removal: per-buddy button opens confirmation modal before
+> POST. Active votes table: yes/no cast buttons; open votes targeting the local node filtered out
+> (ADR-010). cast_vote auto-calls start_grace_period on removal PASSED and apply_grace_extension on
+> grace_extension PASSED. Grace extension: "Extend grace" button per grace-status member, opens days
+> input modal. upsert_self_member added to ClusterDB so local node is always in members table.
+> local_node_id stored in app.state at startup. Modal CSS added to style.css (no CDN).
+> 21 unit tests, full suite 840 pass 12 skip. Commit: 0888617d0.
 ```
 
 ---
