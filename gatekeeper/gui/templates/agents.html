@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}Agents — BackupBuddy{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>
+        Agents
+        {% if not data.setup_required %}
+        <span id="agent-count-badge" class="badge badge-ok">
+            {{ data.agent_count }} agent{% if data.agent_count != 1 %}s{% endif %}
+        </span>
+        {% endif %}
+    </h1>
+</div>
+
+{% if data.setup_required %}
+<p>The gatekeeper has not been configured yet. Complete the setup wizard first.</p>
+{% else %}
+
+<section class="card" id="agents-section">
+    {% if data.agents %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Last backup</th>
+                <th>Files backed up</th>
+                <th>Log sharing</th>
+                <th>Registered</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in data.agents %}
+            <tr>
+                <td><strong>{{ a.agent_name }}</strong></td>
+                <td>
+                    {% if a.is_online %}
+                    <span class="badge badge-ok">Online</span>
+                    {% else %}
+                    <span class="badge badge-warn">Offline</span>
+                    {% endif %}
+                </td>
+                <td>{{ a.last_backup_at | ts_format }}</td>
+                <td>{{ a.file_count }}</td>
+                <td>
+                    {% if a.share_log %}
+                    <span class="badge badge-ok">Enabled</span>
+                    {% else %}
+                    <span class="text-muted">Disabled</span>
+                    {% endif %}
+                </td>
+                <td>{{ a.registered_at | ts_format }}</td>
+            </tr>
+            {% if a.share_log %}
+            <tr class="detail-row">
+                <td colspan="6">
+                    <div class="agent-detail">
+                        <strong>Last 10 backup events</strong>
+                        {% if a.recent_events %}
+                        <table class="inner-table">
+                            <thead>
+                                <tr>
+                                    <th>Backed up at</th>
+                                    <th>Size</th>
+                                    <th>Profile</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ev in a.recent_events %}
+                                <tr>
+                                    <td>{{ ev.backed_up_at | ts_format }}</td>
+                                    <td>{{ ev.size_bytes | fmt_bytes }}</td>
+                                    <td>{{ ev.profile }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p class="text-muted">No backup events recorded yet.</p>
+                        {% endif %}
+                        <p class="text-muted small">
+                            Log sharing is enabled for this agent.
+                            Full backup.cfg and log forwarding will be available
+                            when the agent sends them (not yet implemented in Phase 1).
+                        </p>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr class="detail-row">
+                <td colspan="6">
+                    <div class="agent-detail">
+                        <strong>Last 10 backup events</strong>
+                        {% if a.recent_events %}
+                        <table class="inner-table">
+                            <thead>
+                                <tr>
+                                    <th>Backed up at</th>
+                                    <th>Size</th>
+                                    <th>Profile</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ev in a.recent_events %}
+                                <tr>
+                                    <td>{{ ev.backed_up_at | ts_format }}</td>
+                                    <td>{{ ev.size_bytes | fmt_bytes }}</td>
+                                    <td>{{ ev.profile }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p class="text-muted">No backup events recorded yet.</p>
+                        {% endif %}
+                        <p class="text-muted small">
+                            File names and paths are hidden.
+                            Enable <code>share_log = true</code> in the agent's
+                            <code>backup.cfg</code> to allow the gatekeeper to
+                            display log detail for this agent.
+                        </p>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">No agents registered yet.</p>
+    <p>
+        Install the BackupBuddy agent on a device and point it at this gatekeeper.
+        The agent will appear here once it registers.
+    </p>
+    {% endif %}
+</section>
+
+<p class="text-muted small" id="last-updated-time-label">
+    Last updated: <span id="last-updated-time">—</span>
+</p>
+
+<script>
+(function () {
+    var POLL_MS = 30000;
+
+    function fmtTs(ts) {
+        if (!ts) return '—';
+        return new Date(ts * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    }
+
+    function fmtBytes(n) {
+        if (n == null) return '—';
+        var units = ['B','KB','MB','GB','TB'];
+        for (var i = 0; i < units.length - 1; i++) {
+            if (n < 1024) return n.toFixed(1) + ' ' + units[i];
+            n /= 1024;
+        }
+        return n.toFixed(1) + ' PB';
+    }
+
+    function renderEventRows(events) {
+        if (!events || !events.length) return '<p class="text-muted">No backup events recorded yet.</p>';
+        var rows = events.map(function(ev) {
+            return '<tr><td>' + fmtTs(ev.backed_up_at) + '</td><td>' +
+                fmtBytes(ev.size_bytes) + '</td><td>' + (ev.profile || '') + '</td></tr>';
+        }).join('');
+        return '<table class="inner-table"><thead><tr><th>Backed up at</th><th>Size</th><th>Profile</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    function renderAgent(a) {
+        var statusBadge = a.is_online
+            ? '<span class="badge badge-ok">Online</span>'
+            : '<span class="badge badge-warn">Offline</span>';
+        var logBadge = a.share_log
+            ? '<span class="badge badge-ok">Enabled</span>'
+            : '<span class="text-muted">Disabled</span>';
+        var note = a.share_log
+            ? '<p class="text-muted small">Log sharing is enabled. Full backup.cfg and log forwarding will be available when the agent sends them (not yet implemented in Phase 1).</p>'
+            : '<p class="text-muted small">File names and paths are hidden. Enable <code>share_log = true</code> in the agent\'s <code>backup.cfg</code> to show log detail.</p>';
+        return '<tr>' +
+            '<td><strong>' + a.agent_name + '</strong></td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td>' + fmtTs(a.last_backup_at) + '</td>' +
+            '<td>' + (a.file_count || 0) + '</td>' +
+            '<td>' + logBadge + '</td>' +
+            '<td>' + fmtTs(a.registered_at) + '</td>' +
+            '</tr>' +
+            '<tr class="detail-row"><td colspan="6"><div class="agent-detail">' +
+            '<strong>Last 10 backup events</strong>' +
+            renderEventRows(a.recent_events) +
+            note +
+            '</div></td></tr>';
+    }
+
+    function applyUpdate(data) {
+        if (data.setup_required) return;
+        var badge = document.getElementById('agent-count-badge');
+        if (badge) badge.textContent = data.agent_count + ' agent' + (data.agent_count !== 1 ? 's' : '');
+        var section = document.getElementById('agents-section');
+        if (!section) return;
+        if (!data.agents || !data.agents.length) {
+            section.innerHTML = '<p class="text-muted">No agents registered yet.</p>';
+            return;
+        }
+        var rows = data.agents.map(renderAgent).join('');
+        section.innerHTML = '<table><thead><tr><th>Name</th><th>Status</th><th>Last backup</th><th>Files backed up</th><th>Log sharing</th><th>Registered</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        var el = document.getElementById('last-updated-time');
+        if (el) el.textContent = new Date().toLocaleTimeString();
+    }
+
+    function poll() {
+        fetch('/api/agents')
+            .then(function(r) { return r.json(); })
+            .then(function(data) { applyUpdate(data); })
+            .catch(function() {});
+    }
+
+    var stamp = document.getElementById('last-updated-time');
+    if (stamp) stamp.textContent = new Date().toLocaleTimeString();
+
+    setInterval(poll, POLL_MS);
+}());
+</script>
+
+{% endif %}
+{% endblock %}

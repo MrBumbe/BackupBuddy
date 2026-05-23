@@ -76,6 +76,7 @@ _registered_agents: dict[str, dict] = {}
 class _AgentRegisterMessage(BaseModel):
     agent_name: str
     lifeboat_port: int | None = None
+    share_log: bool = False
 
 
 def _is_lan_ip(ip_str: str) -> bool:
@@ -421,6 +422,7 @@ def _create_agent_api_app(cfg: GatekeeperConfig, data_dir: Path) -> FastAPI:
             lifeboat_url=lifeboat_url,
             registered_at=now,
             last_seen=now,
+            share_log=message.share_log,
         )
 
         _registered_agents[message.agent_name] = {

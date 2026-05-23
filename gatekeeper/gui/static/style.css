@@ -499,3 +499,47 @@ tr.row-error {
     word-break: break-all;
     user-select: all;
 }
+
+/* ── Agents page ─────────────────────────────────────────────────────────── */
+
+tr.detail-row td {
+    background: #f8f9fc;
+    padding: 0 1rem 0.75rem 1rem;
+    border-top: none;
+}
+
+.agent-detail {
+    padding: 0.5rem 0;
+}
+
+.agent-detail strong {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #555577;
+}
+
+table.inner-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+}
+
+table.inner-table th,
+table.inner-table td {
+    padding: 0.3rem 0.6rem;
+    border: 1px solid #e0e2ef;
+    text-align: left;
+}
+
+table.inner-table thead th {
+    background: #eceef5;
+    font-weight: 600;
+}
+
+.small {
+    font-size: 0.8rem;
+}

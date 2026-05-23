@@ -234,6 +234,19 @@ class CatalogDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_recent_backups_for_agent(self, agent: str, limit: int = 10) -> list[dict]:
+        """Return the most recent backup events for a single agent.
+
+        Returns only plaintext columns (backed_up_at, size_bytes, profile) —
+        no encrypted paths or caps are included.
+        """
+        rows = self._conn.execute(
+            "SELECT backed_up_at, size_bytes, profile FROM files "
+            "WHERE agent = ? ORDER BY backed_up_at DESC LIMIT ?",
+            (agent, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     @property
     def connection(self) -> sqlite3.Connection:
         """Expose the raw SQLite connection (e.g. for WAL-safe backups in bundle.py)."""

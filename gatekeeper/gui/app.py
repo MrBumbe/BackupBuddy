@@ -27,6 +27,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from gatekeeper.gui.routes.agents import create_agents_router
 from gatekeeper.gui.routes.buddies import create_buddies_router
 from gatekeeper.gui.routes.dashboard import create_dashboard_router
 from gatekeeper.gui.routes.restore import create_restore_router
@@ -91,6 +92,7 @@ def setup_gui(app: Any) -> None:
     app.include_router(create_restore_router())
     app.include_router(create_settings_router())
     app.include_router(create_buddies_router())
+    app.include_router(create_agents_router())
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     async def _404_handler(request: Request, exc: Exception) -> HTMLResponse:

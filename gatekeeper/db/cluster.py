@@ -34,7 +34,7 @@ _VOTE_UPDATABLE = frozenset({"votes_yes", "votes_no", "resolved"})
 
 _ORPHAN_UPDATABLE = frozenset({"cleaned_at", "marked_orphan_at"})
 
-_AGENT_UPDATABLE = frozenset({"ip", "lifeboat_url", "last_seen"})
+_AGENT_UPDATABLE = frozenset({"ip", "lifeboat_url", "last_seen", "share_log"})
 
 _REBALANCE_UPDATABLE = frozenset({
     "baseline_count", "current_tracked_count", "size_stable_since",
@@ -366,13 +366,16 @@ class ClusterDB:
         lifeboat_url: str | None,
         registered_at: float,
         last_seen: float,
+        share_log: bool = False,
     ) -> None:
         self._conn.execute(
-            "INSERT INTO agents (agent_name, ip, lifeboat_url, registered_at, last_seen) "
-            "VALUES (?, ?, ?, ?, ?) "
+            "INSERT INTO agents "
+            "(agent_name, ip, lifeboat_url, registered_at, last_seen, share_log) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(agent_name) DO UPDATE SET "
-            "ip=excluded.ip, lifeboat_url=excluded.lifeboat_url, last_seen=excluded.last_seen",
-            (agent_name, ip, lifeboat_url, registered_at, last_seen),
+            "ip=excluded.ip, lifeboat_url=excluded.lifeboat_url, "
+            "last_seen=excluded.last_seen, share_log=excluded.share_log",
+            (agent_name, ip, lifeboat_url, registered_at, last_seen, int(share_log)),
         )
         self._conn.commit()
 
