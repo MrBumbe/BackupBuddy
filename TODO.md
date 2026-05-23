@@ -1359,7 +1359,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.14.6 — Agents UI
+### [x] 1.14.6 — Agents UI
 
 **Reads:** docs/design.md → Web GUI → Agents
 **Creates:** `gatekeeper/gui/routes/agents.py`, `gatekeeper/gui/templates/agents.html`
@@ -1375,7 +1375,16 @@ docs/design.md → Node removal
 - share_log = true shows log entries
 
 ```
-> Kludde: <!-- -->
+> Kludde: GET /agents + GET /api/agents (30 s JS polling). share_log flag added to
+> _AgentRegisterMessage and cluster.db agents table (migration 005, ALTER TABLE).
+> ClusterDB.upsert_agent() extended with share_log param; CatalogDB.get_recent_backups_for_agent()
+> returns last N events (backed_up_at, size_bytes, profile only — no encrypted columns).
+> Per-agent detail row shown for all agents: share_log=false shows timestamps + privacy note
+> (share_log = true in backup.cfg); share_log=true shows same + log-sharing note (actual
+> backup.cfg/log forwarding not implemented in Phase 1 — agent does not push them).
+> "backup.cfg status" rendered as log-sharing enabled/disabled badge (no actual config push).
+> Nav link added to base.html; CSS for .detail-row and .inner-table added to style.css.
+> 23 unit tests pass. Full suite: 863 pass, 12 skip. Commit: 68a14782c.
 ```
 
 ---
