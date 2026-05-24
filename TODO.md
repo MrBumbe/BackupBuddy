@@ -1429,7 +1429,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.15.2 — Onboarding wizard (web)
+### [x] 1.15.2 — Onboarding wizard (web)
 
 **Reads:** docs/onboarding.md (entire file), SECURITY.md → Section 11
 **Creates:** `gatekeeper/gui/routes/onboarding.py`,
@@ -1458,7 +1458,15 @@ docs/design.md → Node removal
 - Wizard resumable if interrupted
 
 ```
-> Kludde: <!-- -->
+> Kludde: 5-step wizard served on LAN IP in setup mode (ADR-019). State persisted in
+> onboarding_state.json via atomic writes. Finish cascade: Tahoe introducer + storage node
+> bootstrapped, root_dir.cap created, lifeboat key generated, cluster.db seeded, first invite
+> code generated, gatekeeper.cfg written last (atomic rename) — retryable on failure.
+> Join flow contacts existing cluster via initiate_join to obtain introducer_furl.
+> Recovery key (root_dir.cap) shown once; download + re-display blocked after user confirms.
+> app.py: added setup_onboarding_app(); main.py: _create_app() branches on setup_mode.
+> Templates in flat templates/ dir. 10 unit tests for wizard_state.py pass.
+> Commit: 5728a38bd.
 ```
 
 ---
