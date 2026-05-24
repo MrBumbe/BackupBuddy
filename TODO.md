@@ -1391,7 +1391,7 @@ docs/design.md → Node removal
 
 ## 1.15 — Onboarding wizard
 
-### [ ] 1.15.1 — Install script (gatekeeper)
+### [x] 1.15.1 — Install script (gatekeeper)
 
 **Reads:** docs/onboarding.md, SECURITY.md → Section 11
 **Creates:** `install/gatekeeper.sh`
@@ -1411,7 +1411,20 @@ docs/design.md → Node removal
 - Service starts and onboarding wizard is accessible
 
 ```
-> Kludde: <!-- -->
+> Kludde: install/gatekeeper.sh — Ubuntu 22.04/24.04, set -euo pipefail, idempotent.
+> Service user: dedicated backupbuddy system user (no login shell), same pattern as
+> Nginx/Gitea. Directories: /etc/backup-buddy (config), /var/lib/backup-buddy (data),
+> /opt/backup-buddy (code+venv). Install order: pip install . -r requirements.txt
+> (installs Tahoe-LAFS fork from source + pins all deps). Python discovery: 3.13/3.12/3.11
+> from system; falls back to deadsnakes PPA for Python 3.11 on Ubuntu 22.04. Tailscale
+> installed via official curl|sh; NOT authenticated during install (user runs tailscale up
+> before finishing the wizard). Browser opened if DISPLAY/WAYLAND_DISPLAY set (xdg-open).
+> ADR-019 added: missing gatekeeper.cfg → setup mode, GUI binds to LAN IP (not Tailscale).
+> TailscaleOnlyMiddleware bypassed when app.state.setup_required=True. Wizard (1.15.2) must
+> instruct user to run tailscale up before the final "finish setup" step.
+> Storage pool path permissions (chown backupbuddy) must be handled by wizard (1.15.2).
+> Cannot be tested on Windows dev machine — Ubuntu 22.04/24.04 verification pending.
+> 863 pass, 12 skip. Commit: 5e327793a.
 ```
 
 ---
