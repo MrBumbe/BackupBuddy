@@ -1471,7 +1471,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.15.3 — Agent install script
+### [x] 1.15.3 — Agent install script
 
 **Reads:** docs/onboarding.md → Agent installation
 **Creates:** `install/agent.sh`
@@ -1487,7 +1487,17 @@ docs/design.md → Node removal
 - backup.cfg created with comments
 
 ```
-> Kludde: <!-- -->
+> Kludde: install/agent.sh — Ubuntu 22.04/24.04, set -euo pipefail, idempotent.
+> Two questions (gatekeeper IP + agent name) read from /dev/tty so curl|bash works.
+> Token auto-generated via openssl rand -hex 32 (fallback: python secrets.token_hex).
+> backup.cfg written with 0600 perms to /etc/backup-buddy/backup.cfg — all [backup]
+> paths commented out by design (agent won't start until user uncomments at least one).
+> systemd unit: service enabled but NOT started for the same reason. Token printed
+> prominently in the completion message with [agent_api] / token = <TOKEN> snippet to
+> add to gatekeeper.cfg. Idempotent: backup.cfg not overwritten if it already exists;
+> existing token extracted and shown instead. Phase 1 note: all agents share one token
+> (gatekeeper AgentApiConfig.token) — a second agent install must reuse the same token.
+> Cannot be tested on Windows dev machine — Ubuntu 22.04/24.04 verification pending.
 ```
 
 ---
