@@ -54,8 +54,12 @@ class TestDeriveCatalogKey:
 # ── main() abort paths ────────────────────────────────────────────────────────
 
 class TestMainAbortPaths:
-    def test_aborts_when_tailscale_not_running(self):
-        with patch("sys.argv", ["gk"]):
+    def test_aborts_when_tailscale_not_running(self, tmp_path):
+        # Config must exist so main() reaches the Tailscale check (ADR-019: missing
+        # config enters setup mode before the Tailscale check runs).
+        cfg = tmp_path / "gatekeeper.cfg"
+        cfg.touch()
+        with patch("sys.argv", ["gk", "--config", str(cfg), "--data-dir", str(tmp_path)]):
             with patch(
                 "gatekeeper.main.assert_tailscale_running",
                 side_effect=TailscaleNotRunning("Tailscale is not running"),
@@ -64,13 +68,13 @@ class TestMainAbortPaths:
                     main()
         assert exc_info.value.code == 1
 
-    def test_aborts_when_config_file_missing(self, tmp_path):
+    def test_enters_setup_mode_when_config_missing(self, tmp_path):
+        """Missing config → setup mode (not abort). ADR-019."""
         nonexistent = str(tmp_path / "nonexistent.cfg")
-        with patch("sys.argv", ["gk", "--config", nonexistent]):
-            with patch("gatekeeper.main.assert_tailscale_running", return_value="100.64.0.1"):
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
-        assert exc_info.value.code == 1
+        with patch("sys.argv", ["gk", "--config", nonexistent, "--data-dir", str(tmp_path)]):
+            with patch("gatekeeper.main._start_setup_mode") as mock_setup:
+                main()
+        mock_setup.assert_called_once()
 
     def test_aborts_when_config_missing_required_section(self, tmp_path):
         cfg = tmp_path / "gatekeeper.cfg"
@@ -122,6 +126,11 @@ def _mock_tahoe_client() -> MagicMock:
 # ── Lifespan — setup mode ─────────────────────────────────────────────────────
 
 class TestLifespanSetupMode:
+    def setup_method(self):
+        # Prevent _state["setup_mode"] set by _start_setup_mode from leaking
+        # between tests (module-level dict, not reset between test runs).
+        _state.pop("setup_mode", None)
+
     def test_returns_503_when_root_dir_cap_absent(self, tmp_path):
         """When root_dir.cap is absent, /api/status returns 503 setup_required."""
         _state["config"] = _make_mock_config()

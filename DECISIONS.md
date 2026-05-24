@@ -581,5 +581,42 @@ be implemented as part of Phase 1.
 
 ---
 
+## ADR-019 — Onboarding wizard served on LAN before Tailscale is active
+
+**Status:** Accepted
+
+**Decision:** When the gatekeeper starts without a `gatekeeper.cfg` (first-run setup mode),
+it skips the Tailscale startup guard and binds the GUI to the local LAN IP on the standard
+port (8080). Once the onboarding wizard writes `gatekeeper.cfg` and the service restarts,
+normal mode activates: Tailscale is required and the GUI binds to the Tailscale IP only.
+
+The same FastAPI application, port, and systemd unit handle both modes.
+`TailscaleOnlyMiddleware` is bypassed when `app.state.setup_required` is `True`.
+
+**Rationale:**
+- Tailscale must be authenticated by the user before `tailscale up` succeeds. Requiring
+  it at startup would deadlock the onboarding flow — the user cannot complete the wizard
+  to configure Tailscale if the wizard won't start without Tailscale.
+- No sensitive data exists in setup mode (no root_dir.cap, no catalog, no keys), so LAN
+  exposure during the brief setup window is an acceptable tradeoff.
+- Reusing the same service, port, and application keeps the installation simple and
+  predictable — one unit, one port, mode determined by config file presence.
+
+**Consequences:**
+- `TailscaleOnlyMiddleware` checks `app.state.setup_required` before enforcing the
+  Tailscale IP requirement. If True, LAN requests are passed through.
+- In setup mode, `get_lan_ip()` provides the binding address. If no LAN interface is
+  found, the wizard falls back to 0.0.0.0 (all interfaces).
+- The wizard (task 1.15.2) must instruct the user to authenticate Tailscale before the
+  final "finish setup" step, so the service restart after wizard completion finds Tailscale
+  running and enters normal mode.
+- This is a transitional binding only — after the wizard-triggered restart, SECURITY.md
+  §3 (Tailscale interface only) is fully enforced.
+- The existing "setup mode" triggered by a missing `root_dir.cap` (config present but
+  Tahoe not yet initialised) is a distinct state; both states set `setup_required = True`
+  and are handled by the same middleware bypass.
+
+---
+
 _BackupBuddy DECISIONS.md_
 _Read relevant ADRs before implementing any related feature._

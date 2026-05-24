@@ -56,9 +56,14 @@ class TailscaleOnlyMiddleware(BaseHTTPMiddleware):
     Returns 404 rather than 403 to avoid information disclosure — callers
     outside the Tailscale network should not know the GUI exists.
     None client (ASGI scope without client tuple) is also rejected.
+
+    In setup mode (app.state.setup_required = True), the check is bypassed so the
+    onboarding wizard is reachable on the LAN before Tailscale is active. (ADR-019)
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if getattr(request.app.state, "setup_required", False):
+            return await call_next(request)
         client = request.client
         if client is None or not _is_tailscale_ip(client.host):
             return Response("Not Found", status_code=404, media_type="text/plain")

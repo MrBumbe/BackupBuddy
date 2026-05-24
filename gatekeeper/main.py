@@ -59,6 +59,9 @@ from gatekeeper.tailscale import (
 
 logger = logging.getLogger(__name__)
 
+# Default web port used in setup mode before gatekeeper.cfg is written.
+_DEFAULT_WEB_PORT = 8080
+
 # Floor of free space Tahoe's storage node will leave in the storage directory.
 # StoragePoolManager enforces the real quota; this is Tahoe's own safety valve.
 _TAHOE_RESERVED_BYTES = 1 * 1024**3  # 1 GB
@@ -135,14 +138,35 @@ def _register_background_tasks(
 async def lifespan(app: FastAPI):
     """Steps 3–9 of the startup sequence; full cleanup on shutdown.
 
-    Two modes:
-    - Setup mode: root_dir.cap absent — GUI starts so the user can complete
-      onboarding (task 1.7.x). Databases and Tahoe processes are NOT started.
-    - Normal mode: root_dir.cap present — full startup, all components active.
+    Three modes:
+    - Pre-config setup mode: gatekeeper.cfg absent — GUI binds to LAN IP, only the
+      onboarding wizard is served. No Tailscale, no databases, no Tahoe. (ADR-019)
+    - Post-config setup mode: config present but root_dir.cap absent — GUI starts on
+      Tailscale IP but databases and Tahoe are not yet active. (existing behaviour)
+    - Normal mode: both config and root_dir.cap present — full startup.
 
-    app.state.setup_required is set in both modes so route handlers can gate
+    app.state.setup_required is True in both setup modes so route handlers can gate
     access to features that require a fully onboarded gatekeeper.
     """
+    # ── Pre-config setup mode (ADR-019) ──────────────────────────────────────
+    if _state.get("setup_mode"):
+        app.state.setup_required = True
+        app.state.config = None
+        app.state.config_path = _state.get("config_path")
+        app.state.data_dir = _state.get("data_dir")
+        app.state.pool = None
+        app.state.catalog_db = None
+        app.state.cluster_db = None
+        app.state.storage_node = None
+        app.state.tahoe_client = None
+        app.state.fragmenter = None
+        app.state.introducer_furl = ""
+        app.state.local_node_id = None
+        app.state.background_tasks = []
+        yield
+        return
+
+    # ── Normal / post-config startup ──────────────────────────────────────────
     config: GatekeeperConfig = _state["config"]
     data_dir: Path = _state["data_dir"]
     config_path: Path = _state.get("config_path", data_dir / "gatekeeper.cfg")
@@ -468,6 +492,48 @@ async def _run_servers(
     await asyncio.gather(*coroutines)
 
 
+# ── Setup mode (ADR-019) ─────────────────────────────────────────────────────
+
+def _start_setup_mode(data_dir: Path, config_path: Path, log_level: str) -> None:
+    """Start in setup mode when gatekeeper.cfg does not exist.
+
+    Binds the onboarding wizard to the LAN IP so it is reachable before
+    Tailscale is authenticated. After the wizard writes gatekeeper.cfg and
+    triggers a service restart, normal mode activates.
+    """
+    lan_ip = get_lan_ip()
+    gui_host = lan_ip if lan_ip else "0.0.0.0"
+    gui_port = _DEFAULT_WEB_PORT
+
+    logger.warning(
+        "No configuration found at %s — starting in setup mode", config_path
+    )
+    logger.info("Onboarding wizard at http://%s:%d", gui_host, gui_port)
+
+    # Ensure data directory exists so lifeboat.key and databases have a home.
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    _state.update({
+        "setup_mode": True,
+        "data_dir": data_dir,
+        "config_path": config_path,
+        "config": None,
+    })
+
+    gui_app = _create_app()
+    asyncio.run(
+        _run_servers(
+            gui_app=gui_app,
+            gui_host=gui_host,
+            gui_port=gui_port,
+            agent_app=None,
+            agent_host=None,
+            agent_port=0,
+            log_level=log_level,
+        )
+    )
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
@@ -517,6 +583,12 @@ def main() -> None:
 
     logger.info("BackupBuddy gatekeeper starting")
     logger.info("Data directory: %s", data_dir)
+
+    # Pre-config setup mode: config file absent → skip all normal startup steps
+    # and serve the onboarding wizard on the LAN interface (ADR-019).
+    if not config_path.exists():
+        _start_setup_mode(data_dir, config_path, args.log_level.lower())
+        return
 
     # Step 1 — assert Tailscale
     try:
