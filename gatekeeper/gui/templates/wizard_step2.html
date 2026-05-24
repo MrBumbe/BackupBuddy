@@ -1,0 +1,52 @@
+{% extends "wizard_base.html" %}
+{% set step = 2 %}
+
+{% block title %}BackupBuddy Setup — Node Name{% endblock %}
+
+{% block content %}
+<h1>Name this node</h1>
+<p class="subtitle">Give this BackupBuddy node a name and a friendly label.</p>
+
+<form method="POST" action="/onboarding/step/2">
+    <div class="form-row">
+        <label for="node_name">Node ID</label>
+        <input id="node_name" name="node_name" type="text" class="form-input"
+               placeholder="my-node" value="{{ state.node_name }}"
+               pattern="[a-z0-9][a-z0-9\-]{0,30}[a-z0-9]" required
+               oninput="syncDisplay(this)">
+    </div>
+    <p class="text-muted" style="font-size:0.8rem; margin-top:0.25rem">
+        Lowercase letters, digits, and hyphens only. Used as the internal identifier.
+    </p>
+
+    <div class="form-row" style="margin-top: 0.75rem;">
+        <label for="node_display_name">Display name</label>
+        <input id="node_display_name" name="node_display_name" type="text" class="form-input"
+               placeholder="My BackupBuddy" value="{{ state.node_display_name }}" required>
+    </div>
+    <p class="text-muted" style="font-size:0.8rem; margin-top:0.25rem">
+        Shown in the dashboard and to other cluster members.
+    </p>
+
+    <div class="wizard-actions">
+        {% if state.role == 'join' %}
+        <a href="/onboarding/join" class="btn-link">← Back</a>
+        {% else %}
+        <a href="/onboarding/step/1" class="btn-link">← Back</a>
+        {% endif %}
+        <button type="submit" class="btn">Next →</button>
+    </div>
+</form>
+
+<script>
+function syncDisplay(el) {
+    var disp = document.getElementById('node_display_name');
+    if (!disp.dataset.edited) {
+        disp.value = el.value.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+}
+document.getElementById('node_display_name').addEventListener('input', function() {
+    this.dataset.edited = '1';
+});
+</script>
+{% endblock %}

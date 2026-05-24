@@ -1,0 +1,114 @@
+{% extends "wizard_base.html" %}
+{% set step = 5 %}
+
+{% block title %}BackupBuddy Setup — Notifications{% endblock %}
+
+{% block head %}
+<style>
+    .toggle-section { display: none; }
+    .toggle-section.visible { display: block; }
+    .spinner {
+        display: none;
+        width: 1rem; height: 1rem;
+        border: 2px solid #fff;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        vertical-align: middle;
+        margin-right: 0.4rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Notifications</h1>
+<p class="subtitle">Optionally configure email or webhook alerts. You can skip this and set it up later in Settings.</p>
+
+<form method="POST" action="/onboarding/step/5" id="finish-form">
+    <!-- SMTP -->
+    <div class="card" style="margin-bottom: 1rem;">
+        <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem;">
+            <strong style="font-size:0.9rem;">Email (SMTP)</strong>
+            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.875rem; font-weight:normal; cursor:pointer;">
+                <input type="checkbox" id="smtp_enabled" name="smtp_enabled" value="1"
+                       {% if state.notify_smtp_enabled %}checked{% endif %}
+                       onchange="toggleSection('smtp-section', this.checked)">
+                Enable
+            </label>
+        </div>
+        <div id="smtp-section" class="toggle-section {% if state.notify_smtp_enabled %}visible{% endif %}">
+            <div class="form-row">
+                <label>Host</label>
+                <input name="smtp_host" type="text" class="form-input"
+                       placeholder="smtp.example.com" value="{{ state.notify_smtp_host }}">
+            </div>
+            <div class="form-row">
+                <label>Port</label>
+                <input name="smtp_port" type="number" class="form-input"
+                       min="1" max="65535" value="{{ state.notify_smtp_port }}" style="max-width:7rem;">
+            </div>
+            <div class="form-row">
+                <label>Username</label>
+                <input name="smtp_user" type="text" class="form-input"
+                       placeholder="user@example.com" value="{{ state.notify_smtp_user }}" autocomplete="off">
+            </div>
+            <div class="form-row">
+                <label>Password</label>
+                <input name="smtp_password" type="password" class="form-input"
+                       placeholder="(enter password)" autocomplete="new-password">
+            </div>
+            <div class="form-row">
+                <label>Send alerts to</label>
+                <input name="smtp_to" type="email" class="form-input"
+                       placeholder="you@example.com" value="{{ state.notify_smtp_to }}">
+            </div>
+        </div>
+    </div>
+
+    <!-- Webhook -->
+    <div class="card" style="margin-bottom: 1.25rem;">
+        <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem;">
+            <strong style="font-size:0.9rem;">Webhook</strong>
+            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.875rem; font-weight:normal; cursor:pointer;">
+                <input type="checkbox" id="webhook_enabled" name="webhook_enabled" value="1"
+                       {% if state.notify_webhook_enabled %}checked{% endif %}
+                       onchange="toggleSection('webhook-section', this.checked)">
+                Enable
+            </label>
+        </div>
+        <div id="webhook-section" class="toggle-section {% if state.notify_webhook_enabled %}visible{% endif %}">
+            <div class="form-row">
+                <label>Webhook URL</label>
+                <input name="webhook_url" type="url" class="form-input"
+                       placeholder="https://hooks.example.com/..." autocomplete="off">
+            </div>
+        </div>
+    </div>
+
+    <div class="wizard-actions">
+        <a href="/onboarding/step/4" class="btn-link">← Back</a>
+        <button type="submit" class="btn" id="submit-btn">
+            <span class="spinner" id="spinner"></span>
+            Set up BackupBuddy
+        </button>
+    </div>
+</form>
+
+<script>
+function toggleSection(id, show) {
+    var el = document.getElementById(id);
+    el.classList.toggle('visible', show);
+}
+
+document.getElementById('finish-form').addEventListener('submit', function() {
+    var btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.textContent = '';
+    var spinner = document.createElement('span');
+    spinner.style.cssText = 'display:inline-block;width:1rem;height:1rem;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.4rem';
+    btn.appendChild(spinner);
+    btn.appendChild(document.createTextNode(' Setting up…'));
+});
+</script>
+{% endblock %}

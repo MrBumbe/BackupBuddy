@@ -1,0 +1,32 @@
+{% extends "wizard_base.html" %}
+{% set step = 1 %}
+
+{% block title %}BackupBuddy Setup — Join Cluster{% endblock %}
+
+{% block content %}
+<h1>Join existing cluster</h1>
+<p class="subtitle">Enter the invite code and address of an existing BackupBuddy node.</p>
+
+<form method="POST" action="/onboarding/join">
+    <div class="form-row">
+        <label for="invite_code">Invite code</label>
+        <input id="invite_code" name="invite_code" type="text" class="form-input"
+               placeholder="word-word-1" value="{{ state.invite_code }}"
+               autocomplete="off" required>
+    </div>
+    <div class="form-row">
+        <label for="gatekeeper_url">Gatekeeper address</label>
+        <input id="gatekeeper_url" name="gatekeeper_url" type="url" class="form-input"
+               placeholder="http://100.x.y.z:8080" value="{{ state.gatekeeper_url }}"
+               autocomplete="off" required>
+    </div>
+    <p class="text-muted" style="font-size:0.8rem; margin-top:0.25rem">
+        The Tailscale address of the BackupBuddy node that sent you the invite code.
+    </p>
+
+    <div class="wizard-actions">
+        <a href="/onboarding/step/1" class="btn-link">← Back</a>
+        <button type="submit" class="btn">Next →</button>
+    </div>
+</form>
+{% endblock %}

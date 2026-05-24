@@ -1,0 +1,42 @@
+{% extends "wizard_base.html" %}
+{% set step = 3 %}
+
+{% block title %}BackupBuddy Setup — Storage{% endblock %}
+
+{% block content %}
+<h1>Storage location</h1>
+<p class="subtitle">Choose where BackupBuddy will store encrypted fragments from cluster members.</p>
+
+<form method="POST" action="/onboarding/step/3">
+    <div style="margin-bottom: 0.75rem;">
+        <label for="storage_paths" style="display:block; font-size:0.875rem; font-weight:600; color:#555; margin-bottom:0.35rem;">
+            Storage path(s)
+        </label>
+        <textarea id="storage_paths" name="storage_paths" class="form-textarea"
+                  rows="4" placeholder="/mnt/storage&#10;/data/backup-pool"
+                  required>{{ state.storage_paths | join('\n') }}</textarea>
+        <p class="text-muted" style="font-size:0.8rem; margin-top:0.25rem">
+            One absolute path per line. Each path must exist and be writable.
+            These paths are excluded from backup automatically.
+        </p>
+    </div>
+
+    <div class="form-row">
+        <label for="storage_quota_gb">Quota per path</label>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input id="storage_quota_gb" name="storage_quota_gb" type="number" class="form-input"
+                   min="10" max="100000" value="{{ state.storage_quota_gb }}" required
+                   style="max-width:8rem;">
+            <span style="font-size:0.875rem; color:#666;">GB</span>
+        </div>
+    </div>
+    <p class="text-muted" style="font-size:0.8rem; margin-top:0.25rem">
+        Maximum space BackupBuddy will use on each path.
+    </p>
+
+    <div class="wizard-actions">
+        <a href="/onboarding/step/2" class="btn-link">← Back</a>
+        <button type="submit" class="btn">Next →</button>
+    </div>
+</form>
+{% endblock %}

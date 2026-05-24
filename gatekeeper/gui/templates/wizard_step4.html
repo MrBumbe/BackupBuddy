@@ -1,0 +1,40 @@
+{% extends "wizard_base.html" %}
+{% set step = 4 %}
+
+{% block title %}BackupBuddy Setup — Profile{% endblock %}
+
+{% block content %}
+<h1>Fragmentation profile</h1>
+<p class="subtitle">Choose how BackupBuddy splits and distributes your files across the cluster.</p>
+
+<form method="POST" action="/onboarding/step/4">
+    <div class="profile-grid" style="margin-bottom: 1.25rem;">
+        {% for p in profiles %}
+        <label>
+            <input type="radio" name="profile" value="{{ p.id }}"
+                   {% if state.profile == p.id %}checked{% endif %}
+                   style="display:none" class="profile-radio">
+            <div class="profile-btn {% if state.profile == p.id %}profile-btn-active{% endif %}"
+                 onclick="selectProfile(this, '{{ p.id }}')">
+                <span class="profile-btn-name">{{ p.name }}</span>
+                <span class="profile-btn-desc">{{ p.desc }}</span>
+            </div>
+        </label>
+        {% endfor %}
+    </div>
+
+    <div class="wizard-actions">
+        <a href="/onboarding/step/3" class="btn-link">← Back</a>
+        <button type="submit" class="btn">Next →</button>
+    </div>
+</form>
+
+<script>
+function selectProfile(el, value) {
+    document.querySelectorAll('.profile-radio').forEach(r => r.checked = false);
+    document.querySelectorAll('.profile-btn').forEach(b => b.classList.remove('profile-btn-active'));
+    el.classList.add('profile-btn-active');
+    el.closest('label').querySelector('.profile-radio').checked = true;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "wizard_base.html" %}
+{% set step = 1 %}
+
+{% block title %}BackupBuddy Setup — Role{% endblock %}
+
+{% block content %}
+<h1>Welcome to BackupBuddy</h1>
+<p class="subtitle">Are you setting up a new backup cluster, or joining an existing one?</p>
+
+<form method="POST" action="/onboarding/step/1">
+    <div class="profile-grid" style="margin-bottom: 1.25rem;">
+        <label>
+            <input type="radio" name="role" value="new"
+                   {% if state.role == 'new' or not state.role %}checked{% endif %}
+                   style="display:none" class="role-radio">
+            <div class="profile-btn {% if state.role == 'new' or not state.role %}profile-btn-active{% endif %}"
+                 onclick="selectRole(this, 'new')">
+                <span class="profile-btn-name">Create new cluster</span>
+                <span class="profile-btn-desc">I want to start a new BackupBuddy cluster on this machine</span>
+            </div>
+        </label>
+        <label>
+            <input type="radio" name="role" value="join"
+                   {% if state.role == 'join' %}checked{% endif %}
+                   style="display:none" class="role-radio">
+            <div class="profile-btn {% if state.role == 'join' %}profile-btn-active{% endif %}"
+                 onclick="selectRole(this, 'join')">
+                <span class="profile-btn-name">Join existing cluster</span>
+                <span class="profile-btn-desc">I have an invite code from another BackupBuddy node</span>
+            </div>
+        </label>
+    </div>
+
+    <div class="wizard-actions">
+        <button type="submit" class="btn">Next →</button>
+    </div>
+</form>
+
+<script>
+function selectRole(el, value) {
+    document.querySelectorAll('.role-radio').forEach(r => r.checked = false);
+    document.querySelectorAll('.profile-btn').forEach(b => b.classList.remove('profile-btn-active'));
+    el.classList.add('profile-btn-active');
+    el.closest('label').querySelector('.role-radio').checked = true;
+}
+</script>
+{% endblock %}

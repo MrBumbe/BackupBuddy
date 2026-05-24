@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}BackupBuddy Setup{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .wizard-wrap {
+            min-height: 100vh;
+            background: #f4f5f7;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem 4rem;
+        }
+
+        .wizard-brand {
+            font-weight: 600;
+            font-size: 1.1rem;
+            letter-spacing: 0.02em;
+            color: #1a1a2e;
+            margin-bottom: 2rem;
+        }
+
+        .wizard-card {
+            background: #ffffff;
+            border: 1px solid #e2e4e9;
+            border-radius: 0.5rem;
+            padding: 2rem;
+            width: 100%;
+            max-width: 560px;
+        }
+
+        .wizard-card h1 {
+            font-size: 1.4rem;
+            margin: 0 0 0.4rem;
+        }
+
+        .wizard-card .subtitle {
+            color: #666;
+            font-size: 0.9rem;
+            margin: 0 0 1.5rem;
+        }
+
+        .wizard-steps {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 1.75rem;
+        }
+
+        .wstep {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: #e2e4e9;
+        }
+
+        .wstep-done   { background: #4caf50; }
+        .wstep-active { background: #1a1a2e; }
+
+        .wizard-actions {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: flex-end;
+            margin-top: 1.5rem;
+        }
+
+        .btn-link {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 0.875rem;
+            cursor: pointer;
+            padding: 0.4rem 0;
+            text-decoration: underline;
+        }
+
+        .btn-link:hover { color: #1a1a2e; }
+
+        .error-box {
+            background: #fff5f5;
+            border: 1px solid #f8d7da;
+            border-radius: 0.3rem;
+            padding: 0.75rem 1rem;
+            color: #721c24;
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+<div class="wizard-wrap">
+    <div class="wizard-brand">BackupBuddy</div>
+    <div class="wizard-card">
+        {% if step is defined %}
+        <div class="wizard-steps">
+            {% for i in range(1, 6) %}
+            <div class="wstep {% if i < step %}wstep-done{% elif i == step %}wstep-active{% endif %}"></div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div class="error-box">{{ error }}</div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </div>
+</div>
+</body>
+</html>

@@ -12,7 +12,8 @@ Registered components:
   /buddies                 — cluster member management, invites, votes
   /api/buddies/*           — buddies API
 
-All components are wired into the main FastAPI app via setup_gui(app).
+Normal mode:  wired via setup_gui(app).
+Setup mode:   wired via setup_onboarding_app(app) — only the wizard is served.
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from starlette.responses import Response
 from gatekeeper.gui.routes.agents import create_agents_router
 from gatekeeper.gui.routes.buddies import create_buddies_router
 from gatekeeper.gui.routes.dashboard import create_dashboard_router
+from gatekeeper.gui.routes.onboarding import create_onboarding_router
 from gatekeeper.gui.routes.restore import create_restore_router
 from gatekeeper.gui.routes.settings import create_settings_router
 from gatekeeper.tailscale import _TAILSCALE_CGNAT
@@ -116,4 +118,20 @@ def setup_gui(app: Any) -> None:
     app.add_exception_handler(500, _500_handler)
 
     app.add_middleware(TailscaleOnlyMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
+
+
+def setup_onboarding_app(app: Any) -> None:
+    """Wire the onboarding wizard into a FastAPI app (setup mode only).
+
+    Registered instead of setup_gui() when gatekeeper.cfg does not exist.
+    Only mounts the wizard router, /static, and RequestLoggingMiddleware.
+    TailscaleOnlyMiddleware is omitted — the wizard must be reachable on the
+    LAN before Tailscale is active (ADR-019).
+
+    The onboarding router includes a catch-all GET that redirects unknown paths
+    to /onboarding/step/1, so it must be registered AFTER /static is mounted.
+    """
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+    app.include_router(create_onboarding_router())
     app.add_middleware(RequestLoggingMiddleware)

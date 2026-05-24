@@ -1,0 +1,34 @@
+{% extends "wizard_base.html" %}
+
+{% block title %}BackupBuddy Setup — First Invite{% endblock %}
+
+{% block content %}
+<h1>Your cluster is ready</h1>
+<p class="subtitle">
+    BackupBuddy is set up. Invite the first buddy to join your cluster by sharing this invite code.
+</p>
+
+<p style="font-size:0.875rem; color:#555; margin-bottom:0.4rem;">
+    First invite code (valid 48 hours, single use):
+</p>
+<div class="modal-code" id="invite-code">{{ invite_code }}</div>
+
+<div style="display:flex; gap:0.5rem; margin-bottom:1rem;">
+    <button type="button" class="btn btn-sm" onclick="copyCode()">Copy</button>
+</div>
+
+<p class="text-muted" style="font-size:0.8rem;">
+    Your buddy enters this code in their BackupBuddy setup wizard.
+    You can generate more invite codes later from the Buddies page.
+</p>
+
+<div class="wizard-actions" style="margin-top: 2rem;">
+    <a href="/onboarding/done" class="btn">Open Dashboard →</a>
+</div>
+
+<script>
+function copyCode() {
+    navigator.clipboard.writeText(document.getElementById('invite-code').textContent.trim());
+}
+</script>
+{% endblock %}
