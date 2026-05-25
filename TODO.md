@@ -1510,7 +1510,7 @@ docs/design.md → Node removal
 > Full integration testing (docs/testing.md scenarios 1–7) is a separate
 > milestone — tracked here when hardware is ready.
 
-### [ ] 1.16.1 — Unit test suite
+### [x] 1.16.1 — Unit test suite
 
 **Reads:** docs/testing.md, CLAUDE.md → Task completion checklist
 **Creates:** `tests/unit/` (one file per module)
@@ -1536,7 +1536,11 @@ docs/design.md → Node removal
 - No test requires network access or external services
 
 ```
-> Kludde: <!-- -->
+> Kludde: All 11 required test files already existed from prior feature tasks. Ran full
+> suite: 873 pass, 12 skip, 0 fail. pip-audit found PYSEC-2026-161 in starlette 1.0.0
+> — upgraded to 1.0.1 and re-verified: no known vulnerabilities (tahoe-lafs skipped,
+> fork not on PyPI). requirements.txt updated. All tests use mocked Tahoe and Tailscale;
+> no network access required. Committed security fix: cf0e4171f.
 ```
 
 ---
