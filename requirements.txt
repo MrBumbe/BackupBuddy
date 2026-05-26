@@ -81,7 +81,7 @@ pyrsistent==0.20.0
 pytest==9.0.3
 python-dotenv==1.2.2
 pyutil==3.3.6
-pywin32==311
+pywin32==311; sys_platform == "win32"
 pyflakes==3.4.0
 PyYAML==6.0.3
 qrcode==8.2
