@@ -52,11 +52,16 @@ class IntroducerNode:
         self._process: asyncio.subprocess.Process | None = None
         self._tahoe: str = _find_tahoe()
 
-    def create(self) -> None:
+    def create(self, hostname: str = "127.0.0.1") -> None:
         """
         Create the introducer node directory.
         Idempotent: does nothing if the node is already created.
         Raises RuntimeError if tahoe create-introducer fails.
+
+        Args:
+            hostname: Hostname advertised in the introducer FURL.
+                      Defaults to 127.0.0.1 (single-machine / smoke-test use).
+                      Pass the Tailscale IP for multi-machine clusters.
         """
         if (self.basedir / "tahoe.cfg").exists():
             logger.info("Introducer node already exists at %s", self.basedir)
@@ -64,7 +69,7 @@ class IntroducerNode:
 
         logger.info("Creating introducer node at %s", self.basedir)
         result = subprocess.run(
-            [self._tahoe, "create-introducer", str(self.basedir)],
+            [self._tahoe, "create-introducer", f"--hostname={hostname}", str(self.basedir)],
             capture_output=True,
             text=True,
         )
