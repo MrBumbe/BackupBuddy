@@ -67,6 +67,8 @@ class IntroducerNode:
             logger.info("Introducer node already exists at %s", self.basedir)
             return
 
+        # Tahoe uses os.mkdir() which does not create parent directories.
+        self.basedir.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Creating introducer node at %s", self.basedir)
         result = subprocess.run(
             [self._tahoe, "create-introducer", f"--hostname={hostname}", str(self.basedir)],
