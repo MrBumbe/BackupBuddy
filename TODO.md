@@ -1566,9 +1566,9 @@ docs/design.md → Node removal
 - All processes cleaned up after test ✓
 
 ```
-> Implementerat 2026-05-27. Test profile (k=1/n=2/happy=1) används för att
-> köra smoke-testet med bara 1 storage node om GK2 inte hinner anmäla sig.
-> Scenario 3 (lifeboat restore) är separerat till task 1.16.5.
+> Implemented 2026-05-27. Test profile (k=1/n=2/happy=1) allows smoke test to
+> succeed with only 1 storage node if GK2 has not yet announced itself.
+> Scenario 3 (lifeboat restore) split into task 1.16.5.
 ```
 
 ---
@@ -1576,27 +1576,27 @@ docs/design.md → Node removal
 ### [x] 1.16.4 — Agent upload pipeline
 
 **Reads:** docs/architecture.md → Data flow backup, docs/testing.md → Scenario 1
-**Creates:** `/api/agents/fragments` endpoint i `gatekeeper/main.py`,
-`_upload_worker` coroutine i `agent/main.py`
+**Creates:** `/api/agents/fragments` endpoint in `gatekeeper/main.py`,
+`_upload_worker` coroutine in `agent/main.py`
 **Requirements:**
-- `POST /api/agents/fragments` på gatekeeper agent API (LAN, token-auth):
-  tar emot råa filebytes + `X-Fragment-Metadata` JSON-header
-  (`original_path`, `agent_name`), skriver till `data_dir/upload_tmp/`,
-  skapar UploadItem, lägger på gatekeeper upload queue
-- Agent `_upload_worker`: konsumerar `upload_queue`, läser fil, anropar
-  `GatekeeperClient.send_fragment()` med metadata
-- Gatekeeper UploadQueueWorker startas i lifespan och stoppas vid shutdown
-- Upload queue exponeras via `_state["upload_queue"]` för agent API-handlens
+- `POST /api/agents/fragments` on gatekeeper agent API (LAN, token-auth):
+  receives raw file bytes + `X-Fragment-Metadata` JSON header
+  (`original_path`, `agent_name`), writes to `data_dir/upload_tmp/`,
+  creates UploadItem, puts on gatekeeper upload queue
+- Agent `_upload_worker`: consumes `upload_queue`, reads file, calls
+  `GatekeeperClient.send_fragment()` with metadata
+- Gatekeeper UploadQueueWorker started in lifespan and stopped on shutdown
+- Upload queue exposed via `_state["upload_queue"]` for the agent API handler
 **Done when:**
-- `/api/agents/fragments` tar emot fil och lägger på upload queue ✓
-- UploadQueueWorker startas/stoppas korrekt i lifespan ✓
-- Agent `_upload_worker` skickar filer från lokal kö till gatekeeper ✓
-- Scenario 1 i smoke test verifierar hela kedjan end-to-end ✓
+- `/api/agents/fragments` receives file and enqueues UploadItem ✓
+- UploadQueueWorker starts and stops correctly in lifespan ✓
+- Agent `_upload_worker` sends files from local queue to gatekeeper ✓
+- Scenario 1 in smoke test verifies the full chain end-to-end ✓
 
 ```
-> Implementerat 2026-05-27. Även test-profil (k=1/n=2/happy=1),
-> TahoeConfig.tahoe_web_port, och BACKUPBUDDY_LIFEBOAT_KEY_PATH env-override
-> lagts till som prerequisites för smoke-testet.
+> Implemented 2026-05-27. Also added test profile (k=1/n=2/happy=1),
+> TahoeConfig.tahoe_web_port, and BACKUPBUDDY_LIFEBOAT_KEY_PATH env override
+> as prerequisites for the smoke test.
 ```
 
 ---
@@ -1604,16 +1604,16 @@ docs/design.md → Node removal
 ### [ ] 1.16.5 — Smoke test Scenario 3 (lifeboat restore)
 
 **Reads:** docs/testing.md → Scenario 3, gatekeeper/lifeboat/bundle.py
-**Creates:** `tests/integration/smoke_scenario_3.py` (körs från `smoke_test.sh`)
+**Creates:** `tests/integration/smoke_scenario_3.py` (called from `smoke_test.sh`)
 **Requirements:**
-- Lägg till anrop i `smoke_test.sh` efter Scenario 1
-- `smoke_scenario_3.py` skapar ett lifeboat-bundle från GK1:s data med
-  `create_bundle()`, raderar catalog.db och root_dir.cap, återställer med
-  `extract_bundle()`, verifierar att filen fortfarande kan restoras
-- Kräver att lifeboat-nyckeln finns tillgänglig (GK1_KEY från smoke-testet)
+- Add Scenario 3 call to `smoke_test.sh` after Scenario 1
+- `smoke_scenario_3.py` creates a lifeboat bundle from GK1 data using
+  `create_bundle()`, deletes catalog.db and root_dir.cap, restores them with
+  `extract_bundle()`, verifies the file from Scenario 1 can still be restored
+- Requires the lifeboat key to be available (GK1_KEY from the smoke test)
 **Done when:**
-- catalog.db + root_dir.cap raderade, återställda från bundle ✓
-- Fil från Scenario 1 kan fortfarande restoras och hash-verifieras ✓
+- catalog.db + root_dir.cap deleted, restored from bundle ✓
+- File from Scenario 1 can still be restored and hash-verified ✓
 
 ---
 
