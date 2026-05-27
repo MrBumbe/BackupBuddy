@@ -1624,6 +1624,16 @@ docs/design.md → Node removal
 > GK1 daemon left running throughout — Tahoe gateway needed for restore_file(); daemon's
 > open fds reference the orphaned inode and do not affect the fresh catalog.db.
 > smoke_test.sh: Step 7 added after Scenario 1. Cannot be tested on Windows dev machine.
+> Verified on Ubuntu server 192.168.1.50 — SMOKE TEST PASSED (both Scenario 1 and Scenario 3).
+> Bugs fixed during live testing:
+>   - tahoe run needs --allow-stdin-close (else exits when stdin closes with DEVNULL)
+>   - tahoe create-introducer/create-node needs --hostname flag
+>   - Parent dirs must be created before tahoe create-* (Tahoe uses os.mkdir)
+>   - backupbuddy-gatekeeper entry point was missing from pyproject.toml
+>   - gatekeeper/agent packages not in pyproject.toml hatch wheel packages list
+>   - FragmentationConfig validator rejected 'test' profile
+>   - run_tahoe_node.py missing --allow-stdin-close
+>   - httpx.AsyncClient requires bytes/async iterable, not sync file handle
 ```
 
 ---
