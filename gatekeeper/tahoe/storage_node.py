@@ -110,6 +110,8 @@ class StorageNode:
             self._configure(introducer_furl)
             return
 
+        # Tahoe uses os.mkdir() which does not create parent directories.
+        self.basedir.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Creating storage node at %s", self.basedir)
         result = subprocess.run(
             [self._tahoe, "create-node", str(self.basedir)],
