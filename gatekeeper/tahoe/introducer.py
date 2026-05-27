@@ -91,23 +91,23 @@ class IntroducerNode:
             return self._read_furl()
 
         logger.info("Starting introducer node")
+        # Discard all Tahoe output — reading from a PIPE without draining blocks
+        # the subprocess's reactor once the OS buffer fills.  Readiness is
+        # detected by polling the Foolscap tub port from the introducer config.
         self._process = await asyncio.create_subprocess_exec(
             self._tahoe, "run", str(self.basedir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # Tahoe logs to stdout; merge for readiness scan
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
         )
 
-        # Poll for the node to begin accepting connections.
-        # Tahoe writes the FURL at create-introducer time; it's already on disk.
-        # We detect readiness by reading the process output for the startup message.
-        ready = await self._wait_for_ready()
+        furl = self._read_furl()
+        ready = await self._wait_for_ready(furl)
         if not ready:
             await self.stop()
             raise RuntimeError(
                 f"Introducer node did not become ready within {_STARTUP_TIMEOUT}s"
             )
 
-        furl = self._read_furl()
         logger.info("Introducer node is running")
         return furl
 
@@ -147,40 +147,39 @@ class IntroducerNode:
             )
         return furl_path.read_text().strip()
 
-    async def _wait_for_ready(self) -> bool:
+    async def _wait_for_ready(self, furl: str) -> bool:
         """
-        Read stdout/stderr until Tahoe reports it is running,
-        or until the timeout expires.
-        Returns True if the node became ready, False on timeout.
+        Poll the introducer's Foolscap tub port until it accepts TCP connections.
+        Port is extracted from the FURL (pb://nodeid@host:PORT/secret).
+        Returns True if the port became reachable, False on timeout or early exit.
         """
-        if self._process is None or self._process.stdout is None:
+        if self._process is None:
             return False
+
+        try:
+            # FURL format: pb://NODEID@HOST:PORT/SECRET
+            port = int(furl.split("@")[1].split(":")[1].split("/")[0])
+        except (IndexError, ValueError):
+            logger.warning("Could not parse port from introducer FURL — falling back to file check")
+            await asyncio.sleep(2.0)
+            return (self.basedir / "private" / "introducer.furl").exists()
 
         deadline = asyncio.get_event_loop().time() + _STARTUP_TIMEOUT
         while asyncio.get_event_loop().time() < deadline:
             if self._process.returncode is not None:
                 return False
             try:
-                line = await asyncio.wait_for(
-                    self._process.stdout.readline(),
+                _reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection("127.0.0.1", port),
                     timeout=1.0,
                 )
-            except asyncio.TimeoutError:
-                # Check if the FURL file exists — if so, the node is ready
-                if (self.basedir / "private" / "introducer.furl").exists():
-                    return True
-                continue
-
-            if not line:
-                break
-
-            decoded = line.decode("utf-8", errors="replace").strip()
-            if decoded:
-                logger.debug("introducer: %s", decoded)
-
-            # Tahoe-LAFS logs this when the introducer is accepting connections
-            if "introducer running" in decoded.lower() or "ready" in decoded.lower():
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
                 return True
+            except (OSError, asyncio.TimeoutError):
+                await asyncio.sleep(0.5)
 
-        # Final check: if the FURL file exists the node was at least created
-        return (self.basedir / "private" / "introducer.furl").exists()
+        return False

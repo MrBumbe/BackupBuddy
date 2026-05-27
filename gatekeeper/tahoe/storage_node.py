@@ -185,10 +185,13 @@ class StorageNode:
             )
 
         logger.info("Starting storage node")
+        # Discard all Tahoe output — reading from a PIPE without draining blocks
+        # the subprocess's reactor once the OS buffer fills.  Readiness is
+        # detected by polling the HTTP gateway port instead.
         self._process = await asyncio.create_subprocess_exec(
             self._tahoe, "run", str(self.basedir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # Tahoe logs to stdout; merge for readiness scan
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
         )
 
         ready = await self._wait_for_ready()
@@ -229,10 +232,10 @@ class StorageNode:
 
     async def _wait_for_ready(self) -> bool:
         """
-        Read stdout until Tahoe emits "client running", or until timeout.
-        Returns True if the node became ready, False on timeout or early exit.
+        Poll the Tahoe HTTP gateway until it accepts a TCP connection or timeout.
+        Returns True if the port became reachable, False on timeout or early exit.
         """
-        if self._process is None or self._process.stdout is None:
+        if self._process is None:
             return False
 
         deadline = asyncio.get_event_loop().time() + _STARTUP_TIMEOUT
@@ -240,23 +243,17 @@ class StorageNode:
             if self._process.returncode is not None:
                 return False
             try:
-                line = await asyncio.wait_for(
-                    self._process.stdout.readline(),
+                _reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection("127.0.0.1", self.web_port),
                     timeout=1.0,
                 )
-            except asyncio.TimeoutError:
-                continue
-
-            if not line:
-                break
-
-            decoded = line.decode("utf-8", errors="replace").strip()
-            if decoded:
-                logger.debug("storage-node: %s", decoded)
-
-            # Tahoe-LAFS logs "<NODETYPE> running" when fully started.
-            # For client/storage nodes NODETYPE == "client" (see allmydata/client.py).
-            if "client running" in decoded.lower():
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
                 return True
+            except (OSError, asyncio.TimeoutError):
+                await asyncio.sleep(0.5)
 
         return False
