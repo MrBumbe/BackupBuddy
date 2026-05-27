@@ -1601,7 +1601,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.5 — Smoke test Scenario 3 (lifeboat restore)
+### [x] 1.16.5 — Smoke test Scenario 3 (lifeboat restore)
 
 **Reads:** docs/testing.md → Scenario 3, gatekeeper/lifeboat/bundle.py
 **Creates:** `tests/integration/smoke_scenario_3.py` (called from `smoke_test.sh`)
@@ -1614,6 +1614,17 @@ docs/design.md → Node removal
 **Done when:**
 - catalog.db + root_dir.cap deleted, restored from bundle ✓
 - File from Scenario 1 can still be restored and hash-verified ✓
+
+```
+> Kludde: smoke_scenario_3.py — nine-step flow: load key, derive catalog key, confirm
+> restorable file exists, create_bundle() via raw sqlite3.Connection, simulate disaster
+> (delete catalog.db + -wal + -shm + root_dir.cap with missing_ok=True), extract_bundle(),
+> write restored root_dir.cap and catalog.db (0600 chmod on POSIX), verify restored catalog
+> is non-empty, restore_file() via TahoeClient, SHA-256 verified against catalog's stored hash.
+> GK1 daemon left running throughout — Tahoe gateway needed for restore_file(); daemon's
+> open fds reference the orphaned inode and do not affect the fresh catalog.db.
+> smoke_test.sh: Step 7 added after Scenario 1. Cannot be tested on Windows dev machine.
+```
 
 ---
 

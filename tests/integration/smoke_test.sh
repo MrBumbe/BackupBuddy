@@ -233,6 +233,15 @@ echo "=== Step 6: Scenario 1 — backup + restore + verify ==="
     --restore-dir     "$RESTORE_DIR"
 
 echo ""
+echo "=== Step 7: Scenario 3 — lifeboat bundle restore ==="
+
+"$PYTHON" "$SCRIPT_DIR/smoke_scenario_3.py" \
+    --gk-data-dir  "$GK1_DATA" \
+    --key-path     "$GK1_KEY" \
+    --tahoe-url    "http://127.0.0.1:$GK1_TAHOE_PORT" \
+    --restore-dir  "$RESTORE_DIR"
+
+echo ""
 echo "======================================"
 echo "  SMOKE TEST PASSED"
 echo "======================================"
