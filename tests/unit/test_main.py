@@ -98,6 +98,7 @@ def _make_mock_config(tailscale_ip: str = "100.64.0.1", web_port: int = 8080) ->
     cfg.tahoe.introducer = "pb://fake@host:3456/fake"
     cfg.storage_pool = []
     cfg.fragmentation.profile = "balanced"
+    cfg.watcher.upload_concurrent = 2
     return cfg
 
 

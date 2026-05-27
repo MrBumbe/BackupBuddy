@@ -69,6 +69,9 @@ class TahoeConfig(BaseModel):
     introducer: str = ""
     # True on the one node in the cluster that runs the Tahoe introducer process
     run_introducer: bool = False
+    # TCP port for the Tahoe HTTP gateway (127.0.0.1 only).
+    # Override when running multiple gatekeepers on the same host (e.g. smoke tests).
+    tahoe_web_port: int = 3456
 
 
 class AdaptiveConfig(BaseModel):
@@ -238,6 +241,7 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
     tahoe = TahoeConfig(
         introducer=tahoe_raw.get("introducer", ""),
         run_introducer=run_introducer,
+        tahoe_web_port=int(tahoe_raw.get("tahoe_web_port", 3456)),
     )
 
     # [fragmentation]

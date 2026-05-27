@@ -17,14 +17,18 @@ from typing import NamedTuple
 
 
 class Profile(NamedTuple):
-    k: int  # shares needed for reconstruction
-    n: int  # total shares created
+    k: int              # shares needed for reconstruction
+    n: int              # total shares created
+    happy: int | None = None  # servers-of-happiness (None → use n)
 
 
 PROFILES: dict[str, Profile] = {
     "balanced": Profile(k=3, n=5),
     "secure":   Profile(k=3, n=7),
     "paranoid": Profile(k=3, n=10),
+    # Single-node profile for local smoke tests.
+    # happy=1 lets bootstrap create root_dir.cap with only 1 storage node running.
+    "test":     Profile(k=1, n=2, happy=1),
 }
 
 # "adaptive" is intentionally absent — k/n is computed at runtime from cluster

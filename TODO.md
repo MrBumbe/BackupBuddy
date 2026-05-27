@@ -1569,6 +1569,32 @@ docs/design.md → Node removal
 
 ---
 
+### [ ] 1.16.4 — Agent upload pipeline
+
+**Reads:** docs/architecture.md → Data flow backup, docs/testing.md → Scenario 1
+**Creates:** `/api/agents/fragments` endpoint in `gatekeeper/main.py`,
+`_upload_worker` coroutine in `agent/main.py`
+**Requirements:**
+- `POST /api/agents/fragments` on the gatekeeper agent API (LAN, token-auth):
+  receives raw file bytes + `X-Fragment-Metadata` JSON header
+  (`original_path`, `agent_name`), writes to `data_dir/upload_tmp/`,
+  creates UploadItem, puts on gatekeeper upload queue
+- Agent `_upload_worker`: consumes `upload_queue`, reads file, calls
+  `GatekeeperClient.send_fragment()` with metadata
+- Gatekeeper UploadQueueWorker started in lifespan and stopped on shutdown
+- Upload queue exposed on `_state["upload_queue"]` for the agent API handler
+**Done when:**
+- Agent detects a stable file → watcher puts path on queue → upload worker
+  sends it to gatekeeper → gatekeeper queues it → fragmenter uploads to Tahoe
+  → catalog.db entry created
+- Scenario 1 in smoke test passes end-to-end
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
 ### [ ] 1.16.3 — Full Proxmox integration tests
 
 > **⚠ Hardware-dependent.** This task cannot start until dedicated Proxmox

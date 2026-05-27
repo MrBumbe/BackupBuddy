@@ -29,6 +29,18 @@ DEFAULT_KEY_PATH = Path("/etc/backup-buddy/lifeboat.key")
 _KEY_SIZE = 32  # bytes — AES-256
 
 
+def _resolve_key_path(key_path: Path) -> Path:
+    """Return key_path, substituting BACKUPBUDDY_LIFEBOAT_KEY_PATH when key_path
+    is the module default.  This allows two gatekeepers on the same host (e.g.
+    smoke tests) to use different key files without changing production code paths.
+    """
+    if key_path == DEFAULT_KEY_PATH:
+        env_override = os.environ.get("BACKUPBUDDY_LIFEBOAT_KEY_PATH")
+        if env_override:
+            return Path(env_override)
+    return key_path
+
+
 # ── Exceptions ─────────────────────────────────────────────────────────────────
 
 class KeystoreError(Exception):
@@ -52,11 +64,13 @@ def generate_key(key_path: Path = DEFAULT_KEY_PATH) -> bytes:
 
     Args:
         key_path: Destination path for the key file.  Defaults to
-                  ``/etc/backup-buddy/lifeboat.key``.
+                  ``/etc/backup-buddy/lifeboat.key`` (overridable via
+                  ``BACKUPBUDDY_LIFEBOAT_KEY_PATH`` env var).
 
     Returns:
         The freshly generated 32-byte key.
     """
+    key_path = _resolve_key_path(key_path)
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key = os.urandom(_KEY_SIZE)
     key_path.write_bytes(key)
@@ -78,7 +92,8 @@ def load_key(key_path: Path = DEFAULT_KEY_PATH) -> bytes:
 
     Args:
         key_path: Path to the key file.  Defaults to
-                  ``/etc/backup-buddy/lifeboat.key``.
+                  ``/etc/backup-buddy/lifeboat.key`` (overridable via
+                  ``BACKUPBUDDY_LIFEBOAT_KEY_PATH`` env var).
 
     Returns:
         The 32-byte key stored in the file.
@@ -88,6 +103,7 @@ def load_key(key_path: Path = DEFAULT_KEY_PATH) -> bytes:
         KeystoreError:    If the file exists but cannot be read or is the
                           wrong length.
     """
+    key_path = _resolve_key_path(key_path)
     if not key_path.exists():
         logger.critical(
             "Lifeboat key not found at %s — cannot start. "

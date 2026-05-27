@@ -18,9 +18,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import ipaddress
+import json
 import logging
+import os
 import secrets as _secrets_mod
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +47,7 @@ from gatekeeper.db.catalog import CatalogDB
 from gatekeeper.db.cluster import ClusterDB
 from gatekeeper.fragmenter.fragmenter import Fragmenter, derive_metadata_key
 from gatekeeper.fragmenter.profiles import get_profile
+from gatekeeper.fragmenter.queue_worker import UploadItem, UploadQueueWorker
 from gatekeeper.lifeboat.distributor import LifeboatDistributor
 from gatekeeper.storage.pool import PoolPathError, StoragePoolManager
 from gatekeeper.tahoe.client import TahoeClient
@@ -177,6 +181,7 @@ async def lifespan(app: FastAPI):
     cluster_db: ClusterDB | None = None
     tahoe_client: TahoeClient | None = None
     fragmenter: Fragmenter | None = None
+    queue_worker: UploadQueueWorker | None = None
 
     try:
         # Step 3 — storage pool (always runs; validates paths are accessible)
@@ -239,6 +244,7 @@ async def lifespan(app: FastAPI):
             active_profile = config.fragmentation.profile
             if active_profile == "adaptive":
                 shares_k, shares_n = 3, 5
+                shares_happy = shares_n
                 logger.info(
                     "Adaptive profile selected — using balanced (3,5) at startup; "
                     "task 1.11.1 will compute final k/n from cluster size"
@@ -246,14 +252,16 @@ async def lifespan(app: FastAPI):
             else:
                 _p = get_profile(active_profile)
                 shares_k, shares_n = _p.k, _p.n
+                shares_happy = _p.happy if _p.happy is not None else shares_n
 
             storage_node = StorageNode(
                 basedir=str(data_dir / "tahoe" / "storage_node"),
                 storage_dir=largest_pool_path,
                 reserved_space=_TAHOE_RESERVED_BYTES,
                 nickname=config.node.name,
+                web_port=config.tahoe.tahoe_web_port,
                 shares_needed=shares_k,
-                shares_happy=shares_n,
+                shares_happy=shares_happy,
                 shares_total=shares_n,
             )
             storage_node.create(introducer_furl)
@@ -277,6 +285,19 @@ async def lifespan(app: FastAPI):
             )
             logger.info("Fragmenter ready (profile=%s k=%d n=%d)",
                         active_profile, shares_k, shares_n)
+
+            # Step 7 (continued) — upload queue and worker
+            upload_queue: asyncio.Queue[UploadItem] = asyncio.Queue()
+            _state["upload_queue"] = upload_queue
+            upload_tmp_dir = data_dir / "upload_tmp"
+            upload_tmp_dir.mkdir(parents=True, exist_ok=True)
+            _state["upload_tmp_dir"] = upload_tmp_dir
+            queue_worker = UploadQueueWorker(
+                queue=upload_queue,
+                fragmenter=fragmenter,
+                upload_concurrent=config.watcher.upload_concurrent,
+            )
+            queue_worker.start()
 
             # Step 8 — background schedulers
             lifeboat_distributor: LifeboatDistributor | None = None
@@ -319,6 +340,10 @@ async def lifespan(app: FastAPI):
 
     finally:
         logger.info("Gatekeeper shutting down")
+        if queue_worker is not None:
+            await queue_worker.stop()
+        _state.pop("upload_queue", None)
+        _state.pop("upload_tmp_dir", None)
         if tahoe_client is not None:
             await tahoe_client.aclose()
         if storage_node is not None:
@@ -400,6 +425,12 @@ def _create_app() -> FastAPI:
 
 # ── Agent API (LAN-only — ADR-017) ───────────────────────────────────────────
 
+class _FragmentMetadata(BaseModel):
+    """Validated header payload for POST /api/agents/fragments."""
+    original_path: str
+    agent_name: str
+
+
 def _create_agent_api_app(cfg: GatekeeperConfig, data_dir: Path) -> FastAPI:
     """Build the FastAPI app that listens on the LAN interface for agent calls.
 
@@ -465,6 +496,71 @@ def _create_agent_api_app(cfg: GatekeeperConfig, data_dir: Path) -> FastAPI:
             lifeboat_url or "none",
         )
         return JSONResponse({"status": "registered"})
+
+    @app.post("/api/agents/fragments")
+    async def receive_file(request: Request) -> JSONResponse:
+        client_ip = request.client.host if request.client else ""
+
+        if not _is_lan_ip(client_ip):
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+        auth = request.headers.get("authorization", "")
+        expected = cfg.agent_api.token
+        if (
+            not expected
+            or not auth.startswith("Bearer ")
+            or not _secrets_mod.compare_digest(auth[7:], expected)
+        ):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        upload_queue = _state.get("upload_queue")
+        if upload_queue is None:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+
+        meta_header = request.headers.get("x-fragment-metadata", "")
+        if not meta_header:
+            return JSONResponse(
+                {"error": "Missing X-Fragment-Metadata header"}, status_code=400
+            )
+        try:
+            meta = _FragmentMetadata.model_validate_json(meta_header)
+        except Exception:
+            return JSONResponse(
+                {"error": "Invalid X-Fragment-Metadata"}, status_code=400
+            )
+
+        content = await request.body()
+        if not content:
+            return JSONResponse({"error": "Empty body"}, status_code=400)
+
+        upload_tmp_dir: Path = _state.get("upload_tmp_dir", data_dir / "upload_tmp")
+        upload_tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = upload_tmp_dir / f"{uuid.uuid4().hex}.tmp"
+        tmp_path.write_bytes(content)
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+
+        config_state: GatekeeperConfig | None = _state.get("config")
+        profile = (
+            config_state.fragmentation.profile if config_state else "balanced"
+        )
+
+        item = UploadItem(
+            file_path=str(tmp_path),
+            profile=profile,
+            agent=meta.agent_name,
+            original_path=meta.original_path,
+        )
+        await upload_queue.put(item)
+
+        logger.info(
+            "Received file from agent '%s' (%d bytes) — queued for upload",
+            meta.agent_name,
+            len(content),
+        )
+        return JSONResponse({"status": "queued"})
 
     return app
 

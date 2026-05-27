@@ -103,6 +103,31 @@ def _create_lifeboat_app(
     return app
 
 
+async def _upload_worker(
+    queue: asyncio.Queue,
+    client: GatekeeperClient,
+    agent_name: str,
+) -> None:
+    """Read file paths from the upload queue and send each file to the gatekeeper."""
+    logger.info("Upload worker started")
+    while True:
+        file_path: str = await queue.get()
+        try:
+            data = Path(file_path).read_bytes()
+            metadata = {
+                "original_path": file_path,
+                "agent_name": agent_name,
+            }
+            await client.send_fragment(data, metadata)
+            logger.info("Uploaded file (%d bytes)", len(data))
+        except (OSError, IOError) as exc:
+            logger.error("Failed to upload file: %s", type(exc).__name__)
+        except Exception as exc:
+            logger.error("Unexpected upload error: %s", type(exc).__name__)
+        finally:
+            queue.task_done()
+
+
 async def _run(config_path: Path) -> None:
     logger.info("BackupBuddy agent starting")
 
@@ -162,8 +187,12 @@ async def _run(config_path: Path) -> None:
 
     stop_watch = watch_config(config_path, _on_reload)
 
-    logger.info("Agent running — file watcher active")
+    logger.info("Agent running — file watcher and upload worker active")
 
+    upload_worker_task = asyncio.create_task(
+        _upload_worker(upload_queue, client, config.gatekeeper.name),
+        name="upload-worker",
+    )
     try:
         if lifeboat_host and lifeboat_port:
             lifeboat_app = _create_lifeboat_app(config, client)
@@ -176,12 +205,15 @@ async def _run(config_path: Path) -> None:
             await asyncio.gather(
                 uvicorn.Server(lb_cfg).serve(),
                 watcher.run(),
+                upload_worker_task,
             )
         else:
-            await watcher.run()
+            await asyncio.gather(watcher.run(), upload_worker_task)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
+        upload_worker_task.cancel()
+        await asyncio.gather(upload_worker_task, return_exceptions=True)
         stop_watch()
         await client.aclose()
 
