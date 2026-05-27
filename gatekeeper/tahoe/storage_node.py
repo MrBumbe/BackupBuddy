@@ -80,6 +80,7 @@ class StorageNode:
         shares_needed: int = 3,
         shares_happy: int = 5,
         shares_total: int = 5,
+        hostname: str = "127.0.0.1",
     ) -> None:
         self.basedir = Path(os.path.realpath(basedir))
         self.storage_dir = Path(os.path.realpath(storage_dir))
@@ -89,6 +90,7 @@ class StorageNode:
         self.shares_needed = shares_needed
         self.shares_happy = shares_happy
         self.shares_total = shares_total
+        self.hostname = hostname
         self._process: asyncio.subprocess.Process | None = None
         self._tahoe: str = _find_tahoe()
 
@@ -114,7 +116,7 @@ class StorageNode:
         self.basedir.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Creating storage node at %s", self.basedir)
         result = subprocess.run(
-            [self._tahoe, "create-node", str(self.basedir)],
+            [self._tahoe, "create-node", f"--hostname={self.hostname}", str(self.basedir)],
             capture_output=True,
             text=True,
         )
