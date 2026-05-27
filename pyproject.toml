@@ -302,7 +302,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/allmydata"]
+packages = ["src/allmydata", "gatekeeper", "agent"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
