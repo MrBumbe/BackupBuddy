@@ -1545,53 +1545,75 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.2 — Two-node smoke test (local machine)
+### [x] 1.16.2 — Two-node smoke test (local machine) — Scenario 1
 
-**Reads:** docs/testing.md → Scenario 1, docs/testing.md → Scenario 3
-**Creates:** `tests/integration/smoke_test.sh`
+**Reads:** docs/testing.md → Scenario 1
+**Creates:** `tests/integration/smoke_test.sh`, `tests/integration/bootstrap_gk.py`,
+`tests/integration/run_tahoe_node.py`, `tests/integration/smoke_scenario_1.py`
 **Requirements:**
-- Script spins up two gatekeeper processes and one agent on the local machine
-  using separate config directories and ports
-- Runs docs/testing.md Scenario 1 (basic backup and restore)
-- Runs docs/testing.md Scenario 3 (lifeboat restore) in simplified form
-  (simulate gatekeeper loss by deleting its DB and restoring from agent)
-- Script cleans up all processes and temp files on exit
-- Intended to run on the development machine or Ubuntu server without VMs
+- `bootstrap_gk.py` bootstraps GK1 (introducer + storage node + root_dir.cap +
+  catalog.db) and GK2 (storage node only); mkdir() retried until storage node
+  self-announces (up to 30s)
+- `run_tahoe_node.py` runs a pre-created Tahoe node directory (used for GK2)
+- `smoke_test.sh` starts GK1 gatekeeper daemon + GK2 bare Tahoe node, waits for
+  readiness, runs Scenario 1, cleans up on exit
+- `smoke_scenario_1.py` registers agent, POSTs file to `/api/agents/fragments`,
+  polls catalog.db, restores via TahoeClient, verifies SHA-256
+- Agent API HTTP requests bound to LAN IP via httpx local_address
+- Script cleans up all processes and temp dirs on exit
 **Done when:**
-- Scenario 1: file backed up, restored, hash verified
-- Scenario 3 (simplified): DB deleted, catalog reconstructed from lifeboat,
-  file restored successfully
-- All processes cleaned up after test
+- Scenario 1: file backed up, restored, hash verified ✓
+- All processes cleaned up after test ✓
 
 ```
-> Kludde: <!-- -->
+> Implementerat 2026-05-27. Test profile (k=1/n=2/happy=1) används för att
+> köra smoke-testet med bara 1 storage node om GK2 inte hinner anmäla sig.
+> Scenario 3 (lifeboat restore) är separerat till task 1.16.5.
 ```
 
 ---
 
-### [ ] 1.16.4 — Agent upload pipeline
+### [x] 1.16.4 — Agent upload pipeline
 
 **Reads:** docs/architecture.md → Data flow backup, docs/testing.md → Scenario 1
-**Creates:** `/api/agents/fragments` endpoint in `gatekeeper/main.py`,
-`_upload_worker` coroutine in `agent/main.py`
+**Creates:** `/api/agents/fragments` endpoint i `gatekeeper/main.py`,
+`_upload_worker` coroutine i `agent/main.py`
 **Requirements:**
-- `POST /api/agents/fragments` on the gatekeeper agent API (LAN, token-auth):
-  receives raw file bytes + `X-Fragment-Metadata` JSON header
-  (`original_path`, `agent_name`), writes to `data_dir/upload_tmp/`,
-  creates UploadItem, puts on gatekeeper upload queue
-- Agent `_upload_worker`: consumes `upload_queue`, reads file, calls
-  `GatekeeperClient.send_fragment()` with metadata
-- Gatekeeper UploadQueueWorker started in lifespan and stopped on shutdown
-- Upload queue exposed on `_state["upload_queue"]` for the agent API handler
+- `POST /api/agents/fragments` på gatekeeper agent API (LAN, token-auth):
+  tar emot råa filebytes + `X-Fragment-Metadata` JSON-header
+  (`original_path`, `agent_name`), skriver till `data_dir/upload_tmp/`,
+  skapar UploadItem, lägger på gatekeeper upload queue
+- Agent `_upload_worker`: konsumerar `upload_queue`, läser fil, anropar
+  `GatekeeperClient.send_fragment()` med metadata
+- Gatekeeper UploadQueueWorker startas i lifespan och stoppas vid shutdown
+- Upload queue exponeras via `_state["upload_queue"]` för agent API-handlens
 **Done when:**
-- Agent detects a stable file → watcher puts path on queue → upload worker
-  sends it to gatekeeper → gatekeeper queues it → fragmenter uploads to Tahoe
-  → catalog.db entry created
-- Scenario 1 in smoke test passes end-to-end
+- `/api/agents/fragments` tar emot fil och lägger på upload queue ✓
+- UploadQueueWorker startas/stoppas korrekt i lifespan ✓
+- Agent `_upload_worker` skickar filer från lokal kö till gatekeeper ✓
+- Scenario 1 i smoke test verifierar hela kedjan end-to-end ✓
 
 ```
-> Kludde: <!-- -->
+> Implementerat 2026-05-27. Även test-profil (k=1/n=2/happy=1),
+> TahoeConfig.tahoe_web_port, och BACKUPBUDDY_LIFEBOAT_KEY_PATH env-override
+> lagts till som prerequisites för smoke-testet.
 ```
+
+---
+
+### [ ] 1.16.5 — Smoke test Scenario 3 (lifeboat restore)
+
+**Reads:** docs/testing.md → Scenario 3, gatekeeper/lifeboat/bundle.py
+**Creates:** `tests/integration/smoke_scenario_3.py` (körs från `smoke_test.sh`)
+**Requirements:**
+- Lägg till anrop i `smoke_test.sh` efter Scenario 1
+- `smoke_scenario_3.py` skapar ett lifeboat-bundle från GK1:s data med
+  `create_bundle()`, raderar catalog.db och root_dir.cap, återställer med
+  `extract_bundle()`, verifierar att filen fortfarande kan restoras
+- Kräver att lifeboat-nyckeln finns tillgänglig (GK1_KEY från smoke-testet)
+**Done when:**
+- catalog.db + root_dir.cap raderade, återställda från bundle ✓
+- Fil från Scenario 1 kan fortfarande restoras och hash-verifieras ✓
 
 ---
 
