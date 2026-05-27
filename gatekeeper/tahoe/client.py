@@ -9,6 +9,7 @@ appear in any name or docstring visible outside this module.
 Callers work with opaque reference strings returned by upload/mkdir.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -66,14 +67,14 @@ class TahoeClient:
         Raises TahoeError on upload failure.
         """
         path = Path(file_path)
-        logger.debug("Uploading %s (%d bytes)", path.name, path.stat().st_size)
+        file_bytes = await asyncio.to_thread(path.read_bytes)
+        logger.debug("Uploading %s (%d bytes)", path.name, len(file_bytes))
 
-        with open(path, "rb") as fh:
-            response = await self._http.put(
-                f"{self._node_url}/uri",
-                content=fh,
-                headers={"Content-Type": "application/octet-stream"},
-            )
+        response = await self._http.put(
+            f"{self._node_url}/uri",
+            content=file_bytes,
+            headers={"Content-Type": "application/octet-stream"},
+        )
 
         _raise_for_tahoe_error(response, "upload")
         ref = response.text.strip()
