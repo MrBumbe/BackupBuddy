@@ -50,7 +50,7 @@ def main() -> None:
     tahoe = _find_tahoe()
     print(f"Starting Tahoe node at {basedir}", flush=True)
     try:
-        subprocess.run([tahoe, "run", str(basedir)], check=False)
+        subprocess.run([tahoe, "run", "--allow-stdin-close", str(basedir)], check=False)
     except KeyboardInterrupt:
         pass
 
