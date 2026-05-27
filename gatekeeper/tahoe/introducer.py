@@ -95,7 +95,7 @@ class IntroducerNode:
         # the subprocess's reactor once the OS buffer fills.  Readiness is
         # detected by polling the Foolscap tub port from the introducer config.
         self._process = await asyncio.create_subprocess_exec(
-            self._tahoe, "run", str(self.basedir),
+            self._tahoe, "run", "--allow-stdin-close", str(self.basedir),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
