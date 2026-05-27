@@ -188,7 +188,7 @@ class StorageNode:
         self._process = await asyncio.create_subprocess_exec(
             self._tahoe, "run", str(self.basedir),
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,  # Tahoe logs to stdout; merge for readiness scan
         )
 
         ready = await self._wait_for_ready()
@@ -229,10 +229,10 @@ class StorageNode:
 
     async def _wait_for_ready(self) -> bool:
         """
-        Read stderr until Tahoe emits "client running", or until timeout.
+        Read stdout until Tahoe emits "client running", or until timeout.
         Returns True if the node became ready, False on timeout or early exit.
         """
-        if self._process is None or self._process.stderr is None:
+        if self._process is None or self._process.stdout is None:
             return False
 
         deadline = asyncio.get_event_loop().time() + _STARTUP_TIMEOUT
@@ -241,7 +241,7 @@ class StorageNode:
                 return False
             try:
                 line = await asyncio.wait_for(
-                    self._process.stderr.readline(),
+                    self._process.stdout.readline(),
                     timeout=1.0,
                 )
             except asyncio.TimeoutError:

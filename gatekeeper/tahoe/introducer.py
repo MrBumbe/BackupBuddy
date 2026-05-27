@@ -94,7 +94,7 @@ class IntroducerNode:
         self._process = await asyncio.create_subprocess_exec(
             self._tahoe, "run", str(self.basedir),
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,  # Tahoe logs to stdout; merge for readiness scan
         )
 
         # Poll for the node to begin accepting connections.
@@ -153,7 +153,7 @@ class IntroducerNode:
         or until the timeout expires.
         Returns True if the node became ready, False on timeout.
         """
-        if self._process is None or self._process.stderr is None:
+        if self._process is None or self._process.stdout is None:
             return False
 
         deadline = asyncio.get_event_loop().time() + _STARTUP_TIMEOUT
@@ -162,7 +162,7 @@ class IntroducerNode:
                 return False
             try:
                 line = await asyncio.wait_for(
-                    self._process.stderr.readline(),
+                    self._process.stdout.readline(),
                     timeout=1.0,
                 )
             except asyncio.TimeoutError:
