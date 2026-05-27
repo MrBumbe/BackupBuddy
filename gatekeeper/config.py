@@ -88,7 +88,7 @@ class FragmentationConfig(BaseModel):
     @field_validator("profile")
     @classmethod
     def _validate_profile(cls, v: str) -> str:
-        valid = {"balanced", "secure", "paranoid", "adaptive"}
+        valid = {"balanced", "secure", "paranoid", "adaptive", "test"}
         if v.lower() not in valid:
             raise ValueError(f"profile must be one of {sorted(valid)}, got {v!r}")
         return v.lower()
