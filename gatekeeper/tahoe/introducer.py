@@ -100,9 +100,8 @@ class IntroducerNode:
             stderr=asyncio.subprocess.DEVNULL,
         )
 
-        furl = self._read_furl()
-        ready = await self._wait_for_ready(furl)
-        if not ready:
+        furl = await self._wait_for_ready()
+        if furl is None:
             await self.stop()
             raise RuntimeError(
                 f"Introducer node did not become ready within {_STARTUP_TIMEOUT}s"
@@ -147,39 +146,24 @@ class IntroducerNode:
             )
         return furl_path.read_text().strip()
 
-    async def _wait_for_ready(self, furl: str) -> bool:
+    async def _wait_for_ready(self) -> str | None:
         """
-        Poll the introducer's Foolscap tub port until it accepts TCP connections.
-        Port is extracted from the FURL (pb://nodeid@host:PORT/secret).
-        Returns True if the port became reachable, False on timeout or early exit.
+        Wait for the introducer to start by polling for the private/introducer.furl
+        file (written by Tahoe when the Foolscap tub registers the reference).
+        Returns the FURL string when ready, or None on timeout or early exit.
         """
         if self._process is None:
-            return False
+            return None
 
-        try:
-            # FURL format: pb://NODEID@HOST:PORT/SECRET
-            port = int(furl.split("@")[1].split(":")[1].split("/")[0])
-        except (IndexError, ValueError):
-            logger.warning("Could not parse port from introducer FURL — falling back to file check")
-            await asyncio.sleep(2.0)
-            return (self.basedir / "private" / "introducer.furl").exists()
-
+        furl_path = self.basedir / "private" / "introducer.furl"
         deadline = asyncio.get_event_loop().time() + _STARTUP_TIMEOUT
         while asyncio.get_event_loop().time() < deadline:
             if self._process.returncode is not None:
-                return False
-            try:
-                _reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection("127.0.0.1", port),
-                    timeout=1.0,
-                )
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-                return True
-            except (OSError, asyncio.TimeoutError):
-                await asyncio.sleep(0.5)
+                return None
+            if furl_path.exists():
+                furl = furl_path.read_text().strip()
+                if furl:
+                    return furl
+            await asyncio.sleep(0.5)
 
-        return False
+        return None
