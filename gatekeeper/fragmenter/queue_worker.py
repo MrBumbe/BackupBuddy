@@ -107,10 +107,17 @@ class UploadQueueWorker:
 
     async def _worker(self) -> None:
         """Main worker loop: dequeue one item, process it, repeat."""
+        logger.debug("Worker task starting — waiting for items")
         while True:
             item: UploadItem = await self._queue.get()
+            logger.debug("Worker dequeued item for agent=%s", item.agent)
             try:
                 await self._process_with_retries(item)
+            except Exception as exc:
+                logger.error(
+                    "Unexpected error in upload worker — agent=%s error=%s",
+                    item.agent, type(exc).__name__, exc_info=True,
+                )
             finally:
                 # task_done() always called after a successful get(), even on
                 # unexpected exceptions, so callers awaiting queue.join() don't hang.
