@@ -1735,7 +1735,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.8 — Integration test: full Scenario 3 (lifeboat VM restore)
+### [x] 1.16.8 — Integration test: full Scenario 3 (lifeboat VM restore)
 
 **Reads:** `project-docs/testing.md` → Scenario 3,
   `project-docs/test-report-proxmox-2026-05-28.md`,
@@ -1759,7 +1759,18 @@ docs/design.md → Node removal
 - All previously backed-up files appear in the GUI after restore
 
 ```
-> Kludde: <!-- -->
+> Kludde: Implemented Option A (Phase 1 scope): passphrase → recovery_kit.enc →
+> root_dir_cap → Tahoe catalog reconstruction. Two code gaps fixed:
+> (1) Wizard step 5 now collects passphrase + creates recovery_kit.enc during cascade.
+>     Download endpoint returns recovery_kit.enc (binary) instead of raw root_dir_cap.
+> (2) POST /api/restore/emergency now accepts recovery_kit_b64 + passphrase;
+>     extracts root_dir_cap via extract_recovery_kit(), then calls reconstruct_catalog().
+>     raw recovery_key field kept for backward compat (Scenario 4 API path).
+> Proxmox test (VM 101, snapshot pre116test): wiped catalog.db, called emergency
+> restore with recovery_kit_b64 + passphrase → 53/53 files reconstructed, restore
+> of scenario1_testfile.txt returned SHA-256 ceaa7ca994f9cc... (exact match).
+> Full test report: project-docs/test-report-scenario3-2026-05-28.md
+> Option B (catalog snapshot preserved in recovery kit) → Phase 2 item 2.10.
 ```
 
 ---
@@ -1855,6 +1866,27 @@ docs/design.md → Node removal
 
 ## 2.8 — File-level backup granularity
 - Allow individual files to be selected in backup.cfg, not just folders
+
+## 2.10 — Recovery kit Option B: full catalog snapshot in recovery kit
+
+Current Phase 1 disaster recovery (Option A) reconstructs the catalog from the Tahoe
+file tree using `root_dir_cap`. Reconstructed entries have no SHA-256, so the nightly
+verifier logs "hash unknown" warnings for all entries until files are re-backed-up.
+
+Option B stores the `lifeboat.key` (runtime key) inside `recovery_kit.enc`:
+  passphrase → recovery_kit.enc → lifeboat.key → decrypt lifeboat.enc on agent
+  → full state: node_privkey, root_dir_cap, catalog.db snapshot, gatekeeper.cfg
+
+This preserves SHA-256 across disaster recovery and allows the nightly verifier
+to fully verify all files immediately after restore.
+
+**Requires:**
+- `create_recovery_kit()` extended to include `lifeboat_key` field (new format version)
+- `extract_recovery_kit()` updated to return lifeboat_key when present
+- Emergency restore flow: download lifeboat.enc from agent, decrypt with lifeboat_key
+- Restore node_privkey, root_dir.cap, catalog.db, gatekeeper.cfg from the bundle
+- GUI flow for "I have recovery_kit.enc + passphrase, retrieve lifeboat from agent"
+- Agent must have a reachable API endpoint to serve the lifeboat bundle
 
 ## 2.9 — Docker Compose distribution
 
