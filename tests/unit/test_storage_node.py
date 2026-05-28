@@ -163,6 +163,34 @@ class TestStorageNodeConfigure(unittest.TestCase):
         self.assertEqual(cfg.get("client", "shares.happy"),  "7")
         self.assertEqual(cfg.get("client", "shares.total"),  "7")
 
+    @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
+    def test_configure_sets_tub_location_with_hostname(self, _mock_find):
+        """tub.location must contain the configured hostname, not 127.0.0.1."""
+        from gatekeeper.tahoe.storage_node import StorageNode
+        StorageNode(
+            str(self.basedir), str(self.storage_dir),
+            hostname="100.64.1.1",
+        )._configure(_FAKE_FURL)
+        tub_location = self._read_cfg().get("node", "tub.location")
+        self.assertIn("100.64.1.1", tub_location)
+        self.assertTrue(tub_location.startswith("tcp:"))
+
+    @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
+    def test_configure_preserves_existing_tub_port(self, _mock_find):
+        """tub.location port must match the tub.port already in tahoe.cfg."""
+        from gatekeeper.tahoe.storage_node import StorageNode
+        # Simulate a tahoe.cfg that already has a concrete tub.port assigned by Tahoe
+        cfg_path = self.basedir / "tahoe.cfg"
+        existing = cfg_path.read_text()
+        cfg_path.write_text(existing + "\ntub.port = tcp:19283\n")
+
+        StorageNode(
+            str(self.basedir), str(self.storage_dir),
+            hostname="100.64.1.1",
+        )._configure(_FAKE_FURL)
+        tub_location = self._read_cfg().get("node", "tub.location")
+        self.assertEqual(tub_location, "tcp:100.64.1.1:19283")
+
 
 class TestStorageNodeStartStop(unittest.IsolatedAsyncioTestCase):
 
@@ -177,19 +205,21 @@ class TestStorageNodeStartStop(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
-    async def test_start_returns_when_client_running_logged(self, _mock_find):
-        """start() must succeed when Tahoe emits 'client running'."""
+    async def test_start_returns_when_port_becomes_reachable(self, _mock_find):
+        """start() must succeed when the Tahoe HTTP gateway port becomes reachable."""
         from gatekeeper.tahoe.storage_node import StorageNode
 
-        fake_stderr = AsyncMock()
-        fake_stderr.readline = AsyncMock(return_value=b"client running\n")
         fake_process = MagicMock()
         fake_process.returncode = None
-        fake_process.stderr = fake_stderr
         fake_process.wait = AsyncMock()
         fake_process.terminate = MagicMock()
 
-        with patch("asyncio.create_subprocess_exec", return_value=fake_process):
+        fake_writer = MagicMock()
+        fake_writer.close = MagicMock()
+        fake_writer.wait_closed = AsyncMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=fake_process), \
+             patch("asyncio.open_connection", return_value=(AsyncMock(), fake_writer)):
             node = StorageNode(str(self.basedir), str(self.storage_dir))
             await node.start()
 
@@ -203,6 +233,18 @@ class TestStorageNodeStartStop(unittest.IsolatedAsyncioTestCase):
         empty.mkdir()
         node = StorageNode(str(empty), str(self.storage_dir))
         with self.assertRaises(RuntimeError):
+            await node.start()
+
+    @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
+    async def test_start_raises_if_tub_location_is_localhost(self, _mock_find):
+        """start() must refuse to start when tub.location is set to 127.0.0.1."""
+        from gatekeeper.tahoe.storage_node import StorageNode
+        cfg_path = self.basedir / "tahoe.cfg"
+        existing = cfg_path.read_text()
+        cfg_path.write_text(existing + "\ntub.location = tcp:127.0.0.1:19283\n")
+
+        node = StorageNode(str(self.basedir), str(self.storage_dir))
+        with self.assertRaises(RuntimeError, msg="should refuse 127.0.0.1 in tub.location"):
             await node.start()
 
     @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")

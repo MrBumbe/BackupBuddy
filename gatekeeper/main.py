@@ -263,6 +263,7 @@ async def lifespan(app: FastAPI):
                 shares_needed=shares_k,
                 shares_happy=shares_happy,
                 shares_total=shares_n,
+                hostname=config.tailscale_ip or "127.0.0.1",
             )
             storage_node.create(introducer_furl)
             await storage_node.start()

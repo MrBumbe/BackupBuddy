@@ -40,6 +40,17 @@ def _find_tahoe() -> str:
 _DEFAULT_WEB_PORT = 3456
 
 
+def _parse_tub_port(tub_port_str: str) -> int:
+    """Extract the port number from a Tahoe tub.port value (e.g. 'tcp:12345')."""
+    parts = tub_port_str.split(":")
+    if len(parts) >= 2:
+        try:
+            return int(parts[1])
+        except ValueError:
+            pass
+    return 0
+
+
 class StorageNode:
     """
     Manages a single Tahoe-LAFS storage node for the gatekeeper.
@@ -144,6 +155,12 @@ class StorageNode:
             config.add_section("node")
         config.set("node", "nickname", self.nickname)
         config.set("node", "web.port", f"tcp:{self.web_port}:interface=127.0.0.1")
+        # Set tub.location to the real hostname so remote storage peers can connect.
+        # Read the existing tub.port (written by tahoe create-node) to preserve
+        # the assigned port; only the hostname part is ours to override.
+        existing_tub_port = config.get("node", "tub.port", fallback="tcp:0")
+        listen_port = _parse_tub_port(existing_tub_port)
+        config.set("node", "tub.location", f"tcp:{self.hostname}:{listen_port}")
 
         if not config.has_section("client"):
             config.add_section("client")
@@ -182,6 +199,16 @@ class StorageNode:
         if not (self.basedir / "tahoe.cfg").exists():
             raise RuntimeError(
                 "Storage node has not been created — call create() first"
+            )
+
+        cfg = configparser.ConfigParser()
+        cfg.read(str(self.basedir / "tahoe.cfg"))
+        tub_location = cfg.get("node", "tub.location", fallback="")
+        if "127.0.0.1" in tub_location:
+            raise RuntimeError(
+                f"Storage node tub.location is '{tub_location}' — remote peers "
+                "cannot connect via 127.0.0.1. Set the gatekeeper's Tailscale IP "
+                "as the hostname so the storage node advertises a reachable address."
             )
 
         logger.info("Starting storage node")

@@ -79,6 +79,7 @@ async def bootstrap_primary(
     web_port: int,
     profile: str,
     key_path: Path,
+    hostname: str = "127.0.0.1",
 ) -> str:
     """Create GK1 data dirs, root_dir.cap, catalog.db, and lifeboat.key.
 
@@ -114,6 +115,7 @@ async def bootstrap_primary(
         shares_needed=shares_k,
         shares_happy=shares_happy,
         shares_total=shares_n,
+        hostname=hostname,
     )
     node.create(furl)
     await node.start()
@@ -153,6 +155,7 @@ async def bootstrap_secondary(
     profile: str,
     key_path: Path,
     introducer_furl: str,
+    hostname: str = "127.0.0.1",
 ) -> None:
     """Create GK2 storage node directory configured to join GK1's introducer."""
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -175,6 +178,7 @@ async def bootstrap_secondary(
         shares_needed=shares_k,
         shares_happy=shares_happy,
         shares_total=shares_n,
+        hostname=hostname,
     )
     node.create(introducer_furl)
     logger.info("Storage node directory created at %s", storage_node_dir)
@@ -195,6 +199,8 @@ def _parse_args() -> argparse.Namespace:
                    help="destination path for lifeboat.key")
     p.add_argument("--introducer-furl", default="", metavar="FURL",
                    help="existing introducer FURL (secondary mode; omit for primary)")
+    p.add_argument("--hostname", default="127.0.0.1", metavar="IP",
+                   help="IP address this node advertises to peers (use Tailscale or LAN IP)")
     return p.parse_args()
 
 
@@ -213,6 +219,7 @@ async def _main() -> None:
             profile=args.profile,
             key_path=key_path,
             introducer_furl=args.introducer_furl,
+            hostname=args.hostname,
         )
         print("READY")
     else:
@@ -223,6 +230,7 @@ async def _main() -> None:
             web_port=args.web_port,
             profile=args.profile,
             key_path=key_path,
+            hostname=args.hostname,
         )
         # Print FURL last so the shell can capture it without parsing log lines
         print(f"FURL={furl}")
