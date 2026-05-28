@@ -145,6 +145,31 @@ class ClusterDB:
         )
         self._conn.commit()
 
+    def upsert_peer_member(
+        self,
+        node_id: str,
+        display_name: str,
+        tailscale_hostname: str,
+        profile: str,
+    ) -> None:
+        """Insert a peer member received during cluster join.
+
+        On conflict (e.g. cascade retry), updates display_name, tailscale_hostname,
+        and profile without touching joined_at or resource accounting columns.
+        """
+        self._conn.execute(
+            "INSERT INTO members "
+            "(node_id, display_name, tailscale_hostname, joined_at, "
+            "contribution_bytes, usage_bytes, profile, status) "
+            "VALUES (?, ?, ?, ?, 0, 0, ?, 'active') "
+            "ON CONFLICT(node_id) DO UPDATE SET "
+            "display_name       = excluded.display_name, "
+            "tailscale_hostname = excluded.tailscale_hostname, "
+            "profile            = excluded.profile",
+            (node_id, display_name, tailscale_hostname, time.time(), profile),
+        )
+        self._conn.commit()
+
     def get_member(self, node_id: str) -> dict | None:
         row = self._conn.execute(
             "SELECT * FROM members WHERE node_id = ?", (node_id,)

@@ -311,6 +311,7 @@ async def _cascade_join(
     """
     cap_path = data_dir / "root_dir.cap"
     introducer_furl: str
+    join_members: list[dict] = []
 
     if cap_path.exists():
         logger.info("root_dir.cap already exists — skipping Tahoe bootstrap")
@@ -332,6 +333,7 @@ async def _cascade_join(
             raise RuntimeError(f"Join failed: {result.error}")
 
         introducer_furl = result.introducer_furl
+        join_members = result.members
         logger.info("Join accepted by cluster — introducer_furl received")
 
         primary_path = state.storage_paths[0]
@@ -368,6 +370,14 @@ async def _cascade_join(
         tailscale_hostname=state.node_name,
         profile=state.profile,
     )
+    for peer in join_members:
+        if peer.get("node_id") != state.node_name:
+            cluster_db.upsert_peer_member(
+                node_id=peer["node_id"],
+                display_name=peer["display_name"],
+                tailscale_hostname=peer["tailscale_hostname"],
+                profile=peer.get("profile", "adaptive"),
+            )
     cluster_db.close()
 
     # -- Secrets --
