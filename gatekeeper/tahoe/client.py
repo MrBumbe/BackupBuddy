@@ -209,36 +209,36 @@ class TahoeClient:
         return ref
 
     async def check_cap(self, file_ref: str) -> dict | None:
-        """Check that a file reference is accessible.
+        """Check a file reference and return real share counts.
 
-        Uses t=json which is supported by the BackupBuddy Tahoe fork.
-        The fork does not support t=check, so per-file share counts are not
-        available via this path. accessible=True means the file node exists
-        and returned a valid JSON response.
+        Uses POST /uri/<ref>?t=check&output=json — this endpoint contacts
+        storage nodes to count available shares and is supported by the
+        BackupBuddy Tahoe fork (t=check exists on POST, not on GET).
 
         Returns a dict with keys:
-          accessible    (bool) — True if the file is reachable
-          shares_good   (int)  — 1 when accessible (share count unavailable in fork)
-          shares_needed (int)  — 1 (share count unavailable in fork)
+          accessible    (bool) — True when the check completed successfully
+          shares_good   (int)  — shares currently available in the grid
+          shares_needed (int)  — minimum shares needed for reconstruction (k)
 
         Returns None if the check itself fails (network error, ref not found).
         Never raises — callers use the return value to decide next steps.
         """
         encoded_ref = urlquote(file_ref, safe="")
         try:
-            response = await self._http.get(
+            response = await self._http.post(
                 f"{self._node_url}/uri/{encoded_ref}",
-                params={"t": "json"},
+                params={"t": "check", "output": "json"},
             )
             _raise_for_tahoe_error(response, "check_cap")
             data = response.json()
-            # t=json returns ["filenode"/"dirnode", {...}] for valid caps
-            if not isinstance(data, list) or len(data) < 1:
-                return None
+            results = data.get("results", {})
+            # LIT files return {"healthy": True} without share counts — default to 1/1
+            shares_good = results.get("count-shares-good", 1)
+            shares_needed = results.get("count-shares-needed", 1)
             return {
                 "accessible": True,
-                "shares_good": 1,
-                "shares_needed": 1,
+                "shares_good": shares_good,
+                "shares_needed": shares_needed,
             }
         except Exception:
             return None

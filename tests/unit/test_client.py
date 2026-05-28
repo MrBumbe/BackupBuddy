@@ -315,5 +315,130 @@ class TestTahoeClientMkdir(unittest.IsolatedAsyncioTestCase):
                 await client.mkdir()
 
 
+# ---------------------------------------------------------------------------
+# check_cap tests
+# ---------------------------------------------------------------------------
+
+class TestTahoeClientCheckCap(unittest.IsolatedAsyncioTestCase):
+
+    async def test_healthy_file_returns_real_share_counts(self):
+        from gatekeeper.tahoe.client import TahoeClient
+
+        check_json = {
+            "storage-index": "aabbcc",
+            "summary": "Healthy",
+            "results": {
+                "healthy": True,
+                "count-shares-good": 5,
+                "count-shares-needed": 3,
+                "count-shares-expected": 5,
+            },
+        }
+        fake_resp = _make_response(200, json_body=check_json)
+
+        async with TahoeClient(_NODE_URL) as client:
+            client._http.post = AsyncMock(return_value=fake_resp)
+            result = await client.check_cap("URI:CHK:abc123")
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result["accessible"])
+        self.assertEqual(result["shares_good"], 5)
+        self.assertEqual(result["shares_needed"], 3)
+
+    async def test_under_replicated_file_returns_low_share_count(self):
+        """shares_good < shares_needed — caller can detect under-replication."""
+        from gatekeeper.tahoe.client import TahoeClient
+
+        check_json = {
+            "storage-index": "aabbcc",
+            "summary": "Not Healthy",
+            "results": {
+                "healthy": False,
+                "count-shares-good": 2,
+                "count-shares-needed": 3,
+                "count-shares-expected": 5,
+            },
+        }
+        fake_resp = _make_response(200, json_body=check_json)
+
+        async with TahoeClient(_NODE_URL) as client:
+            client._http.post = AsyncMock(return_value=fake_resp)
+            result = await client.check_cap("URI:CHK:underrep")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["shares_good"], 2)
+        self.assertEqual(result["shares_needed"], 3)
+        self.assertLess(result["shares_good"], result["shares_needed"])
+
+    async def test_lit_file_defaults_to_one_of_one(self):
+        """LIT files have no share counts — must default to 1/1 (always healthy)."""
+        from gatekeeper.tahoe.client import TahoeClient
+
+        check_json = {"storage-index": "", "results": {"healthy": True}}
+        fake_resp = _make_response(200, json_body=check_json)
+
+        async with TahoeClient(_NODE_URL) as client:
+            client._http.post = AsyncMock(return_value=fake_resp)
+            result = await client.check_cap("URI:LIT:abc")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["shares_good"], 1)
+        self.assertEqual(result["shares_needed"], 1)
+
+    async def test_network_error_returns_none(self):
+        """Any exception during the check returns None — caller treats as inaccessible."""
+        from gatekeeper.tahoe.client import TahoeClient
+
+        async with TahoeClient(_NODE_URL) as client:
+            client._http.post = AsyncMock(side_effect=Exception("connection refused"))
+            result = await client.check_cap("URI:CHK:bad")
+
+        self.assertIsNone(result)
+
+    async def test_http_error_returns_none(self):
+        from gatekeeper.tahoe.client import TahoeClient
+
+        fake_resp = _make_response(404, text="not found")
+
+        async with TahoeClient(_NODE_URL) as client:
+            client._http.post = AsyncMock(return_value=fake_resp)
+            result = await client.check_cap("URI:CHK:missing")
+
+        self.assertIsNone(result)
+
+    async def test_uses_post_with_t_check_and_output_json(self):
+        """check_cap must POST to /uri/<ref>?t=check&output=json."""
+        from gatekeeper.tahoe.client import TahoeClient
+
+        check_json = {"storage-index": "x", "results": {"healthy": True, "count-shares-good": 3, "count-shares-needed": 3}}
+        fake_resp = _make_response(200, json_body=check_json)
+
+        async with TahoeClient(_NODE_URL) as client:
+            client._http.post = AsyncMock(return_value=fake_resp)
+            await client.check_cap("URI:CHK:abc")
+
+        call_args = client._http.post.call_args
+        call_url = call_args[0][0]
+        call_params = call_args[1].get("params", {})
+        self.assertIn("/uri/", call_url)
+        self.assertEqual(call_params.get("t"), "check")
+        self.assertEqual(call_params.get("output"), "json")
+
+    async def test_url_encodes_ref(self):
+        """File refs with colons must be URL-encoded before use in the path."""
+        from gatekeeper.tahoe.client import TahoeClient
+
+        check_json = {"storage-index": "x", "results": {"healthy": True}}
+        fake_resp = _make_response(200, json_body=check_json)
+
+        async with TahoeClient(_NODE_URL) as client:
+            client._http.post = AsyncMock(return_value=fake_resp)
+            await client.check_cap("URI:CHK:abc:def")
+
+        call_url = client._http.post.call_args[0][0]
+        self.assertNotIn("URI:CHK:abc:def", call_url,
+                         "Raw ref must not appear un-encoded in the URL")
+
+
 if __name__ == "__main__":
     unittest.main()

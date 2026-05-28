@@ -1697,7 +1697,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.7 — Nightly verifier: real under-replication detection
+### [x] 1.16.7 — Nightly verifier: real under-replication detection
 
 **Reads:** `gatekeeper/verify/nightly.py`, `gatekeeper/tahoe/client.py`,
   `project-docs/test-report-proxmox-2026-05-28.md`
@@ -1720,7 +1720,17 @@ docs/design.md → Node removal
   OR a documented decision is recorded in DECISIONS.md explaining why it cannot
 
 ```
-> Kludde: <!-- -->
+> Kludde: POST /uri/<cap>?t=check&output=json already exists in the BackupBuddy Tahoe fork
+> (t=check is handled on the POST handler of FileNodeHandler — GET only supports t=json).
+> No fork modification needed. CheckResultsRenderer.render_JSON returns count-shares-good
+> and count-shares-needed from the real ICheckable.check() operation, which contacts storage
+> nodes to count available shares. check_cap() in TahoeClient updated to use POST + parse
+> real share counts; LIT files (no count keys in response) default to 1/1.
+> 7 new unit tests in test_client.py cover: healthy file, under-replicated file, LIT file,
+> network error, HTTP error, POST method + params, URL encoding.
+> Layer 2 of nightly verifier can now distinguish "inaccessible" (check returns None)
+> from "under-replicated" (shares_good < shares_needed). All existing nightly verifier
+> tests pass unchanged. Full suite: 882 pass, 12 skip, 1 pre-existing queue_worker fail.
 ```
 
 ---
