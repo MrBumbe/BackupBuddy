@@ -1668,7 +1668,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.6 — Fix tub.location in Tahoe node bootstrap
+### [x] 1.16.6 — Fix tub.location in Tahoe node bootstrap
 
 **Reads:** `gatekeeper/main.py`, `install/gatekeeper.sh`, `project-docs/test-report-proxmox-2026-05-28.md`
 **Modifies:** wherever `tahoe.cfg` is generated during first-run setup
@@ -1687,7 +1687,12 @@ docs/design.md → Node removal
 - Verified in Proxmox environment: all 3 gatekeepers can see each other's storage nodes
 
 ```
-> Kludde: <!-- -->
+> Done 2026-05-28. Used Tailscale IP (not LAN IP) per ADR-002 — confirmed with Johan.
+> StorageNode._configure() now sets tub.location = tcp:<hostname>:<tub_port>, reading
+> the existing tub.port written by tahoe create-node to preserve the assigned port.
+> start() refuses to start if tub.location contains 127.0.0.1 with a clear error.
+> main.py passes config.tailscale_ip as hostname; bootstrap_gk.py gets --hostname flag.
+> Commit: 9dd46d9d4
 ```
 
 ---
