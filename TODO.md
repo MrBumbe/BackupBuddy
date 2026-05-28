@@ -1638,7 +1638,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.3 — Full Proxmox integration tests
+### [x] 1.16.3 — Full Proxmox integration tests
 
 > **⚠ Hardware-dependent.** This task cannot start until dedicated Proxmox
 > hardware is available. See docs/testing.md for full requirements.
@@ -1656,6 +1656,143 @@ docs/design.md → Node removal
 - All seven scenarios pass
 - Results logged cleanly
 - Environment reset after each run
+
+```
+> Run 2026-05-28 on Proxmox 9.2.2 (3 GK VMs + introducer + 3 agent LXCs).
+> Scenarios 1, 2, 4, 5, 6, 7: PASS. Scenario 3: partial (bundle integrity OK;
+> full VM-restore path requires recovery_kit.enc from wizard flow).
+> Bug found and fixed: check_cap used t=check (unsupported in fork) — commit f2c8bd5c7.
+> Infrastructure note: tub.location generated as 127.0.0.1 — see task 1.16.6.
+> Full test report: project-docs/test-report-proxmox-2026-05-28.md.
+```
+
+---
+
+### [ ] 1.16.6 — Fix tub.location in Tahoe node bootstrap
+
+**Reads:** `gatekeeper/main.py`, `install/gatekeeper.sh`, `project-docs/test-report-proxmox-2026-05-28.md`
+**Modifies:** wherever `tahoe.cfg` is generated during first-run setup
+**Requirements:**
+- When BackupBuddy generates `tahoe.cfg` for the storage node, `tub.location`
+  must be set to the machine's actual LAN IP, not `127.0.0.1`
+- `127.0.0.1` causes the node to announce itself as localhost to the introducer,
+  making it unreachable from all other cluster members — multi-node Tahoe breaks silently
+- Correct value: `tcp:<lan_ip>:<tub_port>` where `<lan_ip>` is the same IP the
+  gatekeeper uses for agent-API binding (the first non-loopback, non-Tailscale private IP)
+- The fix should go into the code path that writes `tahoe.cfg`, not patched post-hoc
+- Add a startup check: if `tub.location` contains `127.0.0.1`, log a clear error and refuse to start
+**Done when:**
+- Fresh install generates `tub.location = tcp:<real_ip>:<port>` automatically
+- Startup check catches any misconfigured existing install
+- Verified in Proxmox environment: all 3 gatekeepers can see each other's storage nodes
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
+### [ ] 1.16.7 — Nightly verifier: real under-replication detection
+
+**Reads:** `gatekeeper/verify/nightly.py`, `gatekeeper/tahoe/client.py`,
+  `project-docs/test-report-proxmox-2026-05-28.md`
+**Modifies:** `gatekeeper/tahoe/client.py` and/or `gatekeeper/verify/nightly.py`
+**Requirements:**
+- Layer 2 of the nightly verifier currently only checks file accessibility (HTTP 200).
+  Share counts (`shares_good`, `shares_needed`) are returned as `1`/`1` always
+  because the Tahoe fork does not support `t=check` on file URI endpoints.
+- Goal: detect files that have fewer shares than `shares.needed` (under-replicated
+  files that cannot currently be restored)
+- Option A: Add a `t=check` equivalent endpoint to the Tahoe fork's webapi.
+  Preferred — gives exact share counts. Requires modifying the Tahoe fork.
+- Option B: Use `t=json` on the verify URI (`verify_uri` from the file's JSON info)
+  to count available shares. Needs investigation.
+- Option C: Accept the current limitation for Phase 1 and document it clearly.
+  Prioritise Option A or B if either is straightforward.
+- Whatever the outcome, `check_cap` docstring must accurately describe what it detects
+**Done when:**
+- Layer 2 can distinguish "file inaccessible" from "file under-replicated"
+  OR a documented decision is recorded in DECISIONS.md explaining why it cannot
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
+### [ ] 1.16.8 — Integration test: full Scenario 3 (lifeboat VM restore)
+
+**Reads:** `project-docs/testing.md` → Scenario 3,
+  `project-docs/test-report-proxmox-2026-05-28.md`,
+  `gatekeeper/lifeboat/`, `gatekeeper/gui/routes/onboarding.py`
+**Requirements:**
+- Complete the gap identified in task 1.16.3: the full destroy-and-restore flow
+- Prerequisites: gatekeeper set up via the wizard (not custom bootstrap), so
+  `recovery_kit.enc` exists and a passphrase was set during onboarding
+- Test steps:
+  1. Set up a fresh gatekeeper via wizard flow (includes recovery_kit creation)
+  2. Back up ≥10 files
+  3. Record a passphrase and confirm `recovery_kit.enc` exists
+  4. Destroy the gatekeeper VM entirely (`qm destroy`)
+  5. Create a fresh VM, install BackupBuddy
+  6. Use the emergency restore path in the GUI
+  7. Enter passphrase, verify all files are listed, restore one, check SHA-256
+- Must pass before any real-world deployment where the wizard flow is used
+**Done when:**
+- End-to-end lifeboat restore completes from a passphrase with no manual steps
+- Restored gatekeeper has same `node_id` (same Tahoe identity) as the destroyed one
+- All previously backed-up files appear in the GUI after restore
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
+### [ ] 1.16.9 — Integration test: fragment corruption detection
+
+**Reads:** `project-docs/testing.md` → Scenario 7,
+  `gatekeeper/verify/nightly.py` → Layer 2 and Layer 3
+**Requirements:**
+- Deliberately corrupt a fragment on a storage node and verify the nightly
+  verifier detects it
+- Steps:
+  1. Back up a file with known SHA-256
+  2. Find the Tahoe share file on a storage node (locate in storage_dir)
+  3. Corrupt it: `dd if=/dev/urandom bs=1 count=100 seek=500 of=<share_file> conv=notrunc`
+  4. Trigger nightly verification
+  5. Verify Layer 3 (test restore) detects the mismatch and reports `RestoreIntegrityError`
+     OR that k remaining good shares still allow a clean restore
+  6. Verify an alert is raised (check notification dispatcher)
+- Note: with k=1, n=2 and 2 shares on the same node, corruption may prevent restore.
+  With 2 separate storage nodes and shares distributed, k=1 means 1 good share suffices.
+  Test should be run with ≥2 storage nodes connected.
+**Done when:**
+- Corruption is detected and reported by nightly verifier
+- System behaviour under corruption is clearly documented (alert sent, auto-retry or not)
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
+### [ ] 1.16.10 — Integration test: multi-gatekeeper cluster join flow
+
+**Reads:** `project-docs/testing.md`, `gatekeeper/gui/routes/buddies.py`,
+  `gatekeeper/gui/routes/onboarding.py`
+**Requirements:**
+- Test the full invite → join → vote → active member flow with two real gatekeepers
+  (Anders invites Björn, Björn joins, both see each other as cluster members)
+- This was not tested in task 1.16.3 because all gatekeepers were bootstrapped
+  independently rather than through the wizard
+- Verify: Tahoe fragments are actually distributed across both storage nodes after join
+- Verify: cluster.db on both nodes is consistent after join
+- Verify: dashboard shows both nodes as active members
+**Done when:**
+- Two gatekeepers form a cluster via wizard/invite flow
+- Files uploaded by one node's agent can be restored
+- Fragments confirmed on both storage nodes (not just the uploader's)
 
 ```
 > Kludde: <!-- -->
@@ -1703,6 +1840,27 @@ docs/design.md → Node removal
 
 ## 2.8 — File-level backup granularity
 - Allow individual files to be selected in backup.cfg, not just folders
+
+## 2.9 — Docker Compose distribution
+
+Alternative installation path alongside the existing `install.sh` script.
+Targets homelab users who prefer containers over native installation.
+
+**Design notes:**
+- Two containers per gatekeeper: `backupbuddy` (FastAPI + Tahoe) and `tailscale` (sidecar)
+- Tailscale sidecar uses `network_mode: service:tailscale` so BackupBuddy can reach
+  the Tailscale interface; requires `--cap-add=NET_ADMIN` and `/dev/net/tun` on the sidecar
+- Storage pool mounted as a bind mount: `./storage:/mnt/storage`
+- Data directory mounted as a named volume: `backupbuddy-data:/root/.backupbuddy`
+- Agent: single container, no Tailscale needed (talks to GK over LAN)
+- `install.sh` remains the primary path; Docker is an opt-in alternative
+- **Proxmox note:** Docker works inside Proxmox VMs without issues. Docker inside
+  unprivileged LXC is not supported and will not be documented or tested.
+- `.env` file for secrets; `docker-compose.yml` + `docker-compose.agent.yml`
+
+**Not in scope for this task:**
+- Kubernetes / Helm charts (overkill for homelab target audience)
+- Multi-arch builds (arm64 for Raspberry Pi can be added separately)
 
 ---
 
