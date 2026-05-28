@@ -242,6 +242,16 @@ echo "=== Step 7: Scenario 3 — lifeboat bundle restore ==="
     --restore-dir  "$RESTORE_DIR"
 
 echo ""
+echo "=== Step 8: Scenario 7 — fragment corruption detection ==="
+
+"$PYTHON" "$SCRIPT_DIR/smoke_scenario_7.py" \
+    --gk-data-dir       "$GK1_DATA" \
+    --gk1-storage-dir   "$GK1_STORAGE" \
+    --gk2-storage-dir   "$GK2_STORAGE" \
+    --tahoe-url         "http://127.0.0.1:$GK1_TAHOE_PORT" \
+    --restore-dir       "$RESTORE_DIR"
+
+echo ""
 echo "======================================"
 echo "  SMOKE TEST PASSED"
 echo "======================================"

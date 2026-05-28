@@ -1775,7 +1775,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.9 — Integration test: fragment corruption detection
+### [x] 1.16.9 — Integration test: fragment corruption detection
 
 **Reads:** `project-docs/testing.md` → Scenario 7,
   `gatekeeper/verify/nightly.py` → Layer 2 and Layer 3
@@ -1798,7 +1798,13 @@ docs/design.md → Node removal
 - System behaviour under corruption is clearly documented (alert sent, auto-retry or not)
 
 ```
-> Kludde: <!-- -->
+> Implementation: `tests/integration/smoke_scenario_7.py` (Step 8 in smoke_test.sh).
+> Corrupts ALL share files in both GK1 and GK2 storage dirs (k=1/n=2 means one good
+> share suffices — must corrupt both nodes to guarantee detection). Runs NightlyVerifier
+> with injectable send_alert; asserts layer3.ok=False and layer3.errors>0.  Layer 4
+> always warns in smoke test (no lifeboat distributed) — filtered to error/critical level
+> when asserting on corruption-specific alerts.
+> Committed: test(verify): add scenario 7 fragment corruption detection smoke test
 ```
 
 ---
