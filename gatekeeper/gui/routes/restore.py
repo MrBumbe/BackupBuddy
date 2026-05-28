@@ -21,6 +21,7 @@ Emergency restore design decision (ADR option A):
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import time
@@ -33,6 +34,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from gatekeeper.lifeboat.crypto import IntegrityError
+from gatekeeper.lifeboat.recovery_kit import extract_recovery_kit
 from gatekeeper.restore.reconstruct import reconstruct_catalog
 from gatekeeper.restore.restore import (
     RestoreIntegrityError,
@@ -66,7 +69,9 @@ class _RestoreFolderRequest(BaseModel):
 
 
 class _EmergencyRequest(BaseModel):
-    recovery_key: str  # root_dir.cap — user-facing label is "recovery key" (onboarding.md)
+    recovery_kit_b64: str = ""  # base64-encoded recovery_kit.enc (passphrase flow)
+    passphrase: str = ""        # required when recovery_kit_b64 is provided
+    recovery_key: str = ""      # raw root_dir.cap (backward compat — Scenario 4 / API access)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -323,9 +328,36 @@ def create_restore_router() -> APIRouter:
         if catalog_db is None or tahoe is None:
             return JSONResponse({"error": "Restore service not available"}, status_code=503)
 
-        recovery_key = body.recovery_key.strip()
-        if not recovery_key:
-            return JSONResponse({"error": "Recovery key is required"}, status_code=400)
+        # Resolve root_dir_cap from whichever input was provided
+        root_dir_cap: str
+        if body.recovery_kit_b64:
+            if not body.passphrase:
+                return JSONResponse(
+                    {"error": "Passphrase is required when using a recovery kit."},
+                    status_code=400,
+                )
+            try:
+                kit_bytes = base64.b64decode(body.recovery_kit_b64, validate=True)
+                kit_data = extract_recovery_kit(kit_bytes, body.passphrase)
+                root_dir_cap = kit_data["root_dir_cap"]
+            except IntegrityError:
+                return JSONResponse(
+                    {"error": "Recovery kit decryption failed — check your passphrase and try again."},
+                    status_code=400,
+                )
+            except Exception:
+                logger.warning("Recovery kit decode/parse failed", exc_info=True)
+                return JSONResponse(
+                    {"error": "Recovery kit file is invalid or corrupted."},
+                    status_code=400,
+                )
+        elif body.recovery_key:
+            root_dir_cap = body.recovery_key.strip()
+        else:
+            return JSONResponse(
+                {"error": "Provide either a recovery kit file with passphrase, or a raw recovery key."},
+                status_code=400,
+            )
 
         # Refuse to overwrite a non-empty catalog (ADR option A).
         existing_count = len(catalog_db.get_all_files())
@@ -355,7 +387,7 @@ def create_restore_router() -> APIRouter:
                 drain_task = asyncio.create_task(_drain_progress())
 
                 count = await reconstruct_catalog(
-                    recovery_key,
+                    root_dir_cap,
                     catalog=catalog_db,
                     tahoe=tahoe,
                     progress_queue=progress_queue,

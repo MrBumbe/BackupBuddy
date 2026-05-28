@@ -357,46 +357,61 @@ for small test clusters (e.g. use Lagom 3-of-5 instead of Adaptiv).
 
 ---
 
-### Scenario 3 — Lifeboat restore (gatekeeper replacement)
+### Scenario 3 — Disaster recovery (recovery kit)
 
-**Goal**: confirm that a gatekeeper can be fully replaced using
-only the lifeboat from a local agent, with no data loss.
+**Goal**: confirm that a gatekeeper can be replaced using the
+`recovery-kit.enc` file and passphrase from the onboarding wizard,
+with no catalog or file data loss.
+
+**Recovery path (Option A — Phase 1)**: passphrase decrypts
+`recovery-kit.enc` → extracts `root_dir_cap` → catalog is
+reconstructed by traversing the Tahoe file tree (same as Scenario 4).
+Restored catalog entries have no SHA-256 stored (by design —
+see Scenario 4 notes). Files are fully restorable via Tahoe caps.
+
+**Pre-conditions**:
+- Gatekeeper was set up via the onboarding wizard (so `recovery-kit.enc` exists)
+- `recovery-kit.enc` was downloaded and stored safely
+- The passphrase entered during setup is known
 
 **Steps**:
-1. Back up at least 10 files successfully on gatekeeper-anders
-2. Confirm lifeboat was distributed to agent-anders-nas:
+1. Set up gatekeeper-anders via the onboarding wizard:
+   - Record the passphrase
+   - Download `recovery-kit.enc` and confirm the download
+2. Back up at least 10 files on agent-anders-pc; record SHA-256 of one:
    ```bash
-   # On agent-anders-nas
-   ls /var/backup-buddy/lifeboat/
-   # Should show: lifeboat.enc (recently modified)
+   sha256sum /home/testuser/documents/scenario3_testfile.txt
    ```
 3. Snapshot gatekeeper-anders for reference:
    ```bash
    # On Proxmox host
-   qm snapshot 101 before-lifeboat-test
+   qm snapshot 101 before-scenario3
    ```
 4. Destroy gatekeeper-anders completely:
    ```bash
    qm stop 101 && qm destroy 101
    ```
-5. Create a fresh gatekeeper-anders VM from template (same IP, same name)
-6. Install BackupBuddy fresh — do NOT run the normal onboarding wizard
-7. Use the emergency restore path in the GUI:
-   GUI → Restore → Emergency restore (gatekeeper gone)
-8. Enter the lifeboat passphrase when prompted
-9. The system copies lifeboat.enc from agent-anders-nas,
-   decrypts it, and restores: node.privkey, root_dir.cap,
-   catalog.db, gatekeeper.cfg
-10. Confirm all previously backed-up files appear in the GUI
-11. Restore one file and verify SHA-256
+5. Create a fresh VM with the same Tailscale name; install and start BackupBuddy
+6. Run the onboarding wizard on the fresh install to get a working gatekeeper
+   (can use the same node name; a new Tahoe identity is fine for Phase 1)
+7. In the GUI: Restore → Emergency restore tab
+8. Upload `recovery-kit.enc` and enter the passphrase
+9. Click "Reconstruct catalog" and poll until `status: done`
+10. Confirm all ≥10 previously backed-up files appear in the catalog
+11. Restore `scenario3_testfile.txt` and verify SHA-256 matches step 2
 
-**Expected result**: new gatekeeper-anders is fully operational.
-All files visible in GUI. Restore works. Cluster sees it as the
-same node (same node.privkey = same identity).
+**Expected result**: catalog reconstructed with all files. Restore works.
+SHA-256 of restored file matches the original.
 
-**If it fails**: check that lifeboat.enc on the agent is not
-older than the lifeboat interval (1h in production, may vary
-in test). Check passphrase was entered correctly.
+**Notes**:
+- Reconstructed entries have `sha256=""` (same as Scenario 4) — this is
+  expected and logged as a warning by the nightly verifier, not an error.
+- Phase 2 will add full catalog snapshot recovery (Option B) so SHA-256
+  is preserved across disaster recovery.
+
+**If it fails**: check that `recovery-kit.enc` decrypts correctly (wrong
+passphrase returns a clear error in the GUI). Check Tahoe connectivity on
+the new gatekeeper — the cluster must be reachable to traverse the file tree.
 
 ---
 

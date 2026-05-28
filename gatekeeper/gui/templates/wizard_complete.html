@@ -1,23 +1,26 @@
 {% extends "wizard_base.html" %}
 
-{% block title %}BackupBuddy Setup — Recovery Key{% endblock %}
+{% block title %}BackupBuddy Setup — Recovery Kit{% endblock %}
 
 {% block head %}
 <style>
-    .recovery-key-box {
-        font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
-        font-size: 0.85rem;
-        background: #f0f1f6;
-        border: 1px solid #d0d3da;
-        border-radius: 0.3rem;
-        padding: 0.75rem 1rem;
-        word-break: break-all;
-        user-select: all;
-        margin: 0.75rem 0;
-    }
-    .confirm-area {
+    .kit-box {
         background: #fff8e1;
         border: 1px solid #ffe082;
+        border-radius: 0.3rem;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0 1.25rem;
+    }
+    .kit-box ul {
+        margin: 0.5rem 0 0;
+        padding-left: 1.25rem;
+        font-size: 0.875rem;
+        color: #555;
+    }
+    .kit-box ul li { margin-bottom: 0.25rem; }
+    .confirm-area {
+        background: #f0f1f6;
+        border: 1px solid #d0d3da;
         border-radius: 0.3rem;
         padding: 1rem;
         margin-top: 1.25rem;
@@ -26,30 +29,34 @@
 {% endblock %}
 
 {% block content %}
-<h1>Save your recovery key</h1>
+<h1>Download your recovery kit</h1>
 <p class="subtitle">
-    This is your recovery key. Store it somewhere safe — a password manager, encrypted drive, or printed copy.
-    <strong>You will not be able to see it again.</strong>
+    Your recovery kit is a small encrypted file. Store it somewhere safe alongside your passphrase.
+    <strong>You will not be able to download it again after this step.</strong>
 </p>
 
-<div class="recovery-key-box" id="recovery-key">{{ recovery_key }}</div>
-
-<div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">
-    <button type="button" class="btn btn-sm" onclick="copyKey()">Copy</button>
-    <a href="/api/onboarding/download-key" class="btn btn-sm" download="backupbuddy-recovery-key.txt">Download as file</a>
+<div class="kit-box">
+    <strong style="font-size:0.9rem;">What to do with recovery-kit.enc:</strong>
+    <ul>
+        <li>Download it now using the button below</li>
+        <li>Save it to a password manager, USB drive, or encrypted cloud storage</li>
+        <li>Remember the passphrase you entered — it is needed to use this file</li>
+        <li>If you lose this gatekeeper entirely, this file + passphrase is how you get your backups back</li>
+    </ul>
 </div>
-<p class="text-muted" style="font-size:0.8rem;">
-    Without this key, your backups cannot be recovered after a total data loss.
-</p>
 
-<div class="confirm-area">
+<a href="/api/onboarding/download-key" class="btn" download="recovery-kit.enc">
+    Download recovery-kit.enc
+</a>
+
+<div class="confirm-area" style="margin-top: 1.25rem;">
     <form method="POST" action="/onboarding/confirm-key">
         <label style="display:flex; align-items:flex-start; gap:0.6rem; cursor:pointer;">
             <input type="checkbox" id="confirm_check" onchange="toggleConfirm(this)"
                    style="margin-top:0.2rem; flex-shrink:0;">
             <span style="font-size:0.875rem;">
-                I have saved my recovery key in a safe place. I understand that losing it means
-                I cannot recover my backups.
+                I have downloaded and safely stored my recovery kit. I understand that losing it
+                (or forgetting my passphrase) means I cannot recover my backups after a total loss.
             </span>
         </label>
         <div class="wizard-actions" style="margin-top:1rem;">
@@ -61,17 +68,6 @@
 <script>
 function toggleConfirm(cb) {
     document.getElementById('confirm-btn').disabled = !cb.checked;
-}
-
-function copyKey() {
-    var text = document.getElementById('recovery-key').textContent.trim();
-    navigator.clipboard.writeText(text).catch(function() {
-        var sel = window.getSelection();
-        var range = document.createRange();
-        range.selectNodeContents(document.getElementById('recovery-key'));
-        sel.removeAllRanges();
-        sel.addRange(range);
-    });
 }
 </script>
 {% endblock %}

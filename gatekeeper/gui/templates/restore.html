@@ -71,13 +71,18 @@
     <section class="card">
         <h2>Emergency restore</h2>
         <p>Use this only if your catalog database is lost or empty and cannot be recovered by other means.
-           Reconstruction reads your recovery key and rebuilds the catalog from your backup storage.
+           Upload the <strong>recovery-kit.enc</strong> file you downloaded during setup, enter your
+           recovery passphrase, and BackupBuddy will rebuild the catalog from your backup storage.
            This will fail if the catalog already contains records.</p>
         <form id="emergency-form">
             <div class="form-row">
-                <label for="emergency-key">Recovery key</label>
-                <textarea id="emergency-key" class="form-textarea" rows="4"
-                          placeholder="Paste your recovery key here…" required></textarea>
+                <label for="emergency-kit-file">Recovery kit file</label>
+                <input type="file" id="emergency-kit-file" accept=".enc" required>
+            </div>
+            <div class="form-row">
+                <label for="emergency-passphrase">Recovery passphrase</label>
+                <input type="password" id="emergency-passphrase" class="form-input"
+                       placeholder="Passphrase used during setup" autocomplete="current-password" required>
             </div>
             <button type="submit" class="btn btn-danger">Reconstruct catalog</button>
         </form>
@@ -305,28 +310,45 @@
 
     document.getElementById('emergency-form').addEventListener('submit', function (e) {
         e.preventDefault();
-        var key = document.getElementById('emergency-key').value.trim();
+        var fileInput = document.getElementById('emergency-kit-file');
+        var passphrase = document.getElementById('emergency-passphrase').value;
         var statusEl = document.getElementById('emergency-status');
 
-        fetch('/api/restore/emergency', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({recovery_key: key}),
-        })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
+        if (!fileInput.files || !fileInput.files[0]) {
             statusEl.hidden = false;
-            if (data.error) {
-                statusEl.innerHTML = '<span class="badge badge-error">Error</span> ' + esc(data.error);
-                return;
-            }
-            statusEl.innerHTML = '<span class="badge badge-warning">Reconstructing catalog…</span>';
-            pollJob(data.job_id, statusEl);
-        })
-        .catch(function () {
-            statusEl.hidden = false;
-            statusEl.innerHTML = '<span class="badge badge-error">Request failed.</span>';
-        });
+            statusEl.innerHTML = '<span class="badge badge-error">Error</span> Please select the recovery-kit.enc file.';
+            return;
+        }
+
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+            // Convert ArrayBuffer to base64
+            var bytes = new Uint8Array(ev.target.result);
+            var binary = '';
+            for (var i = 0; i < bytes.byteLength; i++) { binary += String.fromCharCode(bytes[i]); }
+            var b64 = btoa(binary);
+
+            fetch('/api/restore/emergency', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({recovery_kit_b64: b64, passphrase: passphrase}),
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                statusEl.hidden = false;
+                if (data.error) {
+                    statusEl.innerHTML = '<span class="badge badge-error">Error</span> ' + esc(data.error);
+                    return;
+                }
+                statusEl.innerHTML = '<span class="badge badge-warning">Reconstructing catalog…</span>';
+                pollJob(data.job_id, statusEl);
+            })
+            .catch(function () {
+                statusEl.hidden = false;
+                statusEl.innerHTML = '<span class="badge badge-error">Request failed.</span>';
+            });
+        };
+        reader.readAsArrayBuffer(fileInput.files[0]);
     });
 
 }());

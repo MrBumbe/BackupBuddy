@@ -86,6 +86,28 @@
         </div>
     </div>
 
+    {% if state.role == "new" %}
+    <!-- Recovery passphrase — only required when starting a new cluster -->
+    <div class="card" style="margin-bottom: 1.25rem;">
+        <strong style="font-size:0.9rem; display:block; margin-bottom:0.5rem;">Recovery passphrase</strong>
+        <p style="font-size:0.85rem; color:#555; margin-bottom:0.75rem;">
+            Used to protect the recovery kit you will download next. If this gatekeeper is ever lost,
+            you will need this passphrase to restore your backups.
+            <strong>It is never stored or transmitted.</strong>
+        </p>
+        <div class="form-row">
+            <label>Passphrase</label>
+            <input name="passphrase" type="password" class="form-input"
+                   placeholder="Enter a strong passphrase" autocomplete="new-password" required>
+        </div>
+        <div class="form-row">
+            <label>Confirm</label>
+            <input name="passphrase_confirm" type="password" class="form-input"
+                   placeholder="Repeat passphrase" autocomplete="new-password" required>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="wizard-actions">
         <a href="/onboarding/step/4" class="btn-link">← Back</a>
         <button type="submit" class="btn" id="submit-btn">

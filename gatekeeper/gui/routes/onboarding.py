@@ -37,6 +37,7 @@ from gatekeeper.cluster.join import NodeInfo, initiate_join
 from gatekeeper.db.cluster import ClusterDB
 from gatekeeper.gui.wizard_state import WizardState, clear_state, load_state, save_state
 from gatekeeper.lifeboat.keystore import DEFAULT_KEY_PATH, generate_key
+from gatekeeper.lifeboat.recovery_kit import create_recovery_kit
 from gatekeeper.secrets import SecretsStore
 from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
@@ -75,6 +76,8 @@ _PROFILE_DESCRIPTIONS = [
 ]
 
 _TAHOE_RESERVED_BYTES = 1 * 1024 ** 3  # 1 GB safety margin
+_NODE_PRIVKEY_RELPATH = Path("tahoe") / "storage_node" / "private" / "node.privkey"
+_RECOVERY_KIT_FILENAME = "recovery_kit.enc"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -191,6 +194,7 @@ async def _cascade_new_cluster(
     state: WizardState,
     smtp_password: str,
     webhook_url: str,
+    passphrase: str,
 ) -> str:
     """Run the new-cluster finish cascade. Returns the root_dir_cap string.
 
@@ -237,6 +241,19 @@ async def _cascade_new_cluster(
         except OSError:
             pass
         logger.info("root_dir.cap written")
+
+    # -- Recovery kit --
+    kit_path = data_dir / _RECOVERY_KIT_FILENAME
+    if not kit_path.exists():
+        privkey_path = data_dir / _NODE_PRIVKEY_RELPATH
+        node_privkey = privkey_path.read_text(encoding="utf-8").strip()
+        kit_bytes = create_recovery_kit(passphrase, node_privkey, root_dir_cap)
+        kit_path.write_bytes(kit_bytes)
+        try:
+            os.chmod(kit_path, 0o600)
+        except OSError:
+            pass
+        logger.info("Recovery kit written to %s", kit_path)
 
     # -- Lifeboat key --
     if not DEFAULT_KEY_PATH.exists():
@@ -588,6 +605,8 @@ def create_onboarding_router() -> APIRouter:
         smtp_to = str(form.get("smtp_to", "")).strip()
         webhook_enabled = bool(form.get("webhook_enabled"))
         webhook_url = str(form.get("webhook_url", "")).strip()
+        passphrase = str(form.get("passphrase", ""))
+        passphrase_confirm = str(form.get("passphrase_confirm", ""))
 
         try:
             smtp_port = int(smtp_port_raw)
@@ -600,6 +619,19 @@ def create_onboarding_router() -> APIRouter:
                 "state": state,
                 "error": "SMTP host is required when email notifications are enabled.",
             })
+
+        # Recovery passphrase required for new cluster
+        if state.role == "new":
+            if not passphrase:
+                return _render(request, "wizard_step5.html", {
+                    "state": state,
+                    "error": "A recovery passphrase is required.",
+                })
+            if passphrase != passphrase_confirm:
+                return _render(request, "wizard_step5.html", {
+                    "state": state,
+                    "error": "Passphrases do not match — please try again.",
+                })
 
         # Update non-sensitive state
         state.notify_smtp_enabled = smtp_enabled
@@ -614,7 +646,7 @@ def create_onboarding_router() -> APIRouter:
         try:
             if state.role == "new":
                 root_dir_cap = await _cascade_new_cluster(
-                    data_dir, config_path, state, smtp_password, webhook_url
+                    data_dir, config_path, state, smtp_password, webhook_url, passphrase
                 )
                 # Persist root_dir_cap for the /complete page (will be cleared after confirmation)
                 # SECURITY: never log this value
@@ -645,22 +677,12 @@ def create_onboarding_router() -> APIRouter:
         if state.recovery_key_confirmed:
             return _redirect("/onboarding/first-invite")
 
-        # Recovery key is the root_dir.cap — held in app.state to avoid re-reading
-        # from disk unnecessarily and to ensure it is never logged
-        root_dir_cap: str = getattr(request.app.state, "wizard_root_dir_cap", "")
-        if not root_dir_cap:
-            # Try reading from disk as fallback (e.g. page refresh after cascade)
-            cap_path = data_dir / "root_dir.cap"
-            if cap_path.exists():
-                root_dir_cap = cap_path.read_text(encoding="utf-8").strip()
-
-        if not root_dir_cap:
+        # Recovery kit must exist (created by cascade) — redirect if missing
+        kit_path = data_dir / _RECOVERY_KIT_FILENAME
+        if not kit_path.exists():
             return _redirect("/onboarding/step/1")
 
-        return _render(request, "wizard_complete.html", {
-            "recovery_key": root_dir_cap,
-            "state": state,
-        })
+        return _render(request, "wizard_complete.html", {"state": state})
 
     @router.post("/onboarding/confirm-key")
     async def confirm_key(request: Request) -> Any:
@@ -668,8 +690,6 @@ def create_onboarding_router() -> APIRouter:
         state = load_state(data_dir)
         state.recovery_key_confirmed = True
         save_state(data_dir, state)
-        # Clear the cap from app.state now that the user has confirmed
-        request.app.state.wizard_root_dir_cap = ""
         return _redirect("/onboarding/first-invite")
 
     # ── First invite code ──────────────────────────────────────────────────────
@@ -724,20 +744,20 @@ def create_onboarding_router() -> APIRouter:
 
     @router.get("/api/onboarding/download-key")
     async def download_key(request: Request) -> Response:
-        """Return the root_dir.cap as a downloadable plain-text file."""
+        """Return the encrypted recovery kit as a downloadable binary file."""
         data_dir = _get_data_dir(request)
         state = load_state(data_dir)
-        # Block download once the user has confirmed receipt — key shown once only
+        # Block download once the user has confirmed receipt — shown once only
         if state.recovery_key_confirmed:
             return Response("Not available", status_code=404)
-        cap_path = data_dir / "root_dir.cap"
-        if not cap_path.exists():
+        kit_path = data_dir / _RECOVERY_KIT_FILENAME
+        if not kit_path.exists():
             return Response("Not available", status_code=404)
-        content = cap_path.read_text(encoding="utf-8").strip()
+        content = kit_path.read_bytes()
         return Response(
             content=content,
-            media_type="text/plain",
-            headers={"Content-Disposition": 'attachment; filename="backupbuddy-recovery-key.txt"'},
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="recovery-kit.enc"'},
         )
 
     # ── Catch-all: redirect to current step ───────────────────────────────────
