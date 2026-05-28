@@ -209,12 +209,17 @@ class TahoeClient:
         return ref
 
     async def check_cap(self, file_ref: str) -> dict | None:
-        """Check that a file reference is accessible and has sufficient shares.
+        """Check that a file reference is accessible.
+
+        Uses t=json which is supported by the BackupBuddy Tahoe fork.
+        The fork does not support t=check, so per-file share counts are not
+        available via this path. accessible=True means the file node exists
+        and returned a valid JSON response.
 
         Returns a dict with keys:
           accessible    (bool) — True if the file is reachable
-          shares_good   (int)  — number of shares confirmed available
-          shares_needed (int)  — minimum shares needed to reconstruct the file
+          shares_good   (int)  — 1 when accessible (share count unavailable in fork)
+          shares_needed (int)  — 1 (share count unavailable in fork)
 
         Returns None if the check itself fails (network error, ref not found).
         Never raises — callers use the return value to decide next steps.
@@ -223,15 +228,17 @@ class TahoeClient:
         try:
             response = await self._http.get(
                 f"{self._node_url}/uri/{encoded_ref}",
-                params={"t": "check", "output": "json"},
+                params={"t": "json"},
             )
             _raise_for_tahoe_error(response, "check_cap")
             data = response.json()
-            results = data.get("results", {})
+            # t=json returns ["filenode"/"dirnode", {...}] for valid caps
+            if not isinstance(data, list) or len(data) < 1:
+                return None
             return {
                 "accessible": True,
-                "shares_good": results.get("count-shares-good", 0),
-                "shares_needed": results.get("count-shares-needed", 0),
+                "shares_good": 1,
+                "shares_needed": 1,
             }
         except Exception:
             return None
