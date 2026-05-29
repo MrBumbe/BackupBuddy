@@ -133,6 +133,15 @@ ask_questions() {
     local default_name
     default_name="$(hostname -s 2>/dev/null || echo "agent")"
 
+    # Allow non-interactive installs via environment variables (e.g. CI, automated testing).
+    # Normal interactive installs are unaffected when these vars are unset.
+    if [ -n "${BB_GATEKEEPER_IP:-}" ] && [ -n "${BB_AGENT_NAME:-}" ]; then
+        GATEKEEPER_IP="$BB_GATEKEEPER_IP"
+        AGENT_NAME="$BB_AGENT_NAME"
+        info "Non-interactive mode: gatekeeper=$GATEKEEPER_IP  agent=$AGENT_NAME"
+        return 0
+    fi
+
     exec 3</dev/tty
 
     printf '\n'
