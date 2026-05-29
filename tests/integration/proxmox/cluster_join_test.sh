@@ -15,11 +15,7 @@ set -euo pipefail
 PROXMOX="root@192.168.1.60"
 ANDERS_LAN="10.99.0.11"
 BJORN_LAN="10.99.0.12"
-ANDERS_TS="100.68.15.102"
-BJORN_TS="100.105.68.77"
-ANDERS_TS_URL="http://$ANDERS_TS:8080"
 BJORN_WIZARD_URL="http://$BJORN_LAN:8080"
-BJORN_TS_URL="http://$BJORN_TS:8080"
 ANDERS_AGENT_API="http://$ANDERS_LAN:8081"
 ANDERS_TAHOE_URL="http://127.0.0.1:3456"
 AGENT_TOKEN="backupbuddy-test-token-proxmox-2026"
@@ -62,6 +58,16 @@ wait_for_http_anders() {
     done
     echo " TIMEOUT"; return 1
 }
+
+# ── Resolve Tailscale IPs dynamically ─────────────────────────────────────────
+ANDERS_TS=$(anders "tailscale ip -4 2>/dev/null | head -1")
+[[ -n "$ANDERS_TS" ]] || fail "Could not resolve Anders Tailscale IP — is Tailscale running?"
+BJORN_TS=$(bjorn "tailscale ip -4 2>/dev/null | head -1")
+[[ -n "$BJORN_TS" ]] || fail "Could not resolve Björn Tailscale IP — is Tailscale running?"
+ANDERS_TS_URL="http://$ANDERS_TS:8080"
+BJORN_TS_URL="http://$BJORN_TS:8080"
+info "Anders Tailscale IP: $ANDERS_TS"
+info "Björn  Tailscale IP: $BJORN_TS"
 
 # ══════════════════════════════════════════════════════════════════════════════
 echo "=============================================="
