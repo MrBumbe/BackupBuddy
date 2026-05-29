@@ -1827,7 +1827,25 @@ docs/design.md → Node removal
 - Fragments confirmed on both storage nodes (not just the uploader's)
 
 ```
-> Kludde: <!-- -->
+> Kludde: Six bugs found and fixed during the test run — all in the test script and Proxmox VM state:
+>   1. Wrong install path /opt/backupbuddy → /opt/backup-buddy (install.sh places code there).
+>   2. Service name mismatch: Björn runs new-format service (backup-buddy-gatekeeper / backupbuddy user)
+>      while Anders still runs old-format (backupbuddy-gatekeeper / root). Added ANDERS_SVC / BJORN_SVC
+>      constants and correct BJORN_DATA_DIR (/var/lib/backup-buddy) and BJORN_CFG (/etc/backup-buddy/).
+>   3. /mnt/storage owned by root — Björn's backupbuddy user couldn't write; fixed with chown -R in reset step.
+>   4. Tahoe files in data dir owned by root (from previous debug sessions) blocked the cascade running as
+>      backupbuddy user; fixed with recursive chown -R in reset step.
+>   5. Empty tahoe binary (/opt/backup-buddy/.venv/bin/tahoe = 0 bytes); fixed with pip install --force-reinstall.
+>   6. StartLimitBurst exhausted after many test failures; service wouldn't restart. Fixed with
+>      systemctl reset-failed before restart in step 7.
+> Run via SSH (ProxyJump through proxmox at 192.168.1.60). Resolved Tailscale IPs dynamically.
+> Final result (5th attempt): ALL 9 PASS assertions hit, 1.16.10 PASSED.
+>   - Anders healthy (status: ok)
+>   - Invite code generated, wizard cascade complete, Björn in normal mode
+>   - Both cluster.db consistent: gatekeeper-anders + bjorn-rejoin visible on both sides
+>   - Backup + restore verified (sha256 match)
+>   - Fragments distributed to Björn's storage (before=66 after=67)
+> Commits: fix(test)×5 across e2e4dd7, 9a92769, 8df6b9f, 8df6b9f, 97faf3a.
 ```
 
 ---
@@ -1951,7 +1969,7 @@ docs/design.md → Node removal
 > Abort with clear error if either resolves to empty. ANDERS_TS_URL and
 > BJORN_TS_URL derived from the resolved values immediately after.
 > Resolved IPs echoed via info() before main test body for easy debug.
-> Commit: 1f11ab659. Proxmox run (task 1.16.10) pending — Johan to execute.
+> Commit: 1f11ab659. 1.16.10 run on Proxmox: PASSED (see 1.16.10 note for details).
 ```
 
 ---
