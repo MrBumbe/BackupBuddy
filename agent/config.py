@@ -203,8 +203,13 @@ def load_config(path: str | Path) -> AgentConfig:
     parser = configparser.ConfigParser(allow_no_value=True, delimiters=("=",))
     parser.optionxform = str  # preserve case: paths and patterns are case-sensitive
 
+    # Use read_file() via explicit open so a permissions error surfaces clearly.
+    # parser.read() silently skips unreadable files, giving a misleading error.
     try:
-        parser.read(path, encoding="utf-8")
+        with open(path, encoding="utf-8") as _f:
+            parser.read_file(_f)
+    except OSError as exc:
+        raise ConfigError(f"Cannot read config file {path}: {exc}") from exc
     except configparser.Error as exc:
         raise ConfigError(f"Failed to parse config file {path}: {exc}") from exc
 

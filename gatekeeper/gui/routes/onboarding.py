@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
-_VALID_PROFILES = frozenset({"balanced", "secure", "paranoid", "adaptive"})
+_VALID_PROFILES = frozenset({"balanced", "secure", "paranoid", "adaptive", "test"})
 _NODE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{0,30}[a-z0-9]$")
 
 _PROFILE_DESCRIPTIONS = [
@@ -231,6 +231,17 @@ async def _cascade_new_cluster(
         client = TahoeClient(storage_node.node_url)
         root_dir_cap = await client.mkdir()
 
+        # Wait for Tahoe to write node.privkey before stopping the storage node.
+        # The TCP port becomes ready slightly before the private key file is
+        # flushed, so stopping immediately after mkdir() causes a race.
+        _privkey_path = data_dir / _NODE_PRIVKEY_RELPATH
+        _privkey_deadline = asyncio.get_event_loop().time() + 15.0
+        while not _privkey_path.exists():
+            if asyncio.get_event_loop().time() >= _privkey_deadline:
+                logger.error("node.privkey not written after 15s — Tahoe startup incomplete")
+                break
+            await asyncio.sleep(0.5)
+
         # Stop nodes; service restart will start them properly
         await storage_node.stop()
         await introducer.stop()
@@ -247,7 +258,14 @@ async def _cascade_new_cluster(
     kit_path = data_dir / _RECOVERY_KIT_FILENAME
     if not kit_path.exists():
         privkey_path = data_dir / _NODE_PRIVKEY_RELPATH
-        node_privkey = privkey_path.read_text(encoding="utf-8").strip()
+        if privkey_path.exists():
+            node_privkey = privkey_path.read_text(encoding="utf-8").strip()
+        else:
+            # node.privkey may not have been written yet (race on first start) or
+            # may have been lost in a disaster scenario.  Phase 1 restore only
+            # requires root_dir_cap, so proceed with an empty privkey.
+            node_privkey = ""
+            logger.warning("node.privkey not found — recovery kit will omit node identity")
         kit_bytes = create_recovery_kit(passphrase, node_privkey, root_dir_cap)
         kit_path.write_bytes(kit_bytes)
         try:
