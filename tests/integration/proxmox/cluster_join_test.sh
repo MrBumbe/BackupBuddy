@@ -127,9 +127,11 @@ bjorn "systemctl stop backupbuddy-gatekeeper 2>/dev/null || true"
 # Back up data dir, then wipe it and the config so the wizard starts fresh.
 bjorn "rm -rf ${BJORN_DATA_DIR}.bak-1.16.10; cp -r $BJORN_DATA_DIR ${BJORN_DATA_DIR}.bak-1.16.10 2>/dev/null || true"
 bjorn "rm -rf ${BJORN_DATA_DIR:?}/*; rm -f $BJORN_CFG"
-# Ensure the storage pool path is writable by the backupbuddy service user.
-# The wizard step 3 validates write access; chown is idempotent if already set.
-bjorn 'chown backupbuddy:backupbuddy /mnt/storage 2>/dev/null || true'
+# Reset ownership of data dir and storage pool to the service user.
+# Any debug tahoe runs as root would otherwise leave root-owned files that
+# block the backupbuddy-user cascade.
+bjorn "chown -R backupbuddy:backupbuddy $BJORN_DATA_DIR 2>/dev/null || true"
+bjorn 'chown -R backupbuddy:backupbuddy /mnt/storage 2>/dev/null || true'
 bjorn "systemctl start $BJORN_SVC"
 info "Björn restarted in setup mode"
 
