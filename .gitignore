@@ -66,3 +66,4 @@ lifeboat.enc
 __pycache__/
 node_modules/
 .tahoe/
+*.local.md
