@@ -124,6 +124,8 @@ echo "=== Step 4: Reset Björn to setup mode ==="
 bjorn "systemctl stop $BJORN_SVC 2>/dev/null || true"
 # Also stop old crash-looping service if present (pre-1.16.11 format).
 bjorn "systemctl stop backupbuddy-gatekeeper 2>/dev/null || true"
+# Clear the systemd failure counter so repeated test runs don't hit StartLimitBurst.
+bjorn "systemctl reset-failed $BJORN_SVC 2>/dev/null || true"
 # Back up data dir, then wipe it and the config so the wizard starts fresh.
 bjorn "rm -rf ${BJORN_DATA_DIR}.bak-1.16.10; cp -r $BJORN_DATA_DIR ${BJORN_DATA_DIR}.bak-1.16.10 2>/dev/null || true"
 bjorn "rm -rf ${BJORN_DATA_DIR:?}/*; rm -f $BJORN_CFG"
@@ -189,8 +191,9 @@ pass "Wizard cascade complete — gatekeeper.cfg created"
 # ── Step 7: Trigger restart and wait for normal mode ──────────────────────────
 echo ""
 echo "=== Step 7: Restart Björn into normal mode ==="
-prox curl -sf -X POST "$BJORN_WIZARD_URL/api/onboarding/restart" -o /dev/null || true
-sleep 8
+bjorn "systemctl reset-failed $BJORN_SVC 2>/dev/null || true"
+bjorn "systemctl restart $BJORN_SVC"
+sleep 3
 
 wait_for_http_anders "$BJORN_TS_URL/api/status" "Björn normal mode" 120
 BJORN_STATUS=$(anders curl -sf "$BJORN_TS_URL/api/status")
