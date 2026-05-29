@@ -42,7 +42,7 @@ from gatekeeper.secrets import SecretsStore
 from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
 from gatekeeper.tahoe.storage_node import StorageNode
-from gatekeeper.tailscale import get_tailscale_ip
+from gatekeeper.tailscale import get_lan_ip, get_tailscale_ip
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +222,7 @@ async def _cascade_new_cluster(
             storage_dir=primary_path,
             reserved_space=_TAHOE_RESERVED_BYTES,
             nickname=state.node_name,
+            hostname=get_lan_ip() or "127.0.0.1",
         )
         storage_node.create(introducer_furl)
         await storage_node.start()
@@ -342,6 +343,7 @@ async def _cascade_join(
             storage_dir=primary_path,
             reserved_space=_TAHOE_RESERVED_BYTES,
             nickname=state.node_name,
+            hostname=get_lan_ip() or "127.0.0.1",
         )
         storage_node.create(introducer_furl)
         await storage_node.start()
