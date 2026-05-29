@@ -205,11 +205,22 @@ class StorageNode:
         cfg.read(str(self.basedir / "tahoe.cfg"))
         tub_location = cfg.get("node", "tub.location", fallback="")
         if "127.0.0.1" in tub_location:
-            raise RuntimeError(
-                f"Storage node tub.location is '{tub_location}' — remote peers "
-                "cannot connect via 127.0.0.1. Set the gatekeeper's Tailscale IP "
-                "as the hostname so the storage node advertises a reachable address."
-            )
+            from gatekeeper.tailscale import get_lan_ip as _get_lan_ip
+            lan_ip = _get_lan_ip()
+            if lan_ip:
+                patched = tub_location.replace("127.0.0.1", lan_ip)
+                cfg.set("node", "tub.location", patched)
+                with open(str(self.basedir / "tahoe.cfg"), "w") as _f:
+                    cfg.write(_f)
+                logger.warning(
+                    "Storage node tub.location was 127.0.0.1 — auto-patched to %s",
+                    lan_ip,
+                )
+            else:
+                raise RuntimeError(
+                    f"Storage node tub.location is '{tub_location}' and no LAN IP "
+                    "is available to fix it. Check network interfaces."
+                )
 
         logger.info("Starting storage node")
         # Discard all Tahoe output — reading from a PIPE without draining blocks
