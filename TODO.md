@@ -1832,7 +1832,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.11 — Fresh install via install scripts + idempotency
+### [x] 1.16.11 — Fresh install via install scripts + idempotency
 
 **Reads:** `install/gatekeeper.sh`, `install/agent.sh`, `project-docs/testing.md`
 **Requirements:**
@@ -1855,7 +1855,21 @@ docs/design.md → Node removal
 - Post-install snapshot taken and named consistently
 
 ```
-> Kludde: <!-- -->
+> Kludde: Two bugs found and fixed during the test:
+>   - requirements.txt contained a stale -e git+...#egg=tahoe_lafs line that conflicted
+>     with pip install ${INSTALL_DIR} on fresh installs — line removed (tahoe-lafs is
+>     installed transitively via the package itself).
+>   - clone_or_update_repo() used origin/main but the repo uses master — fixed in both scripts.
+> Additional improvement: BB_GATEKEEPER_IP / BB_AGENT_NAME env vars added to agent.sh
+>   ask_questions() to enable non-interactive installs (CI, automated testing).
+>   Normal interactive flow unaffected when vars are unset.
+> Run via SSH (ProxyJump through proxmox at 192.168.1.60). All 3 GK VMs + 3 agent LXCs.
+> First run: all 6 nodes clean install. Wizard HTTP 200 on all GK nodes.
+> Second run (idempotency): service user already exists, unit already up to date,
+>   backup.cfg not overwritten, service restarted once (after git pull — expected).
+> Snapshot post-install-no-wizard taken on all 6 nodes (101, 102, 103, 301, 302, 303).
+> NOTE: thin pool space warnings during snapshot (over-provisioned LVM). Not errors.
+> Committed: fix(deps), fix(install)×2, feat(install).
 ```
 
 ---
