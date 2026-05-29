@@ -5,7 +5,7 @@
 #   - Proxmox host reachable at 192.168.1.60
 #   - gatekeeper-anders (10.99.0.11): running in normal mode, Tailscale active
 #   - gatekeeper-bjorn  (10.99.0.12): running (will be reset to setup mode)
-#   - Updated source already deployed to /opt/backupbuddy on both VMs
+#   - Updated source already deployed to /opt/backup-buddy on both VMs
 #
 # Run from the dev machine:
 #   bash tests/integration/proxmox/cluster_join_test.sh
@@ -243,7 +243,7 @@ sleep 45
 RESTORE_DIR="/tmp/bb-join-test-restore"
 # lan-ip must be a local interface on Anders (10.99.0.11); the agent API
 # validates that requests come from a non-loopback, non-Tailscale private IP.
-SCENARIO_OUT=$(anders "cd /opt/backupbuddy && /opt/bb-venv/bin/python3 tests/integration/smoke_scenario_1.py --agent-api-url $ANDERS_AGENT_API --agent-api-token $AGENT_TOKEN --agent-name join-test-agent --gk-data-dir /root/.backupbuddy --tahoe-url $ANDERS_TAHOE_URL --lan-ip $ANDERS_LAN --restore-dir $RESTORE_DIR 2>&1")
+SCENARIO_OUT=$(anders "cd /opt/backup-buddy && /opt/bb-venv/bin/python3 tests/integration/smoke_scenario_1.py --agent-api-url $ANDERS_AGENT_API --agent-api-token $AGENT_TOKEN --agent-name join-test-agent --gk-data-dir /root/.backupbuddy --tahoe-url $ANDERS_TAHOE_URL --lan-ip $ANDERS_LAN --restore-dir $RESTORE_DIR 2>&1")
 info "Scenario 1 output:"
 echo "$SCENARIO_OUT" | sed 's/^/    /'
 echo "$SCENARIO_OUT" | grep -q "PASS" || fail "Backup/restore scenario failed"
