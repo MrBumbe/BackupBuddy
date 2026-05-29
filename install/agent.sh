@@ -79,7 +79,7 @@ clone_or_update_repo() {
     if [ -d "${INSTALL_DIR}/.git" ]; then
         info "Updating BackupBuddy..."
         git -C "$INSTALL_DIR" fetch --quiet origin
-        git -C "$INSTALL_DIR" reset --quiet --hard origin/main
+        git -C "$INSTALL_DIR" reset --quiet --hard origin/master
         success "BackupBuddy updated at $INSTALL_DIR"
     else
         info "Cloning BackupBuddy..."
