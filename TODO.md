@@ -1832,6 +1832,109 @@ docs/design.md → Node removal
 
 ---
 
+### [ ] 1.16.11 — Fresh install via install scripts + idempotency
+
+**Reads:** `install/gatekeeper.sh`, `install/agent.sh`, `project-docs/testing.md`
+**Requirements:**
+- Roll back all gatekeeper VMs and agent CTs to the clean Ubuntu-only Proxmox snapshot
+  (no BackupBuddy installed — Tailscale active and joined to the test tailnet is sufficient)
+- Run `install/gatekeeper.sh` on each gatekeeper VM (anders, bjorn, carina); verify:
+  - Service `backupbuddy-gatekeeper` starts without errors
+  - Wizard is accessible at `http://<LAN-IP>:8080/onboarding/step/1`
+- Run `install/agent.sh` on each agent CT; verify:
+  - Service `backupbuddy-agent` starts without errors
+  - `backup.cfg` is created (empty or default values)
+- Run both scripts a **second time** on every VM/CT — idempotency check:
+  - Scripts must complete without errors
+  - Running services must not be restarted unnecessarily
+  - Config files must not be overwritten or corrupted
+- Take a new "post-install, wizard not yet run" Proxmox snapshot on all VMs/CTs after success
+**Done when:**
+- Both install scripts run cleanly on all nodes
+- Idempotency verified: second run completes without errors and changes nothing material
+- Post-install snapshot taken and named consistently
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
+### [ ] 1.16.12 — Full Scenario 3 from wizard setup (VM destroy + fresh install + GUI restore)
+
+**Reads:** `project-docs/testing.md` → Scenario 3,
+  `install/gatekeeper.sh`, `gatekeeper/gui/routes/onboarding.py`
+**Requirements:**
+- Start from the post-install snapshot (1.16.11 snapshot) on gatekeeper-anders
+- Run the full wizard on anders (role=new, steps 1–5 including passphrase collection)
+- Record the passphrase; download and keep `recovery_kit.enc`
+- Via an agent, back up ≥10 files; record the SHA-256 of at least one file
+- **Destroy the VM entirely**: `qm destroy 101` on the Proxmox host
+- Create a fresh VM with the same ID (101), run `install/gatekeeper.sh`, verify wizard is accessible
+- Use the emergency restore tab in the GUI:
+  - Upload `recovery_kit.enc`
+  - Enter the passphrase
+  - Trigger catalog reconstruction
+- Verify all ≥10 files appear in the catalog after reconstruction
+- Restore one file; verify its SHA-256 matches the value recorded before destruction
+**Done when:**
+- Entire flow completes end-to-end from a completely fresh VM (no snapshot tricks)
+- SHA-256 of restored file matches pre-destruction value
+- Wizard passphrase collection (step 5 form) and GUI emergency restore confirmed working
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
+### [ ] 1.16.13 — GUI smoke test: all pages accessible, no Tahoe internals in HTML
+
+**Reads:** `gatekeeper/gui/`, CLAUDE.md → rule 5 (never expose Tahoe internals)
+**Requirements:**
+- With gatekeeper running in normal mode (Tailscale active, cluster configured)
+- HTTP GET each of the main pages via `curl -sf`:
+  - `/` (dashboard)
+  - `/restore`
+  - `/settings`
+  - `/buddies`
+  - `/agents`
+- Verify all pages return HTTP 200; no page returns 500 or redirects to setup wizard unexpectedly
+- Grep the full HTML body of every response for Tahoe internals:
+  `FURL`, `furl`, `:cap`, `shares.needed`, `storage_index`, `tahoe:`, `pb://`, `storage_index`
+- Verify none of these strings appear in any rendered HTML response
+**Done when:**
+- All 5 pages return HTTP 200
+- Zero Tahoe internal strings found in any HTML response
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
+### [ ] 1.16.14 — Fix cluster_join_test.sh dynamic IPs, then run 1.16.10
+
+**Reads:** `tests/integration/proxmox/cluster_join_test.sh`
+**Requirements:**
+- Replace hardcoded Tailscale IPs in `cluster_join_test.sh`:
+  - `ANDERS_TS="100.68.15.102"` → resolved dynamically: `anders tailscale ip -4 2>/dev/null | head -1`
+  - `BJORN_TS="100.105.68.77"` → resolved dynamically: `bjorn tailscale ip -4 2>/dev/null | head -1`
+- Add failure check: if either IP resolves to empty, abort with a clear error
+- Rerun derived variables that depend on `ANDERS_TS` / `BJORN_TS`
+  (`ANDERS_TS_URL`, `BJORN_TS_URL`) after the dynamic resolution
+- Execute the updated script end-to-end (run task 1.16.10 to completion)
+**Done when:**
+- `cluster_join_test.sh` resolves Tailscale IPs dynamically (no hardcoded IPs)
+- Script runs to completion: both nodes see each other in `cluster.db`
+- Fragments confirmed on Björn's storage node after backup from Anders
+
+```
+> Kludde: <!-- -->
+```
+
+---
+
 ---
 
 # Phase 2 — Maturity
