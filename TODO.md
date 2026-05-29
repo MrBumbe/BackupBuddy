@@ -1927,7 +1927,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.14 — Fix cluster_join_test.sh dynamic IPs, then run 1.16.10
+### [x] 1.16.14 — Fix cluster_join_test.sh dynamic IPs, then run 1.16.10
 
 **Reads:** `tests/integration/proxmox/cluster_join_test.sh`
 **Requirements:**
@@ -1944,7 +1944,14 @@ docs/design.md → Node removal
 - Fragments confirmed on Björn's storage node after backup from Anders
 
 ```
-> Kludde: <!-- -->
+> Kludde: Removed hardcoded ANDERS_TS and BJORN_TS from the top variable block.
+> Added dynamic resolution block after SSH/utility helper functions:
+>   ANDERS_TS=$(anders "tailscale ip -4 2>/dev/null | head -1")
+>   BJORN_TS=$(bjorn  "tailscale ip -4 2>/dev/null | head -1")
+> Abort with clear error if either resolves to empty. ANDERS_TS_URL and
+> BJORN_TS_URL derived from the resolved values immediately after.
+> Resolved IPs echoed via info() before main test body for easy debug.
+> Commit: 1f11ab659. Proxmox run (task 1.16.10) pending — Johan to execute.
 ```
 
 ---
