@@ -1809,7 +1809,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.10 — Integration test: multi-gatekeeper cluster join flow
+### [x] 1.16.10 — Integration test: multi-gatekeeper cluster join flow
 
 **Reads:** `project-docs/testing.md`, `gatekeeper/gui/routes/buddies.py`,
   `gatekeeper/gui/routes/onboarding.py`
