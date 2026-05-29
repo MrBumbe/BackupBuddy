@@ -21,6 +21,15 @@ ANDERS_TAHOE_URL="http://127.0.0.1:3456"
 AGENT_TOKEN="backupbuddy-test-token-proxmox-2026"
 BJORN_NODE_NAME="bjorn-rejoin"
 
+# Anders uses pre-1.16.11 install format (root user, /opt/bb-venv, /root/.backupbuddy)
+ANDERS_SVC="backupbuddy-gatekeeper"
+ANDERS_DATA_DIR="/root/.backupbuddy"
+
+# Björn uses current install.sh format (backupbuddy user, /opt/backup-buddy/.venv)
+BJORN_SVC="backup-buddy-gatekeeper"
+BJORN_DATA_DIR="/var/lib/backup-buddy"
+BJORN_CFG="/etc/backup-buddy/gatekeeper.cfg"
+
 SSH_OPTS="-q -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=15"
 
 # ── SSH helpers using ProxyJump ────────────────────────────────────────────────
@@ -77,7 +86,7 @@ echo ""
 
 # ── Step 1: Verify Anders is healthy ──────────────────────────────────────────
 echo "=== Step 1: Verify Anders is healthy ==="
-anders systemctl restart backupbuddy-gatekeeper
+anders systemctl restart "$ANDERS_SVC"
 wait_for_http_anders "$ANDERS_TS_URL/api/status" "Anders after restart" 90
 STATUS=$(anders curl -sf "$ANDERS_TS_URL/api/status")
 info "Status: $STATUS"
@@ -112,9 +121,16 @@ pass "Invite code generated"
 # ── Step 4: Reset Björn to setup mode ─────────────────────────────────────────
 echo ""
 echo "=== Step 4: Reset Björn to setup mode ==="
-bjorn systemctl stop backupbuddy-gatekeeper
-bjorn 'rm -rf /root/.backupbuddy.bak-1.16.10; cp -r /root/.backupbuddy /root/.backupbuddy.bak-1.16.10 && rm -rf /root/.backupbuddy'
-bjorn systemctl start backupbuddy-gatekeeper
+bjorn "systemctl stop $BJORN_SVC 2>/dev/null || true"
+# Also stop old crash-looping service if present (pre-1.16.11 format).
+bjorn "systemctl stop backupbuddy-gatekeeper 2>/dev/null || true"
+# Back up data dir, then wipe it and the config so the wizard starts fresh.
+bjorn "rm -rf ${BJORN_DATA_DIR}.bak-1.16.10; cp -r $BJORN_DATA_DIR ${BJORN_DATA_DIR}.bak-1.16.10 2>/dev/null || true"
+bjorn "rm -rf ${BJORN_DATA_DIR:?}/*; rm -f $BJORN_CFG"
+# Ensure the storage pool path is writable by the backupbuddy service user.
+# The wizard step 3 validates write access; chown is idempotent if already set.
+bjorn 'chown backupbuddy:backupbuddy /mnt/storage 2>/dev/null || true'
+bjorn "systemctl start $BJORN_SVC"
 info "Björn restarted in setup mode"
 
 # ── Step 5: Wait for Björn wizard ─────────────────────────────────────────────
@@ -164,7 +180,7 @@ info "Cascade HTTP call done"
 
 # Verify success by checking gatekeeper.cfg was created on Björn
 sleep 2
-bjorn 'test -f /root/.backupbuddy/gatekeeper.cfg' \
+bjorn "test -f $BJORN_CFG" \
     || { BODY=$(prox cat /tmp/cascade_body.txt 2>/dev/null || echo "(no body)"); fail "Cascade failed — no gatekeeper.cfg on Björn: $BODY"; }
 pass "Wizard cascade complete — gatekeeper.cfg created"
 
@@ -200,7 +216,7 @@ pass "Anders sees both members"
 
 BJORN_MEMBERS=$(bjorn python3 << PYTHON
 import sqlite3
-db = sqlite3.connect('/root/.backupbuddy/cluster.db')
+db = sqlite3.connect('$BJORN_DATA_DIR/cluster.db')
 rows = db.execute('SELECT node_id FROM members ORDER BY joined_at').fetchall()
 for r in rows:
     print(r[0])
