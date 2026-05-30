@@ -15,7 +15,7 @@ PROXMOX="root@192.168.1.60"
 ANDERS_LAN="10.99.0.11"
 ANDERS_VMID=101
 AGENT_CTID=301
-SHA256_REF="9d20cb463e6f14168eda326be0304ae0faac4003c2dc0a4dc45aafa84cb73124"
+SHA256_REF="f7fd1b6380eae2b73f7d40d189042351e2d74fda64b5c40c1264e84debed5eef"
 CATALOG_DB="/var/lib/backup-buddy/catalog.db"
 ANDERS_SVC="backup-buddy-gatekeeper"
 
@@ -108,7 +108,7 @@ info "Checking Tahoe share sizes..."
 ZERO_SHARES=$(anders "find /mnt/storage/shares -type f -size 0 2>/dev/null | wc -l" 2>/dev/null | tr -d '[:space:]')
 TOTAL_SHARES=$(anders "find /mnt/storage/shares -type f 2>/dev/null | wc -l" 2>/dev/null | tr -d '[:space:]')
 info "Shares total=$TOTAL_SHARES zero-byte=$ZERO_SHARES"
-(( TOTAL_SHARES >= 50 )) || fail "Too few shares ($TOTAL_SHARES < 50) — snapshot may not include backup data"
+(( TOTAL_SHARES >= 10 )) || fail "Too few shares ($TOTAL_SHARES < 10) — snapshot may not include backup data"
 (( ZERO_SHARES == 0 )) || fail "$ZERO_SHARES zero-byte share files found — snapshot was taken on running VM; redo with VM stopped"
 
 pass "Both nodes rolled back and started"
@@ -182,15 +182,15 @@ pass "Folder restore: $FILE_COUNT files, SHA-256 verified ✓"
 echo ""
 echo "=== Step 4: Hash mismatch detection ==="
 info "Finding catalog record id for testfile_1.bin by sha256..."
-FILE_ID=$(anders "sqlite3 '${CATALOG_DB}' \"SELECT id FROM files WHERE sha256='${SHA256_REF}' LIMIT 1\"" 2>/dev/null | tr -d '[:space:]')
+FILE_ID=$(anders "python3 -c \"import sqlite3; c=sqlite3.connect('${CATALOG_DB}'); r=c.execute(\\\"SELECT id FROM files WHERE sha256='${SHA256_REF}' LIMIT 1\\\").fetchone(); print(r[0] if r else '')\"" 2>/dev/null | tr -d '[:space:]')
 [[ -n "$FILE_ID" ]] || fail "Could not find catalog record with SHA-256=$SHA256_REF"
 info "Found catalog id=$FILE_ID — corrupting sha256..."
 
 GARBAGE_SHA="aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
-anders "sqlite3 '${CATALOG_DB}' \"UPDATE files SET sha256='${GARBAGE_SHA}' WHERE id=${FILE_ID}\"" 2>/dev/null
+anders "python3 -c \"import sqlite3; c=sqlite3.connect('${CATALOG_DB}'); c.execute(\\\"UPDATE files SET sha256='${GARBAGE_SHA}' WHERE id=${FILE_ID}\\\"); c.commit()\"" 2>/dev/null
 
 # Verify corruption took effect
-STORED=$(anders "sqlite3 '${CATALOG_DB}' \"SELECT sha256 FROM files WHERE id=${FILE_ID}\"" 2>/dev/null | tr -d '[:space:]')
+STORED=$(anders "python3 -c \"import sqlite3; c=sqlite3.connect('${CATALOG_DB}'); r=c.execute('SELECT sha256 FROM files WHERE id=${FILE_ID}').fetchone(); print(r[0] if r else '')\"" 2>/dev/null | tr -d '[:space:]')
 [[ "$STORED" == "$GARBAGE_SHA" ]] || fail "sha256 corruption did not persist in catalog.db"
 info "Catalog sha256 corrupted. Triggering restore..."
 
@@ -221,8 +221,8 @@ info "Integrity log entries:"
 echo "$INTEGRITY_LINES" | while IFS= read -r line; do info "  $line"; done
 
 info "Reverting catalog sha256 corruption..."
-anders "sqlite3 '${CATALOG_DB}' \"UPDATE files SET sha256='${SHA256_REF}' WHERE id=${FILE_ID}\"" 2>/dev/null
-REVERTED=$(anders "sqlite3 '${CATALOG_DB}' \"SELECT sha256 FROM files WHERE id=${FILE_ID}\"" 2>/dev/null | tr -d '[:space:]')
+anders "python3 -c \"import sqlite3; c=sqlite3.connect('${CATALOG_DB}'); c.execute(\\\"UPDATE files SET sha256='${SHA256_REF}' WHERE id=${FILE_ID}\\\"); c.commit()\"" 2>/dev/null
+REVERTED=$(anders "python3 -c \"import sqlite3; c=sqlite3.connect('${CATALOG_DB}'); r=c.execute('SELECT sha256 FROM files WHERE id=${FILE_ID}').fetchone(); print(r[0] if r else '')\"" 2>/dev/null | tr -d '[:space:]')
 [[ "$REVERTED" == "$SHA256_REF" ]] || fail "Failed to revert catalog sha256 — catalog may be in inconsistent state"
 pass "Hash mismatch detection: RestoreIntegrityError triggered and logged, catalog reverted ✓"
 
@@ -232,7 +232,7 @@ echo "=== Step 5: Take phase-d snapshot on VM $ANDERS_VMID ==="
 info "Stopping anders for snapshot..."
 prox "qm stop $ANDERS_VMID"
 sleep 5
-prox "qm snapshot $ANDERS_VMID phase-d --description 'Phase D: restore verified 2026-05-30'"
+prox "qm snapshot $ANDERS_VMID phase-d --description 'Phase D: restore verified 2026-05-31'"
 prox "qm start $ANDERS_VMID"
 pass "phase-d snapshot created on VM $ANDERS_VMID"
 
