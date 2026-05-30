@@ -2232,6 +2232,15 @@ curl -sf "http://${ANDERS_TS}:8080/" | grep -q "BackupBuddy" && echo "Dashboard 
 
 **Step 1 — Rollback 101 and 301 to `phase-b`**
 
+> **Note:** After rollback, `/dev/sdb` (storage disk) on VM 101 is unformatted and
+> unmounted. The `phase-b` snapshot was taken after the disk was formatted, so it
+> should be preserved — but verify before proceeding:
+> ```bash
+> ssh -J root@192.168.1.60 root@10.99.0.11 "df -h /mnt/storage || echo NEEDS SETUP"
+> ```
+> If `NEEDS SETUP`: `mkfs.ext4 -L storage /dev/sdb && mkdir -p /mnt/storage &&
+> mount /dev/sdb /mnt/storage && chown backupbuddy:backupbuddy /mnt/storage`
+
 **Step 2 — Create test files on agent 301:**
 ```bash
 ssh -J root@192.168.1.60 root@10.99.0.31 bash << 'EOF'
