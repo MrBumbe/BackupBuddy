@@ -2078,7 +2078,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.17.2 — Phase A: Fresh install from GitHub (install scripts)
+### [x] 1.17.2 — Phase A: Fresh install from GitHub (install scripts)
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `clean-ubuntu` (all 6 nodes)
@@ -2134,7 +2134,20 @@ rollback all nodes to `clean-ubuntu` → repeat from Step 1.
 - `phase-a` snapshot taken on all 6 nodes
 
 ```
-> Kludde:
+> Kludde: Done 2026-05-30. Two bugs found and fixed in install scripts:
+> (1) python3-venv not installed → added to base packages (Ubuntu 24.04 ships python3.12
+>     but not python3-venv by default).
+> (2) netifaces C extension build failed — Tahoe-LAFS imports netifaces which requires gcc.
+>     Added build-essential, python3-dev, libffi-dev, libssl-dev to base packages.
+> Commits: fix(install): install python3-venv, fix(install): add build-essential.
+> Install tested via local script pipe (GitHub CDN was caching old version during testing;
+> CDN eventually refreshes — next install from GitHub URL will use fixed script).
+> All 3 gatekeepers: systemctl active, /onboarding/step/1 = HTTP 200.
+> All 3 agents: backup.cfg written, service enabled.
+> Idempotency: gatekeeper re-run — no errors, git update-path used, unit no-op, service
+>   restarted (correct — new code may have been pulled). Agent re-run — backup.cfg preserved,
+>   unit no-op, no errors.
+> phase-a snapshot verified on all 6 nodes (101–103, 301–303). Ready for 1.17.3.
 ```
 
 ---
