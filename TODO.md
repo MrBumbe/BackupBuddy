@@ -2154,6 +2154,7 @@ rollback all nodes to `clean-ubuntu` → repeat from Step 1.
 
 ### [x] 1.17.3 — Phase B: Single-node wizard setup (anders)
 
+
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-a` (all nodes)
 > Rollback `phase-a` on anders (101) and agent 301 if bugs found here.
@@ -2221,7 +2222,7 @@ curl -sf "http://${ANDERS_TS}:8080/" | grep -q "BackupBuddy" && echo "Dashboard 
 
 ---
 
-### [ ] 1.17.4 — Phase C: File backup via agent
+### [x] 1.17.4 — Phase C: File backup via agent
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-b` (anders=101, agent=301)
@@ -2285,7 +2286,24 @@ Expected: 15 rows
 - `phase-c` snapshot on 101 and 301
 
 ```
-> Kludde:
+> Kludde: Done 2026-05-30. Two bugs found and fixed during the test:
+>   (1) Adaptive profile in main.py fell back to hard-coded (3,5) — stub never
+>       called get_current_kn(). With balanced profile, k=3 n=5 requires 5 storage
+>       nodes so all uploads returned HTTP 500. Fixed: main.py now calls
+>       get_current_kn(cluster_db, config.fragmentation.adaptive); with 1 active
+>       member → k=1 n=1. Commit: 88a10f3a0.
+>   (2) Fragmenter.fragment_and_upload() called get_profile("adaptive") which always
+>       raises ValueError. Fixed: Fragmenter accepts adaptive_kn=(k,n) at init and
+>       builds Profile directly when profile=="adaptive". main.py passes resolved k/n.
+>       Commit: c49fb8867.
+> 15 testfiles (testfile_1..15.bin, random sizes 64–576 KB) created in /srv/testbackup
+> on agent 301. SHA-256 of testfile_1.bin:
+>   9d20cb463e6f14168eda326be0304ae0faac4003c2dc0a4dc45aafa84cb73124
+>   Saved locally: sha256_phase_c_reference.txt
+> catalog.db: 17 rows (15 testfiles + .keep + 1 leftover from earlier run).
+> storage disk survived rollback to phase-b — /mnt/storage already mounted.
+> phase-c snapshot on 101 and 301.
+> Note: storage disk prep note (mkfs step) in TODO was precautionary — not needed.
 ```
 
 ---
