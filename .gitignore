@@ -59,6 +59,7 @@ secret-env-plain
 
 # BackupBuddy
 .env
+*.local.env
 *.db
 *.key
 *.cap
