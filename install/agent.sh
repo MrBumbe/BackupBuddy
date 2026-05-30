@@ -50,8 +50,8 @@ check_os() {
 install_system_packages() {
     info "Updating package index..."
     apt-get update -qq
-    info "Installing base packages (curl, git)..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git
+    info "Installing base packages (curl, git, python3-venv)..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git python3-venv
     success "Base packages ready"
 }
 
