@@ -2152,7 +2152,7 @@ rollback all nodes to `clean-ubuntu` → repeat from Step 1.
 
 ---
 
-### [ ] 1.17.3 — Phase B: Single-node wizard setup (anders)
+### [x] 1.17.3 — Phase B: Single-node wizard setup (anders)
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-a` (all nodes)
@@ -2200,7 +2200,23 @@ curl -sf "http://${ANDERS_TS}:8080/" | grep -q "BackupBuddy" && echo "Dashboard 
 - `phase-b` snapshot on 101 and 301
 
 ```
-> Kludde:
+> Kludde: Done 2026-05-30. Wizard completed on anders (101) via curl scripting.
+> Bug found and fixed: install/gatekeeper.sh had Restart=on-failure — wizard sends
+> SIGTERM which uvicorn handles as a clean exit (code 0), so systemd did not
+> auto-restart. Fixed to Restart=always (matches onboarding.py code comment intent).
+> Fix verified on bjorn (102): wizard → SIGTERM → service auto-restarted in normal
+> mode without manual intervention.
+> Two pre-wizard prep steps not in TODO:
+>   (1) /dev/sdb (storage disk) unformatted after rollback — formatted as ext4,
+>       mounted at /mnt/storage, added to fstab, ownership set to backupbuddy.
+>   (2) [backup] section in agent backup.cfg had no paths — added /srv/testbackup
+>       as placeholder so agent could start and register.
+> Results on anders: gatekeeper in normal mode (100.64.235.77:8080), agent-anders-pc
+> registered (is_online: true), dashboard OK via Tailscale.
+> Invite code for cluster joins: shy-turf-7 (48h TTL from wizard completion).
+> recovery_kit.enc: 236 bytes, passphrase: TestPassphrase2026!
+> phase-b snapshot on 101 and 301. Bjorn (102) also configured but NOT snapshotted
+> (phase-b is anders + agent only per task definition).
 ```
 
 ---
