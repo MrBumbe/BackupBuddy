@@ -2384,7 +2384,7 @@ curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/folder" \
 
 ---
 
-### [ ] 1.17.6 — Phase E: Multi-node cluster join (bjorn joins anders)
+### [x] 1.17.6 — Phase E: Multi-node cluster join (bjorn joins anders)
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-b` on anders (101) + `phase-a` on bjorn (102) + agent 303
@@ -2451,7 +2451,9 @@ ssh -J root@192.168.1.60 root@10.99.0.12 \
 - `phase-e` snapshot on all relevant nodes
 
 ```
-> Kludde:
+> Kludde: ANDERS_NODE_NAME resolved dynamically from gatekeeper.cfg (not hardcoded).
+> CT 302 snapshotted without setup (purpose TBD). agent-bjorn-pc uses stability_minutes=1.
+> Cascade via prox (bjorn wizard binds to LAN IP in setup mode).
 ```
 
 ---
