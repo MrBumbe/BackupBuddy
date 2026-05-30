@@ -152,7 +152,7 @@ WorkingDirectory=${INSTALL_DIR}
 ExecStart=${INSTALL_DIR}/.venv/bin/python -m gatekeeper.main \\
     --data-dir ${DATA_DIR} \\
     --config ${CONFIG_DIR}/gatekeeper.cfg
-Restart=on-failure
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
