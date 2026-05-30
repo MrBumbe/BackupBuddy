@@ -2042,7 +2042,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.17.1 — Prepare: create fresh VMs and take pre-install snapshots
+### [x] 1.17.1 — Prepare: create fresh VMs and take pre-install snapshots
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: none — create from scratch using template 9000.
@@ -2070,7 +2070,10 @@ docs/design.md → Node removal
 - All nodes reachable via SSH through Proxmox
 
 ```
-> Kludde:
+> Kludde: Done 2026-05-30. All 6 nodes destroyed and rebuilt from template 9000 (VMs) /
+> ubuntu-24.04-standard_24.04-2_amd64.tar.zst (LXCs). Tailscale installed and joined on
+> anders/bjorn/carina. clean-ubuntu snapshot verified on all 6 nodes. Tailscale auth key
+> saved in secrets.local.env (gitignored). Ready for 1.17.2.
 ```
 
 ---
