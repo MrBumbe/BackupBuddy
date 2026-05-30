@@ -2308,7 +2308,7 @@ Expected: 15 rows
 
 ---
 
-### [ ] 1.17.5 — Phase D: File restore (normal + folder + hash verification)
+### [x] 1.17.5 — Phase D: File restore (normal + folder + hash verification)
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-c` (anders=101, agent=301)
@@ -2362,7 +2362,24 @@ curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/folder" \
 - `phase-d` snapshot on 101
 
 ```
-> Kludde:
+> Kludde: Done 2026-05-31. Three issues found and fixed:
+>   (1) httpx.ResponseNotRead crash: _raise_for_tahoe_error() accessed
+>       response.text inside a streaming context. Fixed: wrapped in
+>       try/except ResponseNotRead, falls back to placeholder string.
+>       Commit: 9eeabd692.
+>   (2) Tahoe UploadUnhappinessError with balanced profile (k=3/n=5 needs
+>       5 distinct servers — only 1 available). Same root cause as 1.17.4.
+>       Fix: gatekeeper.cfg changed to profile=adaptive (same as 1.17.4).
+>       With 1 cluster member → k=1 n=1 happy=1. Shares work on single node.
+>   (3) sqlite3 CLI not installed on anders — test script used sqlite3
+>       for catalog corruption in Step 4. Fixed: replaced with python3 -c
+>       one-liners. Commit: 63844b0f5.
+> Phase-c rebuilt from phase-b: 15 testfiles (testfile_1..15.bin, ~1 MB each)
+> created fresh in /srv/testbackup. New SHA-256 of testfile_1.bin:
+>   f7fd1b6380eae2b73f7d40d189042351e2d74fda64b5c40c1264e84debed5eef
+> Always stop VM/CT before qm snapshot / pct snapshot — running-VM snapshots
+> produce 0-byte Tahoe share placeholder files (buffer not flushed to disk).
+> phase-d snapshot on 101 (anders). CT 301 not snapshotted in phase-d (not needed).
 ```
 
 ---
