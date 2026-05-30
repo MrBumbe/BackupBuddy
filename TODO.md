@@ -1993,6 +1993,656 @@ docs/design.md → Node removal
 
 ---
 
+## 1.17 — Full end-to-end test suite (clean VMs, phased)
+
+> **All tests in 1.17 are performed via SSH through Proxmox at 192.168.1.60.**
+> Kludde SSH:es into each node via ProxyJump: `ssh -J root@192.168.1.60 root@<ip>`
+> No manual steps on VM consoles — everything scripted via SSH.
+>
+> **Testing philosophy:**
+> Each phase starts from a known snapshot and ends with a known snapshot.
+> If a bug is found: fix code locally → `git commit` → `git push` → rollback VM
+> to the phase's starting snapshot → re-run install (which does `git pull` from GitHub)
+> → re-test. Never patch a running VM directly — always fix in code and reinstall.
+>
+> **Snapshot naming convention:**
+> - `clean-ubuntu` — bare Ubuntu 24.04, Tailscale active, NO BackupBuddy (starting point)
+> - `phase-a` — BackupBuddy installed, wizard not yet run
+> - `phase-b` — Anders wizard complete, agent registered
+> - `phase-c` — ≥10 files backed up, SHA-256 recorded
+> - `phase-d` — Restore verified
+> - `phase-e` — Two-node cluster active (bjorn joined)
+> - `phase-f` — Nightly verification passed + corruption detected
+> - `phase-g` — Disaster recovery completed
+> - `phase-h` — Three-node cluster + node removal done
+>
+> **Infrastructure reminder:**
+> - Proxmox: 192.168.1.60 (ssh as root)
+> - Gatekeeper VMs: anders=101 (10.99.0.11), bjorn=102 (10.99.0.12), carina=103 (10.99.0.13)
+> - Agent LXCs: 301 (10.99.0.31), 302 (10.99.0.32), 303 (10.99.0.33)
+> - Template VM: 9000
+> - Tailscale IPs resolved dynamically with: `ssh <node> tailscale ip -4 | head -1`
+>
+> **Rollback commands (used between phases):**
+> ```bash
+> # VM (must be stopped first):
+> ssh root@192.168.1.60 "qm stop <vmid> && qm rollback <vmid> <snapshot> && qm start <vmid>"
+> # LXC:
+> ssh root@192.168.1.60 "pct stop <vmid> && pct rollback <vmid> <snapshot> && pct start <vmid>"
+> ```
+>
+> **Bug fix + re-test workflow:**
+> 1. Observe failure via SSH
+> 2. Fix code locally (dev machine)
+> 3. `git commit -m "fix(...): ..."` → `git push`
+> 4. Rollback VM(s) to the phase's starting snapshot
+> 5. Restart VM(s) and wait for SSH
+> 6. Re-run install script on each affected VM (installs fresh from GitHub)
+> 7. Re-run the phase's test from the beginning
+
+---
+
+### [ ] 1.17.1 — Prepare: create fresh VMs and take pre-install snapshots
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: none — create from scratch using template 9000.
+
+**Reads:** `install/gatekeeper.sh`, `install/agent.sh`, infrastructure memory
+**Requirements:**
+- Stop all currently running VMs and LXCs (101, 102, 103, 301, 302, 303)
+- Destroy all of them (`qm destroy` / `pct destroy`) to start completely fresh
+- Clone template 9000 → new VMs 101, 102, 103 (full clone, `--full`)
+  Set correct hostnames, static IPs, and MAC addresses per infrastructure table
+  Restore cloud-init: static IP, SSH key, hostname
+  Resize OS disk to 20 GB
+  Add storage disk (vm-101-disk-1 style, /mnt/storage) to each GK VM
+- Create LXC containers 301, 302, 303 from the Ubuntu 24.04 LXC template
+  Set correct hostnames and static IPs
+- Boot all VMs and LXCs; wait for SSH to become available on each
+- Join each GK VM to the Tailscale tailnet (`tailscale up --auth-key=...` — ask Johan for key if needed)
+- Verify Tailscale IP is assigned on each GK VM
+- **Take snapshot `clean-ubuntu` on ALL nodes (101, 102, 103, 301, 302, 303)**
+  This is the baseline for re-running Phase A if install bugs are found
+- Verify snapshot exists on all 6 nodes before proceeding
+**Done when:**
+- All 6 nodes running fresh Ubuntu 24.04, Tailscale active on GK VMs
+- `clean-ubuntu` snapshot exists on all 6 nodes
+- All nodes reachable via SSH through Proxmox
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.2 — Phase A: Fresh install from GitHub (install scripts)
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `clean-ubuntu` (all 6 nodes)
+> Rollback here if a bug is found in install scripts.
+
+**Reads:** `install/gatekeeper.sh`, `install/agent.sh`, 1.16.11 notes
+**Requirements:**
+
+**Step 1 — Rollback to `clean-ubuntu` on all nodes:**
+```bash
+for vmid in 101 102 103; do
+  ssh root@192.168.1.60 "qm stop $vmid; qm rollback $vmid clean-ubuntu; qm start $vmid"
+done
+for ctid in 301 302 303; do
+  ssh root@192.168.1.60 "pct stop $ctid; pct rollback $ctid clean-ubuntu; pct start $ctid"
+done
+```
+Wait for all nodes to come back online (SSH available).
+
+**Step 2 — Install gatekeeper on anders, bjorn, carina (parallel):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/MrBumbe/BackupBuddy/master/install/gatekeeper.sh \
+  | ssh root@10.99.0.11 bash
+# Repeat for 10.99.0.12 (bjorn) and 10.99.0.13 (carina)
+```
+- Verify: `systemctl is-active backupbuddy-gatekeeper` returns `active` on each
+- Verify: `curl -sf http://<LAN-IP>:8080/onboarding/step/1` returns HTTP 200 on each
+
+**Step 3 — Install agent on 301, 302, 303:**
+```bash
+# Use env vars for non-interactive install:
+BB_GATEKEEPER_IP=10.99.0.11 BB_AGENT_NAME=agent-anders-pc \
+  curl -fsSL https://raw.githubusercontent.com/MrBumbe/BackupBuddy/master/install/agent.sh \
+  | ssh root@10.99.0.31 bash
+# Repeat for 302 (BB_AGENT_NAME=agent-anders-nas) and 303 (BB_AGENT_NAME=agent-bjorn-pc)
+```
+- Verify: `/etc/backup-buddy/backup.cfg` exists on each LXC
+- Verify: `systemctl is-enabled backupbuddy-agent` returns `enabled`
+
+**Step 4 — Idempotency check (run install scripts a second time on all nodes):**
+- Re-run gatekeeper.sh on anders and agent.sh on 301 without changes
+- Verify: no errors, service not unnecessarily restarted, config not overwritten
+
+**Step 5 — Take snapshot `phase-a` on all 6 nodes**
+
+**Bug fix protocol:** If any step fails → fix code → `git commit` → `git push` →
+rollback all nodes to `clean-ubuntu` → repeat from Step 1.
+
+**Done when:**
+- All 3 gatekeeper services active and wizard accessible
+- All 3 agent services enabled and backup.cfg created
+- Idempotency verified on at least one gatekeeper and one agent
+- `phase-a` snapshot taken on all 6 nodes
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.3 — Phase B: Single-node wizard setup (anders)
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-a` (all nodes)
+> Rollback `phase-a` on anders (101) and agent 301 if bugs found here.
+
+**Reads:** `gatekeeper/gui/routes/onboarding.py`, `install/gatekeeper.sh`, 1.16.12 notes
+**Requirements:**
+
+**Step 1 — Rollback to `phase-a` on all nodes** (ensures clean wizard state)
+
+**Step 2 — Complete wizard on anders via HTTP API (not GUI, scripted via curl):**
+- POST to `/api/onboarding/step/1` — role=new
+- POST to `/api/onboarding/step/2` — node_name=gatekeeper-anders
+- POST to `/api/onboarding/step/3` — storage_path=/mnt/storage, quota=50 GB
+- POST to `/api/onboarding/step/4` — profile=balanced
+- POST to `/api/onboarding/step/5` — skip SMTP and webhook
+- POST to `/api/onboarding/finish` — passphrase=TestPassphrase2026!
+- Verify: wizard returns `root_dir_cap` (or redirects to dashboard)
+- Verify: `GET /api/status` returns `{"status": "ok"}` (normal mode)
+- Record: passphrase and download `recovery_kit.enc` to local machine
+- Verify: `systemctl is-active backupbuddy-gatekeeper` returns `active`
+
+**Step 3 — Register agent-anders-pc (301) with gatekeeper-anders:**
+- Start `backupbuddy-agent` service on 301
+  (first: add correct token to `/etc/backup-buddy/backup.cfg` [gatekeeper] section)
+- Verify: `GET /api/agents` on anders returns agent-anders-pc as registered
+- Verify: agent appears in Agents tab on dashboard
+
+**Step 4 — Verify dashboard is reachable from Tailscale IP:**
+```bash
+ANDERS_TS=$(ssh -J root@192.168.1.60 root@10.99.0.11 tailscale ip -4 | head -1)
+curl -sf "http://${ANDERS_TS}:8080/" | grep -q "BackupBuddy" && echo "Dashboard OK"
+```
+
+**Step 5 — Take snapshot `phase-b` on anders (101) and agent-anders-pc (301)**
+  (bjorn, carina, 302, 303 stay at `phase-a`)
+
+**Bug fix protocol:** Fix → `git commit` → `git push` → rollback 101+301 to `phase-a` → retry from Step 1.
+
+**Done when:**
+- Wizard completes without errors, gatekeeper in normal mode
+- `recovery_kit.enc` downloaded and passphrase recorded
+- Agent registered and visible in GUI
+- Dashboard accessible via Tailscale IP
+- `phase-b` snapshot on 101 and 301
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.4 — Phase C: File backup via agent
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-b` (anders=101, agent=301)
+> Rollback to `phase-b` if backup bugs found.
+
+**Reads:** `agent/watcher.py`, `gatekeeper/fragmenter/`, `gatekeeper/db/catalog.py`
+**Requirements:**
+
+**Step 1 — Rollback 101 and 301 to `phase-b`**
+
+**Step 2 — Create test files on agent 301:**
+```bash
+ssh -J root@192.168.1.60 root@10.99.0.31 bash << 'EOF'
+mkdir -p /srv/testbackup
+for i in $(seq 1 15); do
+  dd if=/dev/urandom bs=1024 count=$((RANDOM % 512 + 64)) \
+    of=/srv/testbackup/testfile_${i}.bin 2>/dev/null
+done
+sha256sum /srv/testbackup/testfile_01.bin > /root/sha256_reference.txt
+cat /root/sha256_reference.txt
+EOF
+```
+
+**Step 3 — Configure backup.cfg on agent 301:**
+Add `/srv/testbackup` to `[backup]` section of `/etc/backup-buddy/backup.cfg`.
+Start `backupbuddy-agent` service.
+
+**Step 4 — Wait for watcher to detect and upload files:**
+- Files should appear stable after `stability_minutes` (default 30) OR set a low value in config
+- Monitor gatekeeper logs for upload completion:
+  `ssh ... journalctl -u backupbuddy-gatekeeper -f | grep -E "uploaded|error"`
+- Wait until all 15 files show in `GET /api/agents` or catalog query
+
+**Step 5 — Verify catalog.db has entries:**
+```bash
+ssh -J root@192.168.1.60 root@10.99.0.11 \
+  sqlite3 /var/lib/backup-buddy/catalog.db "SELECT count(*) FROM files;"
+```
+Expected: 15 rows
+
+**Step 6 — Verify dashboard shows correct upload count and last backup timestamp**
+
+**Step 7 — Take snapshot `phase-c` on 101 and 301**
+
+**Bug fix protocol:** Fix → `git commit` → `git push` → rollback 101+301 to `phase-b` → retry from Step 1.
+
+**Done when:**
+- All 15 test files backed up
+- catalog.db has 15 rows
+- Dashboard reflects correct state
+- SHA-256 reference saved to local machine
+- `phase-c` snapshot on 101 and 301
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.5 — Phase D: File restore (normal + folder + hash verification)
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-c` (anders=101, agent=301)
+> Rollback to `phase-c` if restore bugs found.
+
+**Reads:** `gatekeeper/restore/restore.py`, `gatekeeper/gui/routes/restore.py`
+**Requirements:**
+
+**Step 1 — Rollback 101 and 301 to `phase-c`**
+
+**Step 2 — Restore a single file via the GUI API (Find a file):**
+```bash
+ANDERS_TS=$(ssh -J root@192.168.1.60 root@10.99.0.11 tailscale ip -4 | head -1)
+# Start a restore job:
+curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/file" \
+  -H "Content-Type: application/json" \
+  -d '{"original_path": "/srv/testbackup/testfile_01.bin",
+       "agent": "agent-anders-pc",
+       "dest_path": "/tmp/restore_test/"}'
+# Poll job status until complete
+```
+- Verify: restored file SHA-256 matches reference from Phase C
+- Verify: no `RestoreIntegrityError` in gatekeeper logs
+
+**Step 3 — Restore entire test folder (Restore a folder):**
+```bash
+curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/folder" \
+  -H "Content-Type: application/json" \
+  -d '{"folder_path": "/srv/testbackup",
+       "agent": "agent-anders-pc",
+       "dest_path": "/tmp/restore_folder/"}'
+```
+- Poll until complete
+- Verify: 15 files in /tmp/restore_folder/ on anders
+- Verify: SHA-256 of testfile_01.bin matches reference
+
+**Step 4 — Verify hash mismatch detection:**
+- Manually corrupt one entry in catalog.db: `UPDATE files SET sha256='aabbcc...' WHERE id=1`
+- Trigger a restore of that file
+- Verify: `RestoreIntegrityError` raised, alert logged
+- Revert the catalog corruption
+
+**Step 5 — Take snapshot `phase-d` on 101**
+
+**Bug fix protocol:** Fix → `git commit` → `git push` → rollback 101+301 to `phase-c` → retry.
+
+**Done when:**
+- Single file restore with correct SHA-256 ✓
+- Folder restore (15 files) ✓
+- Hash mismatch detection triggers correctly ✓
+- `phase-d` snapshot on 101
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.6 — Phase E: Multi-node cluster join (bjorn joins anders)
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-b` on anders (101) + `phase-a` on bjorn (102) + agent 303
+> Rollback anders to `phase-b` and bjorn/303 to `phase-a` if cluster join bugs found.
+
+**Reads:** `gatekeeper/cluster/join.py`, `gatekeeper/gui/routes/buddies.py`,
+  `gatekeeper/gui/routes/onboarding.py`, 1.16.10 notes
+**Requirements:**
+
+**Step 1 — Rollback anders (101) to `phase-b`, bjorn (102) + 303 to `phase-a`**
+
+**Step 2 — Back up ≥10 files on anders first** (so there is data to verify distribution):
+- Configure backup on agent 301 (same as Phase C) and wait for upload
+- Verify 10+ files in catalog.db on anders
+
+**Step 3 — Generate invite code on anders:**
+```bash
+ANDERS_TS=$(ssh -J root@192.168.1.60 root@10.99.0.11 tailscale ip -4 | head -1)
+INVITE_JSON=$(curl -sf -X POST "http://${ANDERS_TS}:8080/api/buddies/invite")
+INVITE_CODE=$(echo "$INVITE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['code'])")
+echo "Invite code: $INVITE_CODE"
+```
+
+**Step 4 — Complete wizard on bjorn (join flow):**
+- POST wizard steps to bjorn's LAN IP (bjorn is in setup mode, no Tailscale filter)
+  - Step 1: role=join, invite_code=$INVITE_CODE, member_url=http://${ANDERS_TS}:8080
+  - Steps 2–5: node name, storage path, profile, skip notifications
+  - Finish: complete wizard
+- Verify: bjorn service restarts in normal mode
+- Verify: `GET /api/status` on bjorn returns `{"status": "ok"}`
+
+**Step 5 — Verify cluster consistency on both sides:**
+```bash
+# Anders cluster.db should have bjorn:
+ssh -J root@192.168.1.60 root@10.99.0.11 \
+  sqlite3 /var/lib/backup-buddy/cluster.db "SELECT display_name, status FROM members;"
+# Bjorn cluster.db should have anders:
+ssh -J root@192.168.1.60 root@10.99.0.12 \
+  sqlite3 /var/lib/backup-buddy/cluster.db "SELECT display_name, status FROM members;"
+```
+
+**Step 6 — Verify fragments distributed to bjorn's storage:**
+- Count share files in bjorn's storage dir before and after a new backup
+- Expected: bjorn's storage grows after fragments are placed there
+
+**Step 7 — Verify dashboard on both nodes shows correct cluster state:**
+- Anders dashboard: 2 members, both online, both showing storage contribution
+- Bjorn dashboard: 2 members, both online
+
+**Step 8 — Register agent-bjorn-pc (303) with bjorn and back up test files:**
+- Configure backup.cfg on 303 pointing at bjorn (10.99.0.12)
+- Start agent service, verify registration
+
+**Step 9 — Take snapshot `phase-e` on 101, 102, 301, 302, 303**
+
+**Bug fix protocol:** Fix → `git commit` → `git push` → rollback 101 to `phase-b`,
+102+303 to `phase-a` → retry from Step 1.
+
+**Done when:**
+- Bjorn successfully joined cluster via invite code
+- cluster.db consistent on both nodes
+- Fragments distributed to bjorn's storage node
+- Both dashboards show 2 active members
+- `phase-e` snapshot on all relevant nodes
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.7 — Phase F: Nightly verification + deliberate corruption detection
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-e` (two-node cluster active)
+> Rollback to `phase-e` if verification bugs found.
+
+**Reads:** `gatekeeper/verify/nightly.py`, `gatekeeper/tahoe/client.py`, 1.16.9 notes
+**Requirements:**
+
+**Step 1 — Rollback 101, 102, 301, 303 to `phase-e`**
+
+**Step 2 — Trigger nightly verification on anders manually:**
+```bash
+# Via internal API or by calling Python directly via SSH:
+ssh -J root@192.168.1.60 root@10.99.0.11 \
+  /opt/backup-buddy/.venv/bin/python3 -c "
+import asyncio, sys
+sys.path.insert(0, '/opt/backup-buddy')
+from gatekeeper.verify.nightly import NightlyVerifier
+# ... configure and run ..."
+```
+- Verify: Layer 1 (root_dir.cap accessible) passes
+- Verify: Layer 2 (share counts) passes for all files
+- Verify: Layer 3 (test restore) passes for all sampled files
+- Verify: Layer 4 (lifeboat age) — may warn if no lifeboat yet, expected
+- Verify: No `RestoreIntegrityError` or critical alerts in logs
+
+**Step 3 — Deliberate corruption:**
+- Find share files on bjorn's storage node:
+  ```bash
+  ssh -J root@192.168.1.60 root@10.99.0.12 find /mnt/storage -name "*.share" | head -3
+  ```
+- Corrupt ALL share files on BOTH nodes for one specific file
+  (with k=3/n=5 need to corrupt ≥3 shares to guarantee detection):
+  ```bash
+  ssh -J root@192.168.1.60 root@10.99.0.11 \
+    "dd if=/dev/urandom bs=1 count=100 seek=500 of=<share_file> conv=notrunc"
+  ```
+
+**Step 4 — Re-trigger nightly verification:**
+- Verify: Layer 2 detects under-replication (shares_good < shares_needed) for the corrupted file
+- Verify: Layer 3 restore of the corrupted file fails with `RestoreIntegrityError`
+- Verify: Alert is raised (check logs for `send_alert` call)
+- Verify: Other files still restore correctly (corruption isolated)
+
+**Step 5 — Verify recovery path:**
+- After corruption detected, verify rebalance is triggered or queued
+- Check that notification dispatcher logs the alert correctly
+
+**Bug fix protocol:** Fix → `git commit` → `git push` → rollback to `phase-e` → retry from Step 1.
+
+**Done when:**
+- Clean nightly verification passes all 4 layers
+- Deliberate corruption detected by Layer 2 and/or Layer 3
+- Alert raised correctly
+- Rebalance or flag set for the corrupted file
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.8 — Phase G: Full disaster recovery (VM destroy + fresh install + GUI restore)
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-a` on anders (101) — this phase sets up anders fresh via wizard
+> so it has recovery_kit.enc, backs up files, then completely destroys and rebuilds the VM.
+> Rollback anders to `phase-a` if disaster recovery bugs found.
+
+**Reads:** `install/gatekeeper.sh`, `gatekeeper/gui/routes/onboarding.py`,
+  `gatekeeper/gui/routes/restore.py`, `gatekeeper/lifeboat/`, 1.16.12 notes
+**Requirements:**
+
+**Step 1 — Rollback anders (101) and agent 301 to `phase-a`**
+
+**Step 2 — Complete wizard on anders (same as Phase B):**
+- Run wizard, select profile=balanced, set passphrase=TestPassphrase2026!
+- Download and save `recovery_kit.enc` to local machine
+
+**Step 3 — Back up ≥10 files from agent 301:**
+- Configure backup.cfg, start agent
+- Wait for upload, verify ≥10 rows in catalog.db on anders
+
+**Step 4 — Record SHA-256 of testfile_01.bin:**
+```bash
+ssh -J root@192.168.1.60 root@10.99.0.31 sha256sum /srv/testbackup/testfile_01.bin
+```
+Save this value — it will be verified after disaster recovery.
+
+**Step 5 — Count share files on anders' Tahoe storage (before destroy):**
+```bash
+ssh -J root@192.168.1.60 root@10.99.0.11 find /mnt/storage -type f | wc -l
+```
+Save this count.
+
+**Step 6 — Destroy anders VM (true qm destroy, not just rollback):**
+```bash
+# Remove storage disk from config first to preserve Tahoe data:
+ssh root@192.168.1.60 "
+  qm stop 101
+  # Detach storage disk from VM config (keep the disk volume):
+  sed -i '/scsi1/d' /etc/pve/qemu-server/101.conf
+  qm destroy 101
+"
+# Verify the disk volume still exists:
+ssh root@192.168.1.60 "lvs | grep vm-101"
+```
+
+**Step 7 — Clone template 9000 → new VM 101:**
+```bash
+ssh root@192.168.1.60 "
+  qm clone 9000 101 --name gatekeeper-anders --full --storage local-lvm
+  # Set correct MAC, cloud-init, static IP:
+  qm set 101 --net0 virtio=<ORIGINAL_MAC>,bridge=vmbr0
+  qm set 101 --ipconfig0 ip=10.99.0.11/24,gw=10.99.0.1
+  qm set 101 --cipassword ''  # SSH key only
+  qm resize 101 scsi0 20G
+  # Reattach the storage disk:
+  qm set 101 --scsi1 /dev/<storage-disk-volume>
+  qm cloudinit update 101
+  qm start 101
+"
+```
+Wait for VM to boot and SSH to be available.
+
+**Step 8 — Install BackupBuddy on new anders VM:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/MrBumbe/BackupBuddy/master/install/gatekeeper.sh \
+  | ssh -J root@192.168.1.60 root@10.99.0.11 bash
+# Wait for service to start
+# Verify wizard accessible at http://10.99.0.11:8080/onboarding/step/1
+```
+
+**Step 9 — Join Tailscale on new VM:**
+```bash
+ssh -J root@192.168.1.60 root@10.99.0.11 tailscale up
+```
+Verify Tailscale IP is assigned.
+
+**Step 10 — Emergency restore via GUI:**
+- Upload `recovery_kit.enc` (saved in Step 2) to the emergency restore endpoint:
+  ```bash
+  RECOVERY_B64=$(base64 -w0 recovery_kit.enc)
+  curl -sf -X POST "http://10.99.0.11:8080/api/restore/emergency" \
+    -H "Content-Type: application/json" \
+    -d "{\"recovery_kit_b64\": \"${RECOVERY_B64}\",
+         \"passphrase\": \"TestPassphrase2026!\"}"
+  ```
+- Poll until reconstruction complete
+- Verify: catalog.db has ≥10 entries
+- Verify: `GET /api/restore/catalog` returns ≥10 files
+
+**Step 11 — Restore testfile_01.bin and verify SHA-256:**
+```bash
+curl -sf -X POST "http://10.99.0.11:8080/api/restore/start/file" \
+  -H "Content-Type: application/json" \
+  -d '{"original_path": "/srv/testbackup/testfile_01.bin",
+       "agent": "agent-anders-pc",
+       "dest_path": "/tmp/dr_restore/"}'
+# Poll job until complete
+# SHA-256 the restored file and compare to saved reference
+ssh -J root@192.168.1.60 root@10.99.0.11 sha256sum /tmp/dr_restore/testfile_01.bin
+```
+Expected: SHA-256 matches Step 4 reference exactly.
+
+**Bug fix protocol:** Fix → `git commit` → `git push` → rollback 101 to `phase-a` → retry from Step 1.
+
+**Done when:**
+- VM 101 completely destroyed and recreated from template
+- BackupBuddy installed fresh from GitHub on new VM
+- Emergency restore from recovery_kit.enc + passphrase succeeds
+- ≥10 files appear in catalog after reconstruction
+- SHA-256 of restored file matches pre-destruction reference
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.9 — Phase H: Three-node cluster + node removal flow
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-e` (two-node cluster: anders + bjorn active)
+> Rollback to `phase-e` if removal or three-node bugs found.
+
+**Reads:** `gatekeeper/cluster/removal.py`, `gatekeeper/cluster/orphans.py`,
+  `gatekeeper/rebalance/`, `gatekeeper/gui/routes/buddies.py`, 1.10 notes
+**Requirements:**
+
+**Step 1 — Rollback 101, 102, 103, 301, 302, 303 to `phase-e`** (carina at phase-a)
+
+**Step 2 — Add carina as third node:**
+- Generate invite on anders
+- Complete wizard on carina (join flow, use invite code)
+- Register agent-anders-nas (302) with carina
+- Verify three members in cluster.db on all nodes
+- Verify fragments begin distributing to carina's storage
+- Verify adaptive profile k/n adjusts: 3 nodes → k=1, n=3 per ADR-006a
+
+**Step 3 — Propose removal of bjorn from anders:**
+```bash
+ANDERS_TS=$(ssh -J root@192.168.1.60 root@10.99.0.11 tailscale ip -4 | head -1)
+BJORN_NODE_ID=$(ssh -J root@192.168.1.60 root@10.99.0.12 \
+  sqlite3 /var/lib/backup-buddy/cluster.db \
+  "SELECT node_id FROM members WHERE display_name='gatekeeper-bjorn';")
+curl -sf -X POST "http://${ANDERS_TS}:8080/api/buddies/propose_removal" \
+  -H "Content-Type: application/json" \
+  -d "{\"target_node_id\": \"${BJORN_NODE_ID}\"}"
+```
+- Verify: vote appears in cluster.db on anders
+- Verify: bjorn NOT notified yet (check bjorn logs)
+
+**Step 4 — Cast votes to reach majority (anders + carina vote yes):**
+```bash
+VOTE_ID=$(ssh -J root@192.168.1.60 root@10.99.0.11 \
+  sqlite3 /var/lib/backup-buddy/cluster.db \
+  "SELECT id FROM votes WHERE target_node_id='${BJORN_NODE_ID}' AND resolved=0;")
+# Cast vote from anders:
+curl -sf -X POST "http://${ANDERS_TS}:8080/api/buddies/vote/${VOTE_ID}" \
+  -d '{"vote": true}'
+CARINA_TS=$(ssh -J root@192.168.1.60 root@10.99.0.13 tailscale ip -4 | head -1)
+# Cast vote from carina:
+curl -sf -X POST "http://${CARINA_TS}:8080/api/buddies/vote/${VOTE_ID}" \
+  -d '{"vote": true}'
+```
+- Verify: vote resolves as PASSED in cluster.db
+- Verify: grace period started (grace_started_at set for bjorn's member row)
+- Verify: bjorn notified (check bjorn logs — notification of grace period start)
+
+**Step 5 — Verify re-fragmentation is triggered:**
+- Check rebalance scheduler is queued or running on anders/carina
+- Verify files previously using bjorn's fragments are being re-uploaded
+
+**Step 6 — Simulate grace period expiry and orphan cleanup:**
+- Manually set `grace_started_at` to a past timestamp in cluster.db to skip waiting
+- Trigger `cleanup_orphans()` manually
+- Verify: bjorn's fragments deleted from storage pool
+- Verify: StoragePoolManager.remove_fragment() called (used_bytes decremented)
+- Verify: orphan_tags.cleaned_at set for bjorn's fragments
+- Verify: notification sent: "Cleared X GB of orphaned fragments from bjorn"
+
+**Step 7 — Verify cluster still operates normally with 2 nodes:**
+- Restore a file after bjorn removal
+- Verify SHA-256 matches
+
+**Bug fix protocol:** Fix → `git commit` → `git push` → rollback all to `phase-e` → retry from Step 1.
+
+**Done when:**
+- Three-node cluster formed (anders + bjorn + carina)
+- Removal vote passed, grace period started
+- Orphan cleanup completed, bjorn's fragments deleted
+- Cluster still functional with 2 nodes post-removal
+
+```
+> Kludde:
+```
+
+---
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
