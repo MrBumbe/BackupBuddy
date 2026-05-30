@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from gatekeeper.db.catalog import CatalogDB
-from gatekeeper.fragmenter.profiles import get_profile
+from gatekeeper.fragmenter.profiles import Profile, get_profile
 from gatekeeper.tahoe.client import TahoeClient, TahoeError
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,7 @@ class Fragmenter:
         catalog_db: CatalogDB,
         root_dir_ref: str,
         metadata_key: bytes,
+        adaptive_kn: tuple[int, int] | None = None,
     ) -> None:
         if len(metadata_key) != 32:
             raise ValueError("metadata_key must be exactly 32 bytes")
@@ -117,6 +118,7 @@ class Fragmenter:
         self._catalog = catalog_db
         self._root_dir_ref = root_dir_ref
         self._metadata_key = metadata_key
+        self._adaptive_kn = adaptive_kn
 
     async def fragment_and_upload(
         self,
@@ -154,7 +156,12 @@ class Fragmenter:
             ValueError:          Unknown profile name.
             FragmentationError:  File changed during upload, or upload failed.
         """
-        kn = get_profile(profile)  # raises ValueError for unknown / adaptive
+        if profile == "adaptive":
+            if self._adaptive_kn is None:
+                raise ValueError("Fragmenter not configured with adaptive k/n — pass adaptive_kn at init")
+            kn = Profile(k=self._adaptive_kn[0], n=self._adaptive_kn[1])
+        else:
+            kn = get_profile(profile)
 
         hash_before = await asyncio.to_thread(_compute_sha256, file_path)
         logger.debug(

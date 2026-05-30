@@ -281,6 +281,7 @@ async def lifespan(app: FastAPI):
                 catalog_db=catalog_db,
                 root_dir_ref=root_dir_ref,
                 metadata_key=metadata_key,
+                adaptive_kn=(shares_k, shares_n) if active_profile == "adaptive" else None,
             )
             logger.info("Fragmenter ready (profile=%s k=%d n=%d)",
                         active_profile, shares_k, shares_n)
