@@ -45,6 +45,7 @@ from gatekeeper.config import (
 )
 from gatekeeper.db.catalog import CatalogDB
 from gatekeeper.db.cluster import ClusterDB
+from gatekeeper.fragmenter.adaptive import get_current_kn
 from gatekeeper.fragmenter.fragmenter import Fragmenter, derive_metadata_key
 from gatekeeper.fragmenter.profiles import get_profile
 from gatekeeper.fragmenter.queue_worker import UploadItem, UploadQueueWorker
@@ -239,16 +240,13 @@ async def lifespan(app: FastAPI):
             )["path"]
 
             # ADR-018: k/n is a node-level Tahoe setting.  Resolve from the
-            # active profile; adaptive k/n falls back to balanced (3,5) until
-            # task 1.11.1 provides get_current_kn().
+            # active profile; adaptive reads current cluster size from cluster_db.
             active_profile = config.fragmentation.profile
             if active_profile == "adaptive":
-                shares_k, shares_n = 3, 5
-                shares_happy = shares_n
-                logger.info(
-                    "Adaptive profile selected — using balanced (3,5) at startup; "
-                    "task 1.11.1 will compute final k/n from cluster size"
-                )
+                assert cluster_db is not None
+                shares_k, shares_n = get_current_kn(cluster_db, config.fragmentation.adaptive)
+                shares_happy = shares_k  # happy = k: upload succeeds when decode is possible
+                logger.info("Adaptive profile selected — k=%d n=%d", shares_k, shares_n)
             else:
                 _p = get_profile(active_profile)
                 shares_k, shares_n = _p.k, _p.n
