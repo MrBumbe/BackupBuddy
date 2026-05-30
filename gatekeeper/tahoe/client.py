@@ -283,6 +283,11 @@ class TahoeError(Exception):
 def _raise_for_tahoe_error(response: httpx.Response, operation: str) -> None:
     """Raise TahoeError with a plain message if the HTTP response indicates failure."""
     if response.status_code >= 400:
+        try:
+            body = response.text[:200]
+        except httpx.ResponseNotRead:
+            # Inside a streaming context the body hasn't been read yet.
+            body = "(streaming response — body not yet read)"
         raise TahoeError(
-            f"{operation} failed (HTTP {response.status_code}): {response.text[:200]}"
+            f"{operation} failed (HTTP {response.status_code}): {body}"
         )
