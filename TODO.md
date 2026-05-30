@@ -1892,7 +1892,7 @@ docs/design.md → Node removal
 
 ---
 
-### [ ] 1.16.12 — Full Scenario 3 from wizard setup (VM destroy + fresh install + GUI restore)
+### [x] 1.16.12 — Full Scenario 3 from wizard setup (VM destroy + fresh install + GUI restore)
 
 **Reads:** `project-docs/testing.md` → Scenario 3,
   `install/gatekeeper.sh`, `gatekeeper/gui/routes/onboarding.py`
@@ -1915,12 +1915,25 @@ docs/design.md → Node removal
 - Wizard passphrase collection (step 5 form) and GUI emergency restore confirmed working
 
 ```
-> Kludde: <!-- -->
+> Kludde: Rewrote scenario3_disaster_recovery_test.sh (17 steps). Steps 1–7
+> unchanged (rollback, wizard, agent backup, save artifacts). Step 8 is a true
+> VM destroy: stops service, counts shares, stops VM, removes scsi1 from
+> /etc/pve/qemu-server/101.conf with sed before qm destroy so vm-101-disk-1
+> survives. Step 9 verifies the LVM volume still exists. Step 10 clones template
+> 9000 → 101 (--full), sets original MACs, static cloud-init IPs, adds cloudinit
+> drive defensively, runs qm cloudinit update, resizes OS disk to 20G, reattaches
+> vm-101-disk-1, verifies disk size ~10G to detect naming collisions. Step 11
+> runs install/gatekeeper.sh via bash -s < pipe, overlays current source, pip
+> force-reinstall, mounts /mnt/storage by UUID, handles tailscaled autostart race
+> (stop → write state → enable+start), verifies Tailscale IP is unchanged.
+> Steps 12–17: second wizard, normal-mode restart, empty catalog assert,
+> emergency restore, catalog count ≥10, file restore + SHA-256 verify.
+> SSH_OPTS extended with -o UserKnownHostsFile=/dev/null to handle fresh host keys.
 ```
 
 ---
 
-### [ ] 1.16.13 — GUI smoke test: all pages accessible, no Tahoe internals in HTML
+### [x] 1.16.13 — GUI smoke test: all pages accessible, no Tahoe internals in HTML
 
 **Reads:** `gatekeeper/gui/`, CLAUDE.md → rule 5 (never expose Tahoe internals)
 **Requirements:**
@@ -1940,7 +1953,11 @@ docs/design.md → Node removal
 - Zero Tahoe internal strings found in any HTML response
 
 ```
-> Kludde: <!-- -->
+> Kludde: Fixed missing `ts_format` Jinja2 filter in settings.py — the filter was registered in
+> dashboard.py/buddies.py/agents.py but not in settings.py, causing a 500 on GET /settings.
+> Added `_fmt_timestamp` + `_templates.env.filters["ts_format"]` to settings.py.
+> Smoke test script: tests/integration/proxmox/gui_smoke_test.sh — all 5 pages HTTP 200,
+> zero Tahoe internal strings in rendered HTML. Verified on Anders (100.68.15.102).
 ```
 
 ---

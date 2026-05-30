@@ -22,6 +22,7 @@ import configparser
 import logging
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,15 @@ from gatekeeper.secrets import SecretsStore
 logger = logging.getLogger(__name__)
 
 _templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
+
+
+def _fmt_timestamp(ts: float | None) -> str:
+    if ts is None:
+        return "—"
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+_templates.env.filters["ts_format"] = _fmt_timestamp
 
 _VALID_PROFILES = frozenset({"balanced", "secure", "paranoid", "adaptive"})
 _PARANOID_MIN_NODES = 10
