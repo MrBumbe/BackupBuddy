@@ -181,14 +181,14 @@ info "Anders node name: $ANDERS_NODE_NAME"
 # shares.happy=n=5 distinct servers, which a single-node cluster can never satisfy;
 # adaptive sets happy=k=1 for single-node and scales up as nodes join).
 info "Switching anders fragmentation profile to adaptive..."
-anders "systemctl stop $GK_SVC 2>/dev/null; sleep 2"
-anders "pkill -f 'tahoe run' 2>/dev/null; sleep 3; true"
 anders "sed -i 's/^profile.*/profile = adaptive/' /etc/backup-buddy/gatekeeper.cfg"
 anders "grep profile /etc/backup-buddy/gatekeeper.cfg"
-anders "systemctl start $GK_SVC"
-sleep 3
+# Restart via nohup so the SSH session returns immediately and doesn't hang
+# waiting for systemctl to finish stopping Tahoe sub-processes (~90 s).
+anders "nohup bash -c 'systemctl restart $GK_SVC' >/dev/null 2>&1 &"
+sleep 8  # brief pause so systemd begins the restart cycle before we poll
 
-wait_gatekeeper "$ANDERS_TS_URL" "anders gatekeeper (post-profile-change)" 60 \
+wait_gatekeeper "$ANDERS_TS_URL" "anders gatekeeper (post-profile-change)" 90 \
     || fail "Anders gatekeeper did not recover after profile switch"
 
 wait_tahoe_ready "anders Tahoe" 300 \
