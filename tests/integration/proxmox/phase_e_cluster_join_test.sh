@@ -143,6 +143,17 @@ prox "pct rollback $BJORN_AGENT_CTID phase-a && pct start $BJORN_AGENT_CTID"
 
 wait_ssh "$ANDERS_LAN" "anders" || fail "Anders did not come up within 150 s"
 wait_ssh "$BJORN_LAN"  "bjorn"  || fail "Bjorn did not come up within 150 s"
+
+# Deploy current gatekeeper code from dev machine to both VMs so the test
+# always exercises the latest code, not the snapshot's installed version.
+# Uses tar-over-SSH (ProxyJump) since VMs are not directly reachable.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+info "Syncing gatekeeper code to anders..."
+tar -czf - -C "$REPO_ROOT" gatekeeper | ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" "tar -xzf - -C /opt/backup-buddy/"
+info "Syncing gatekeeper code to bjorn..."
+tar -czf - -C "$REPO_ROOT" gatekeeper | ssh $SSH_OPTS -J "$PROXMOX" "root@$BJORN_LAN"  "tar -xzf - -C /opt/backup-buddy/"
+
 pass "All nodes rolled back and started"
 
 # ── Step 2: Prep bjorn storage disk ──────────────────────────────────────────
