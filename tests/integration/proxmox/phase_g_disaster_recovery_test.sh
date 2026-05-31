@@ -221,8 +221,26 @@ ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" "cat /tmp/recovery_kit.enc" \
 anders "cat /tmp/recovery_kit.enc" | prox "cat - > /tmp/anders_recovery_kit_g.enc"
 info "recovery_kit.enc saved to dev machine (/tmp/recovery_kit_g.enc)"
 
-# Confirm receipt, then trigger service restart into normal mode.
-anders "curl -sf --max-time 15 -X POST '$BASE_LAN/api/onboarding/confirm-key' -o /dev/null"
+# Verify gatekeeper still responds before attempting confirm-key.
+HEALTH_CODE=$(anders "curl -s -o /dev/null -w '%{http_code}' --max-time 10 '$BASE_LAN/'" \
+    2>/dev/null) || HEALTH_CODE="000"
+info "Gatekeeper health check (pre confirm-key): HTTP $HEALTH_CODE"
+
+# Confirm receipt. Capture status code so failures are diagnosable.
+CONFIRM_CODE=$(anders "curl -s -o /tmp/confirm_resp.txt -w '%{http_code}' \
+    --max-time 20 -X POST '$BASE_LAN/api/onboarding/confirm-key'" 2>/dev/null) \
+    || CONFIRM_CODE="000"
+info "confirm-key HTTP status: $CONFIRM_CODE"
+if [[ "$CONFIRM_CODE" != "303" && "$CONFIRM_CODE" != "200" && "$CONFIRM_CODE" != "302" ]]; then
+    CONFIRM_BODY=$(anders "cat /tmp/confirm_resp.txt 2>/dev/null" || echo "(no body)")
+    GK_LOG=$(anders "journalctl -u $ANDERS_SVC --since '-3min' --no-pager -n 30 2>/dev/null" \
+        || echo "(no log)")
+    info "confirm-key body: ${CONFIRM_BODY:0:300}"
+    info "Gatekeeper journal (last 3 min):"
+    while IFS= read -r line; do info "  $line"; done <<< "$GK_LOG"
+    fail "confirm-key failed: HTTP $CONFIRM_CODE (expected 303)"
+fi
+
 anders "curl -sf --max-time 5 -X POST '$BASE_LAN/api/onboarding/restart' -o /dev/null || true"
 sleep 5
 
