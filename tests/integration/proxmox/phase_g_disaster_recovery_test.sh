@@ -427,7 +427,7 @@ info "scsi1 volume reference: $SCSI1_VOL"
 
 # Read original MAC address.
 NET0_LINE=$(prox "grep '^net0:' /etc/pve/qemu-server/$ANDERS_VMID.conf 2>/dev/null")
-ANDERS_MAC=$(echo "$NET0_LINE" | grep -oP '(?<=virtio=)[0-9A-Fa-f:]{17}' | head -1)
+ANDERS_MAC=$(echo "$NET0_LINE" | sed -n 's/.*virtio=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -1)
 [[ -n "$ANDERS_MAC" ]] || fail "Could not read MAC address from VM $ANDERS_VMID net0 config"
 info "Original MAC: $ANDERS_MAC"
 
