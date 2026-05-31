@@ -258,20 +258,17 @@ pass "Clean verification: Layers 1, 2, 3 OK (Layer 4 may warn — no lifeboat ex
 echo ""
 echo "=== Step 5: Identify corruption target (catalog file on both nodes) ==="
 
-# Layer 2 only checks caps that are in the catalog.  We must therefore choose a
-# target whose storage index comes from a catalog cap — not from the raw
-# filesystem.  Tahoe also stores internal metadata (root-dir mutable slots,
-# helper files) that are never in the catalog; deleting those would not be
-# detected by Layer 2.
+# The storage index in a URI:CHK cap is NOT the same as the directory name
+# used by the storage server on disk.  Our Tahoe fork applies an internal
+# transformation.  The actual on-disk SI is returned by Tahoe's check endpoint
+# as the "storage-index" field.
 #
-# Strategy:
-#   1. Extract storage indices from all CHK caps in the catalog (on anders).
-#      In URI:CHK:<si>:<key>:<k>:<n>:<size> the storage index is field [2].
-#   2. Get all storage indices present on bjorn's filesystem.
-#   3. Intersect → a catalog file that was distributed to BOTH nodes.
+# Strategy: query Tahoe's check API for each catalog CHK cap; use the first cap
+# whose check result shows count-good-share-hosts >= 2 (shares on both nodes).
+# Extract its "storage-index" to get the correct on-disk SI.
 
-CATALOG_SIS=$(anders python3 2>/dev/null << 'PYEOF'
-import sys
+TARGET_SI=$(anders python3 2>/dev/null << 'PYEOF'
+import sys, json, urllib.request
 sys.path.insert(0, '/opt/backup-buddy')
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -281,39 +278,38 @@ from gatekeeper.db.catalog import CatalogDB
 db = CatalogDB('/var/lib/backup-buddy/catalog.db', key)
 for r in db.get_all_files():
     cap = r.get('cap', '')
-    if cap.startswith('URI:CHK:'):
-        parts = cap.split(':')
-        if len(parts) >= 3 and parts[2]:
-            print(parts[2])
+    if not cap.startswith('URI:CHK:'):
+        continue
+    cap_enc = cap.replace(':', '%3A')
+    url = f'http://127.0.0.1:3456/uri/{cap_enc}?t=check&output=json'
+    req = urllib.request.Request(url, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception:
+        continue
+    si = data.get('storage-index', '')
+    hosts = data.get('results', {}).get('count-good-share-hosts', 0)
+    if si and hosts >= 2:
+        print(si)
+        break
 db.close()
 PYEOF
 ) || true
 
-[[ -n "$CATALOG_SIS" ]] || fail "No CHK caps found in catalog"
-
-BJORN_SIS=$(bjorn "find $BJORN_SHARES -mindepth 2 -maxdepth 2 -type d 2>/dev/null | xargs -I{} basename {} | sort -u 2>/dev/null") || BJORN_SIS=""
-
-[[ -n "$BJORN_SIS" ]] || fail "No storage index directories on bjorn"
-
-TARGET_SI=""
-while IFS= read -r si; do
-    [[ -z "$si" ]] && continue
-    if echo "$BJORN_SIS" | grep -qx "$si"; then
-        TARGET_SI="$si"
-        break
-    fi
-done <<< "$CATALOG_SIS"
-
 [[ -n "$TARGET_SI" ]] \
-    || fail "No catalog file found on BOTH nodes — cannot test corruption. Re-run phase E to ensure files were uploaded after bjorn joined."
+    || fail "No catalog file found on 2 hosts — cannot test corruption. Re-run phase E to ensure files were uploaded after bjorn joined."
 
-info "Target storage index: $TARGET_SI"
+info "Target storage index (disk): $TARGET_SI"
 
 BJORN_FILES=$(bjorn "find $BJORN_SHARES -path '*/$TARGET_SI/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]' || echo 0)
 ANDERS_FILES=$(anders "find $ANDERS_SHARES -path '*/$TARGET_SI/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]' || echo 0)
 info "Shares to delete: bjorn=$BJORN_FILES anders=$ANDERS_FILES"
 
-pass "Corruption target identified: catalog storage index $TARGET_SI (bjorn: $BJORN_FILES shares, anders: $ANDERS_FILES shares)"
+[[ "$BJORN_FILES" -ge 1 && "$ANDERS_FILES" -ge 1 ]] \
+    || fail "Expected shares on both nodes but bjorn=$BJORN_FILES anders=$ANDERS_FILES"
+
+pass "Corruption target identified: $TARGET_SI (bjorn: $BJORN_FILES shares, anders: $ANDERS_FILES shares)"
 
 # ── Step 6: Remove all share files for the target storage index ───────────────
 echo ""
