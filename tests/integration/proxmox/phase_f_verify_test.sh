@@ -254,37 +254,66 @@ info "Layer3 detail: $C_L3_DETAIL"
 
 pass "Clean verification: Layers 1, 2, 3 OK (Layer 4 may warn — no lifeboat expected)"
 
-# ── Step 5: Find a storage index distributed across both nodes ────────────────
+# ── Step 5: Find a catalog file distributed across both nodes ─────────────────
 echo ""
-echo "=== Step 5: Identify corruption target (storage index on both nodes) ==="
+echo "=== Step 5: Identify corruption target (catalog file on both nodes) ==="
 
-# Collect storage index directory names from bjorn.
-# Tahoe stores: <storage_dir>/shares/<2-hex-prefix>/<storage-index>/<share-number>
-# The storage-index directory is the PARENT of the actual share file.
+# Layer 2 only checks caps that are in the catalog.  We must therefore choose a
+# target whose storage index comes from a catalog cap — not from the raw
+# filesystem.  Tahoe also stores internal metadata (root-dir mutable slots,
+# helper files) that are never in the catalog; deleting those would not be
+# detected by Layer 2.
+#
+# Strategy:
+#   1. Extract storage indices from all CHK caps in the catalog (on anders).
+#      In URI:CHK:<si>:<key>:<k>:<n>:<size> the storage index is field [2].
+#   2. Get all storage indices present on bjorn's filesystem.
+#   3. Intersect → a catalog file that was distributed to BOTH nodes.
+
+CATALOG_SIS=$(anders python3 2>/dev/null << 'PYEOF'
+import sys
+sys.path.insert(0, '/opt/backup-buddy')
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+root_cap = open('/var/lib/backup-buddy/root_dir.cap').read().strip()
+key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b'backupbuddy:catalog:v1').derive(root_cap.encode())
+from gatekeeper.db.catalog import CatalogDB
+db = CatalogDB('/var/lib/backup-buddy/catalog.db', key)
+for r in db.get_all_files():
+    cap = r.get('cap', '')
+    if cap.startswith('URI:CHK:'):
+        parts = cap.split(':')
+        if len(parts) >= 3 and parts[2]:
+            print(parts[2])
+db.close()
+PYEOF
+) || true
+
+[[ -n "$CATALOG_SIS" ]] || fail "No CHK caps found in catalog"
+
 BJORN_SIS=$(bjorn "find $BJORN_SHARES -mindepth 2 -maxdepth 2 -type d 2>/dev/null | xargs -I{} basename {} | sort -u 2>/dev/null") || BJORN_SIS=""
 
-[[ -n "$BJORN_SIS" ]] || fail "No storage index directories found under $BJORN_SHARES on bjorn"
+[[ -n "$BJORN_SIS" ]] || fail "No storage index directories on bjorn"
 
 TARGET_SI=""
-for si in $BJORN_SIS; do
-    MATCH=$(anders "find $ANDERS_SHARES -mindepth 2 -maxdepth 2 -name '$si' -type d 2>/dev/null | wc -l" | tr -d '[:space:]' || echo 0)
-    if (( MATCH >= 1 )); then
+while IFS= read -r si; do
+    [[ -z "$si" ]] && continue
+    if echo "$BJORN_SIS" | grep -qx "$si"; then
         TARGET_SI="$si"
         break
     fi
-done
+done <<< "$CATALOG_SIS"
 
 [[ -n "$TARGET_SI" ]] \
-    || fail "No storage index found on BOTH nodes — cannot test distributed corruption. All of bjorn's shares may be for single-node files. Re-run phase E to ensure files were uploaded after bjorn joined."
+    || fail "No catalog file found on BOTH nodes — cannot test corruption. Re-run phase E to ensure files were uploaded after bjorn joined."
 
 info "Target storage index: $TARGET_SI"
 
-# Count share files that will be corrupted
 BJORN_FILES=$(bjorn "find $BJORN_SHARES -path '*/$TARGET_SI/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]' || echo 0)
 ANDERS_FILES=$(anders "find $ANDERS_SHARES -path '*/$TARGET_SI/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]' || echo 0)
-info "Shares to corrupt: bjorn=$BJORN_FILES anders=$ANDERS_FILES"
+info "Shares to delete: bjorn=$BJORN_FILES anders=$ANDERS_FILES"
 
-pass "Corruption target identified: storage index $TARGET_SI (bjorn: $BJORN_FILES shares, anders: $ANDERS_FILES shares)"
+pass "Corruption target identified: catalog storage index $TARGET_SI (bjorn: $BJORN_FILES shares, anders: $ANDERS_FILES shares)"
 
 # ── Step 6: Remove all share files for the target storage index ───────────────
 echo ""
