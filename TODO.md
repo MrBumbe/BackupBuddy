@@ -2541,7 +2541,7 @@ from gatekeeper.verify.nightly import NightlyVerifier
 
 ---
 
-### [x] 1.17.8 — Phase G: Full disaster recovery (VM destroy + fresh install + GUI restore)
+### [ ] 1.17.8 — Phase G: Full disaster recovery (VM destroy + fresh install + GUI restore)
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-a` on anders (101) — this phase sets up anders fresh via wizard
