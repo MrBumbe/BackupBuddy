@@ -76,12 +76,14 @@ wait_gatekeeper() {
 wait_tahoe_ready() {
     local label="${1:-tahoe}" timeout="${2:-150}"
     local deadline=$(( $(date +%s) + timeout ))
-    echo -n "  Waiting for $label storage node to accept uploads..."
+    echo -n "  Waiting for $label storage node to accept CHK uploads..."
+    # Use 4 KB payload — above the 55-byte LIT threshold, forces real CHK encoding
+    # which requires the storage node to be connected.
     while (( $(date +%s) < deadline )); do
         local resp
-        resp=$(anders "curl -sf --max-time 5 -X PUT 'http://127.0.0.1:3456/uri' --data-binary 'TAHOETEST' 2>/dev/null" 2>/dev/null || true)
-        if [[ "$resp" == URI:* ]]; then
-            echo " OK ($resp)"
+        resp=$(anders "dd if=/dev/urandom bs=4096 count=1 2>/dev/null | curl -sf --max-time 15 -X PUT 'http://127.0.0.1:3456/uri' --data-binary @- 2>/dev/null" 2>/dev/null || true)
+        if [[ "$resp" == URI:CHK:* ]]; then
+            echo " OK"
             return 0
         fi
         echo -n "."; sleep 5
@@ -175,9 +177,19 @@ print(c.get('node', 'name', fallback=''))
 [[ -n "$ANDERS_NODE_NAME" ]] || fail "Could not read node name from anders' gatekeeper.cfg"
 info "Anders node name: $ANDERS_NODE_NAME"
 
+# Switch to adaptive profile so single-node uploads succeed (balanced requires
+# shares.happy=5 distinct servers, which a single-node cluster can never satisfy).
+info "Switching anders fragmentation profile to adaptive..."
+anders "sed -i 's/^profile.*/profile = adaptive/' /etc/backup-buddy/gatekeeper.cfg"
+anders "grep profile /etc/backup-buddy/gatekeeper.cfg"
+anders "systemctl restart $GK_SVC"
+sleep 3
+wait_gatekeeper "$ANDERS_TS_URL" "anders gatekeeper (post-profile-change)" 60 \
+    || fail "Anders gatekeeper did not recover after profile switch"
+
 wait_tahoe_ready "anders Tahoe" 150 \
     || fail "Anders Tahoe storage node did not become ready within 150 s"
-pass "Anders gatekeeper and Tahoe storage ready"
+pass "Anders gatekeeper and Tahoe storage ready (profile=adaptive)"
 
 # ── Step 4: Back up ≥10 files to anders ──────────────────────────────────────
 echo ""
