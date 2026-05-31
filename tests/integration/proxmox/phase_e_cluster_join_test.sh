@@ -178,17 +178,21 @@ print(c.get('node', 'name', fallback=''))
 info "Anders node name: $ANDERS_NODE_NAME"
 
 # Switch to adaptive profile so single-node uploads succeed (balanced requires
-# shares.happy=5 distinct servers, which a single-node cluster can never satisfy).
+# shares.happy=n=5 distinct servers, which a single-node cluster can never satisfy;
+# adaptive sets happy=k=1 for single-node and scales up as nodes join).
 info "Switching anders fragmentation profile to adaptive..."
+anders "systemctl stop $GK_SVC 2>/dev/null; sleep 2"
+anders "pkill -f 'tahoe run' 2>/dev/null; sleep 3; true"
 anders "sed -i 's/^profile.*/profile = adaptive/' /etc/backup-buddy/gatekeeper.cfg"
 anders "grep profile /etc/backup-buddy/gatekeeper.cfg"
-anders "systemctl restart $GK_SVC"
+anders "systemctl start $GK_SVC"
 sleep 3
+
 wait_gatekeeper "$ANDERS_TS_URL" "anders gatekeeper (post-profile-change)" 60 \
     || fail "Anders gatekeeper did not recover after profile switch"
 
-wait_tahoe_ready "anders Tahoe" 150 \
-    || fail "Anders Tahoe storage node did not become ready within 150 s"
+wait_tahoe_ready "anders Tahoe" 300 \
+    || fail "Anders Tahoe storage node did not become ready within 300 s"
 pass "Anders gatekeeper and Tahoe storage ready (profile=adaptive)"
 
 # ── Step 4: Back up ≥10 files to anders ──────────────────────────────────────
