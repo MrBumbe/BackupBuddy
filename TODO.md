@@ -2541,7 +2541,7 @@ from gatekeeper.verify.nightly import NightlyVerifier
 
 ---
 
-### [ ] 1.17.8 — Phase G: Full disaster recovery (VM destroy + fresh install + GUI restore)
+### [x] 1.17.8 — Phase G: Full disaster recovery (VM destroy + fresh install + GUI restore)
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-a` on anders (101) — this phase sets up anders fresh via wizard
@@ -2655,6 +2655,18 @@ Expected: SHA-256 matches Step 4 reference exactly.
 
 ```
 > Kludde:
+> - Phase-a rollback leaves /dev/sdb unformatted → mkfs.ext4 before first wizard
+> - STORAGE_UUID captured dynamically via blkid after mkfs (not hardcoded)
+> - MAC + scsi1 volume saved before VM destroy; `qm set --delete scsi1` detaches
+>   without destroying the LVM volume before `qm destroy --destroy-unreferenced-disks 0`
+> - Tailscale state (/var/lib/tailscale/) saved to Proxmox host before destroy,
+>   restored to fresh VM (stop → restore → start) to preserve same Tailscale IP
+> - Second wizard runs on fresh VM to get into normal mode before emergency restore
+> - profile must be switched to test (k=1, n=2, happy=1) both after first and
+>   second wizard — balanced (k=3, n=5) cannot be satisfied on a single node
+> - Emergency restore uses OLD recovery_kit.enc (pre-destroy), not second wizard's kit
+> - reconstruct_catalog signature: (root_dir_cap, *, catalog, tahoe, progress_queue) → int
+> - Script: tests/integration/proxmox/phase_g_disaster_recovery_test.sh
 ```
 
 ---
