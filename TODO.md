@@ -2454,6 +2454,10 @@ ssh -J root@192.168.1.60 root@10.99.0.12 \
 > Kludde: ANDERS_NODE_NAME resolved dynamically from gatekeeper.cfg (not hardcoded).
 > CT 302 snapshotted without setup (purpose TBD). agent-bjorn-pc uses stability_minutes=1.
 > Cascade via prox (bjorn wizard binds to LAN IP in setup mode).
+> Automated test: tests/integration/proxmox/phase_e_cluster_join_test.sh — all 13 steps PASS.
+> Three production bugs found and fixed: (1) _cascade_join used default shares_happy=5 instead of
+> deriving from cluster size; (2) IntroducerNode.create() used hostname=127.0.0.1 so bjorn's FURL
+> pointed to its own loopback; (3) test syncs code from dev machine to VMs at run time.
 ```
 
 ---
