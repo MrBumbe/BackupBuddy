@@ -164,8 +164,11 @@ pass "Anders gatekeeper reachable"
 echo ""
 echo "=== Step 4: Back up ≥10 files to anders (via agent 301) ==="
 
-# CT 301 (phase-c) has /srv/testbackup with 15 test files and stability_minutes=1.
-# The agent will scan and upload to the fresh phase-b anders catalog.
+# CT 301 (phase-c) backup.cfg has stability_minutes=30 (default).
+# Override to 1 minute so uploads finish quickly during the test.
+info "Overriding stability_minutes to 1 on CT $ANDERS_AGENT_CTID..."
+prox "pct exec $ANDERS_AGENT_CTID -- sed -i 's/^stability_minutes.*/stability_minutes = 1/' /etc/backup-buddy/backup.cfg"
+
 # Create new post-rollback testfiles to guarantee fresh uploads regardless of
 # any local tracking state the agent may have retained from the previous run.
 info "Creating new test files on CT $ANDERS_AGENT_CTID..."
