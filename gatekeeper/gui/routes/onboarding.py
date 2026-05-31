@@ -34,7 +34,10 @@ from fastapi.templating import Jinja2Templates
 
 from gatekeeper.cluster.invites import generate_invite
 from gatekeeper.cluster.join import NodeInfo, initiate_join
+from gatekeeper.config import AdaptiveConfig
 from gatekeeper.db.cluster import ClusterDB
+from gatekeeper.fragmenter.adaptive import compute_adaptive_kn
+from gatekeeper.fragmenter.profiles import get_profile
 from gatekeeper.gui.wizard_state import WizardState, clear_state, load_state, save_state
 from gatekeeper.lifeboat.keystore import DEFAULT_KEY_PATH, generate_key
 from gatekeeper.lifeboat.recovery_kit import create_recovery_kit
@@ -356,12 +359,28 @@ async def _cascade_join(
         logger.info("Join accepted by cluster — introducer_furl received")
 
         primary_path = state.storage_paths[0]
+
+        # Derive shares from profile + current cluster size.
+        # join_members contains existing nodes; +1 for self.
+        _cluster_size = len(join_members) + 1
+        _profile_name = state.profile or "adaptive"
+        if _profile_name == "adaptive":
+            _k, _n = compute_adaptive_kn(_cluster_size, AdaptiveConfig())
+            _happy = _k
+        else:
+            _p = get_profile(_profile_name)
+            _k, _n = _p.k, _p.n
+            _happy = _p.happy if _p.happy is not None else _n
+
         storage_node = StorageNode(
             basedir=str(data_dir / "tahoe" / "storage_node"),
             storage_dir=primary_path,
             reserved_space=_TAHOE_RESERVED_BYTES,
             nickname=state.node_name,
             hostname=get_lan_ip() or "127.0.0.1",
+            shares_needed=_k,
+            shares_happy=_happy,
+            shares_total=_n,
         )
         storage_node.create(introducer_furl)
         await storage_node.start()
