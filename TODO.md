@@ -2462,7 +2462,7 @@ ssh -J root@192.168.1.60 root@10.99.0.12 \
 
 ---
 
-### [ ] 1.17.7 — Phase F: Nightly verification + deliberate corruption detection
+### [x] 1.17.7 — Phase F: Nightly verification + deliberate corruption detection
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-e` (two-node cluster active)
@@ -2521,6 +2521,22 @@ from gatekeeper.verify.nightly import NightlyVerifier
 
 ```
 > Kludde:
+> - URI storage index ≠ on-disk storage index. The Tahoe fork applies an internal
+>   transformation: field [2] of a `URI:CHK:...` cap is NOT the directory name used
+>   under `/mnt/storage/shares/`. The actual on-disk SI is returned by Tahoe's check
+>   API (`POST /uri/<cap>?t=check&output=json`) in the `"storage-index"` field.
+>   Always use the API response to resolve the disk path — never slice the cap string.
+> - Tahoe `?t=check` is shallow (counts share files, does not read content). A byte-flip
+>   inside a share file will NOT be detected — `shares_good` stays ≥ shares_needed.
+>   Only file deletion/absence is detected. Layer 2 corruption test must delete share
+>   files, not corrupt bytes.
+> - `/dev/sdb` (Tahoe storage disk) is NOT in fstab — it must be mounted manually after
+>   every `qm rollback` + `qm start`. Without it gatekeeper starts but all share reads
+>   fail silently. Fix: `mount /dev/sdb /mnt/storage` before starting gatekeeper.
+> - Automated test: tests/integration/proxmox/phase_f_verify_test.sh — all 10 steps PASS.
+> - Standalone NightlyVerifier trigger: tests/integration/proxmox/run_nightly_verify.py
+>   (derives catalog key via HKDF-SHA256 from root_dir.cap, outputs VERIFY_RESULT:<json>).
+> - phase-f snapshots created on VMs 101, 102 and CTs 301, 303.
 ```
 
 ---
