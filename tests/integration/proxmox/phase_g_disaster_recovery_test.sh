@@ -228,7 +228,7 @@ info "Gatekeeper health check (pre confirm-key): HTTP $HEALTH_CODE"
 
 # Confirm receipt. Capture status code so failures are diagnosable.
 CONFIRM_CODE=$(anders "curl -s -o /tmp/confirm_resp.txt -w '%{http_code}' \
-    --max-time 20 -X POST '$BASE_LAN/api/onboarding/confirm-key'" 2>/dev/null) \
+    --max-time 20 -X POST '$BASE_LAN/onboarding/confirm-key'" 2>/dev/null) \
     || CONFIRM_CODE="000"
 info "confirm-key HTTP status: $CONFIRM_CODE"
 if [[ "$CONFIRM_CODE" != "303" && "$CONFIRM_CODE" != "200" && "$CONFIRM_CODE" != "302" ]]; then
@@ -554,7 +554,7 @@ anders "test -f '$GK_CFG'" || {
 pass "Second wizard cascade complete"
 
 # Confirm the new recovery key and restart into normal mode.
-anders "curl -sf --max-time 15 -X POST '$BASE_LAN/api/onboarding/confirm-key' -o /dev/null"
+anders "curl -sf --max-time 15 -X POST '$BASE_LAN/onboarding/confirm-key' -o /dev/null"
 anders "curl -sf --max-time 5 -X POST '$BASE_LAN/api/onboarding/restart' -o /dev/null || true"
 sleep 5
 
