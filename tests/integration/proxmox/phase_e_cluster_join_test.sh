@@ -177,23 +177,21 @@ print(c.get('node', 'name', fallback=''))
 [[ -n "$ANDERS_NODE_NAME" ]] || fail "Could not read node name from anders' gatekeeper.cfg"
 info "Anders node name: $ANDERS_NODE_NAME"
 
-# Switch to adaptive profile so single-node uploads succeed (balanced requires
-# shares.happy=n=5 distinct servers, which a single-node cluster can never satisfy;
-# adaptive sets happy=k=1 for single-node and scales up as nodes join).
-info "Switching anders fragmentation profile to adaptive..."
-anders "sed -i 's/^profile.*/profile = adaptive/' /etc/backup-buddy/gatekeeper.cfg"
-anders "grep profile /etc/backup-buddy/gatekeeper.cfg"
-# Restart via nohup so the SSH session returns immediately and doesn't hang
-# waiting for systemctl to finish stopping Tahoe sub-processes (~90 s).
-anders "nohup bash -c 'systemctl restart $GK_SVC' >/dev/null 2>&1 &"
-sleep 8  # brief pause so systemd begins the restart cycle before we poll
+# Phase-b gatekeeper.cfg uses profile=balanced (shares.happy=n=5), which
+# requires 5 distinct servers — a single-node cluster can never satisfy this.
+# The phase-b code also has adaptive as a stub that falls back to balanced.
+# Fix: patch tahoe.cfg directly (gatekeeper has already written it at startup)
+# and restart only the Tahoe storage_node process — gatekeeper stays running.
+info "Patching Tahoe storage_node config for single-node (shares.happy=1)..."
+anders "sed -i 's/^shares.happy.*/shares.happy = 1/' /var/lib/backup-buddy/tahoe/storage_node/tahoe.cfg"
+anders "grep 'shares\.' /var/lib/backup-buddy/tahoe/storage_node/tahoe.cfg"
+info "Restarting Tahoe storage_node with patched config..."
+anders "pkill -f 'tahoe run.*storage_node' 2>/dev/null; sleep 3; true"
+anders "nohup runuser -u backupbuddy -- /opt/backup-buddy/.venv/bin/tahoe run --allow-stdin-close /var/lib/backup-buddy/tahoe/storage_node >/tmp/tahoe_sn.log 2>&1 &"
 
-wait_gatekeeper "$ANDERS_TS_URL" "anders gatekeeper (post-profile-change)" 90 \
-    || fail "Anders gatekeeper did not recover after profile switch"
-
-wait_tahoe_ready "anders Tahoe" 300 \
-    || fail "Anders Tahoe storage node did not become ready within 300 s"
-pass "Anders gatekeeper and Tahoe storage ready (profile=adaptive)"
+wait_tahoe_ready "anders Tahoe" 180 \
+    || fail "Anders Tahoe storage node did not become ready within 180 s"
+pass "Anders gatekeeper and Tahoe storage ready (shares.happy=1)"
 
 # ── Step 4: Back up ≥10 files to anders ──────────────────────────────────────
 echo ""
