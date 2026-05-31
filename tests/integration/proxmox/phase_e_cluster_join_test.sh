@@ -73,6 +73,22 @@ wait_gatekeeper() {
     echo " TIMEOUT"; return 1
 }
 
+wait_tahoe_ready() {
+    local label="${1:-tahoe}" timeout="${2:-150}"
+    local deadline=$(( $(date +%s) + timeout ))
+    echo -n "  Waiting for $label storage node to accept uploads..."
+    while (( $(date +%s) < deadline )); do
+        local resp
+        resp=$(anders "curl -sf --max-time 5 -X PUT 'http://127.0.0.1:3456/uri' --data-binary 'TAHOETEST' 2>/dev/null" 2>/dev/null || true)
+        if [[ "$resp" == URI:* ]]; then
+            echo " OK ($resp)"
+            return 0
+        fi
+        echo -n "."; sleep 5
+    done
+    echo " TIMEOUT"; return 1
+}
+
 wait_gatekeeper_prox() {
     local url="$1" label="$2" timeout="${3:-120}"
     local deadline=$(( $(date +%s) + timeout ))
@@ -158,7 +174,10 @@ print(c.get('node', 'name', fallback=''))
 \"" 2>/dev/null | tr -d '[:space:]')
 [[ -n "$ANDERS_NODE_NAME" ]] || fail "Could not read node name from anders' gatekeeper.cfg"
 info "Anders node name: $ANDERS_NODE_NAME"
-pass "Anders gatekeeper reachable"
+
+wait_tahoe_ready "anders Tahoe" 150 \
+    || fail "Anders Tahoe storage node did not become ready within 150 s"
+pass "Anders gatekeeper and Tahoe storage ready"
 
 # ── Step 4: Back up ≥10 files to anders ──────────────────────────────────────
 echo ""
