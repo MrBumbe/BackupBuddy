@@ -144,6 +144,34 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 info "Syncing gatekeeper code to anders..."
 tar -czf - -C "$REPO_ROOT" gatekeeper | ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" \
     "tar -xzf - -C /opt/backup-buddy/"
+
+# Ensure Restart=always is in the unit file — phase-a snapshot may predate this setting.
+info "Ensuring Restart=always in systemd unit..."
+if ! anders "grep -q '^Restart=always' /etc/systemd/system/$ANDERS_SVC.service 2>/dev/null"; then
+    info "Writing updated unit file with Restart=always..."
+    {
+        echo '[Unit]'
+        echo 'Description=BackupBuddy Gatekeeper'
+        echo 'After=network.target'
+        echo ''
+        echo '[Service]'
+        echo 'Type=simple'
+        echo 'User=backupbuddy'
+        echo 'Group=backupbuddy'
+        echo 'WorkingDirectory=/opt/backup-buddy'
+        echo 'ExecStart=/opt/backup-buddy/.venv/bin/python -m gatekeeper.main --data-dir /var/lib/backup-buddy --config /etc/backup-buddy/gatekeeper.cfg'
+        echo 'Restart=always'
+        echo 'RestartSec=10'
+        echo 'StandardOutput=journal'
+        echo 'StandardError=journal'
+        echo "SyslogIdentifier=$ANDERS_SVC"
+        echo 'NoNewPrivileges=yes'
+        echo ''
+        echo '[Install]'
+        echo 'WantedBy=multi-user.target'
+    } | ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" \
+        "tee /etc/systemd/system/$ANDERS_SVC.service > /dev/null && systemctl daemon-reload"
+fi
 anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
 
 pass "Rollback complete"
@@ -481,6 +509,34 @@ anders "curl -fsSL https://raw.githubusercontent.com/MrBumbe/BackupBuddy/master/
 info "Overlaying local gatekeeper code on top of install..."
 tar -czf - -C "$REPO_ROOT" gatekeeper | ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" \
     "tar -xzf - -C /opt/backup-buddy/"
+
+# Ensure Restart=always is in the unit file in case GitHub master lags behind local.
+info "Ensuring Restart=always in systemd unit..."
+if ! anders "grep -q '^Restart=always' /etc/systemd/system/$ANDERS_SVC.service 2>/dev/null"; then
+    info "Writing updated unit file with Restart=always..."
+    {
+        echo '[Unit]'
+        echo 'Description=BackupBuddy Gatekeeper'
+        echo 'After=network.target'
+        echo ''
+        echo '[Service]'
+        echo 'Type=simple'
+        echo 'User=backupbuddy'
+        echo 'Group=backupbuddy'
+        echo 'WorkingDirectory=/opt/backup-buddy'
+        echo 'ExecStart=/opt/backup-buddy/.venv/bin/python -m gatekeeper.main --data-dir /var/lib/backup-buddy --config /etc/backup-buddy/gatekeeper.cfg'
+        echo 'Restart=always'
+        echo 'RestartSec=10'
+        echo 'StandardOutput=journal'
+        echo 'StandardError=journal'
+        echo "SyslogIdentifier=$ANDERS_SVC"
+        echo 'NoNewPrivileges=yes'
+        echo ''
+        echo '[Install]'
+        echo 'WantedBy=multi-user.target'
+    } | ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" \
+        "tee /etc/systemd/system/$ANDERS_SVC.service > /dev/null && systemctl daemon-reload"
+fi
 anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
 
 pass "BackupBuddy installed on fresh anders"
