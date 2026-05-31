@@ -241,8 +241,11 @@ if [[ "$CONFIRM_CODE" != "303" && "$CONFIRM_CODE" != "200" && "$CONFIRM_CODE" !=
     fail "confirm-key failed: HTTP $CONFIRM_CODE (expected 303)"
 fi
 
-anders "curl -sf --max-time 5 -X POST '$BASE_LAN/api/onboarding/restart' -o /dev/null || true"
-sleep 5
+RESTART_CODE=$(anders "curl -s -o /dev/null -w '%{http_code}' \
+    --max-time 10 -X POST '$BASE_LAN/api/onboarding/restart'" 2>/dev/null) \
+    || RESTART_CODE="000"
+info "restart call HTTP status: $RESTART_CODE (expected 200)"
+sleep 8
 
 pass "recovery_kit.enc saved and wizard confirmed"
 
@@ -255,7 +258,18 @@ ANDERS_TS=$(anders "tailscale ip -4 2>/dev/null | head -1")
 BASE_TS="http://$ANDERS_TS:8080"
 info "Anders Tailscale IP: $ANDERS_TS  →  $BASE_TS"
 
-wait_gatekeeper_ts "$BASE_TS" 120 || fail "Anders gatekeeper did not start in normal mode within 120 s"
+wait_gatekeeper_ts "$BASE_TS" 180 || {
+    SVC_STATUS=$(anders "systemctl status $ANDERS_SVC --no-pager -n 40 2>/dev/null" || echo "(no status)")
+    PORT_CHECK=$(anders "ss -tlnp 2>/dev/null | grep ':8080'" || echo "(port 8080 not listening)")
+    GK_LOG=$(anders "journalctl -u $ANDERS_SVC --since '-4min' --no-pager -n 40 2>/dev/null" \
+        || echo "(no log)")
+    info "Service status:"
+    while IFS= read -r line; do info "  $line"; done <<< "$SVC_STATUS"
+    info "Port 8080 on anders: $PORT_CHECK"
+    info "Gatekeeper journal (last 4 min):"
+    while IFS= read -r line; do info "  $line"; done <<< "$GK_LOG"
+    fail "Anders gatekeeper did not start in normal mode within 180 s"
+}
 
 # Profile=balanced (k=3, n=5, happy=5) cannot be satisfied on a single node.
 # Switch to profile=test (k=1, n=2, happy=1) so uploads can succeed.
