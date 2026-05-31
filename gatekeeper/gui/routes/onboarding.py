@@ -215,7 +215,7 @@ async def _cascade_new_cluster(
     else:
         logger.info("Starting Tahoe introducer for initial setup")
         introducer = IntroducerNode(str(data_dir / "tahoe" / "introducer"))
-        introducer.create()
+        introducer.create(hostname=get_lan_ip() or "127.0.0.1")
         introducer_furl = await introducer.start()
 
         primary_path = state.storage_paths[0]

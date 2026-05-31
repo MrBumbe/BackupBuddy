@@ -225,7 +225,7 @@ async def lifespan(app: FastAPI):
             if config.tahoe.run_introducer:
                 logger.info("Starting Tahoe introducer node")
                 introducer = IntroducerNode(str(data_dir / "tahoe" / "introducer"))
-                introducer.create()
+                introducer.create(hostname=get_lan_ip() or "127.0.0.1")
                 introducer_furl = await introducer.start()
                 # FURL is internal — never logged at INFO level or above
 

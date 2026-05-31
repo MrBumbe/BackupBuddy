@@ -196,6 +196,10 @@ info "Anders node name: $ANDERS_NODE_NAME"
 info "Switching anders fragmentation profile to test (k=1 n=2 happy=1)..."
 anders "sed -i 's/^profile.*/profile = test/' /etc/backup-buddy/gatekeeper.cfg"
 anders "grep 'profile' /etc/backup-buddy/gatekeeper.cfg"
+# Delete the introducer directory so the updated code recreates it with the
+# LAN IP instead of 127.0.0.1.  Without this, bjorn receives a FURL that
+# points to its own loopback and can never reach anders' introducer.
+anders "rm -rf /var/lib/backup-buddy/tahoe/introducer/"
 anders "nohup bash -c 'systemctl restart $GK_SVC' >/dev/null 2>&1 &"
 sleep 8
 wait_gatekeeper "$ANDERS_TS_URL" "anders gatekeeper (post-profile-change)" 90 \
