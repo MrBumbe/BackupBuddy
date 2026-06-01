@@ -202,6 +202,36 @@ anders "/opt/backup-buddy/.venv/bin/python -c \
     'from cryptography.hazmat.primitives.kdf.hkdf import HKDF; print(\"HKDF OK\")'" \
     || fail "cryptography broken after step-1 pip fix"
 
+# Tailscale auth is invalidated by rollback — the coordination server rejects
+# the rolled-back machine key.  Re-run tailscale up; if a new auth URL is
+# required, display it and wait up to 3 min for the user to authenticate.
+_ts_ip=$(anders "tailscale ip -4 2>/dev/null | head -1" 2>/dev/null || true)
+if [[ -z "$_ts_ip" ]]; then
+    info "Tailscale not connected after rollback — starting tailscale up..."
+    # Run tailscale up in the background on anders; capture any auth URL it emits.
+    anders "nohup tailscale up --accept-routes >/tmp/ts_up.log 2>&1 &"
+    sleep 3
+    _ts_url=$(anders "grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts_up.log 2>/dev/null | head -1" || true)
+    if [[ -n "$_ts_url" ]]; then
+        echo ""
+        echo "  ╔══════════════════════════════════════════════════════════════╗"
+        echo "  ║  ACTION REQUIRED: Tailscale needs re-auth after VM rollback  ║"
+        echo "  ║  Open this URL in your browser:                              ║"
+        echo "  ║  $_ts_url"
+        echo "  ╚══════════════════════════════════════════════════════════════╝"
+        echo ""
+    fi
+    echo -n "  Waiting for Tailscale IP on anders (up to 3 min)..."
+    _ts_deadline=$(( $(date +%s) + 180 ))
+    while (( $(date +%s) < _ts_deadline )); do
+        _ts_ip=$(anders "tailscale ip -4 2>/dev/null | head -1" 2>/dev/null || true)
+        [[ -n "$_ts_ip" ]] && { echo " OK ($_ts_ip)"; break; }
+        echo -n "."; sleep 5
+    done
+    [[ -n "$_ts_ip" ]] || fail "Tailscale not authenticated within 3 min — authenticate the URL above and retry"
+    info "Tailscale reconnected: $_ts_ip"
+fi
+
 anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
 
 pass "Rollback complete"
