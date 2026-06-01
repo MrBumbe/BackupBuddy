@@ -449,12 +449,20 @@ info "Stopping anders VM $ANDERS_VMID..."
 prox "qm stop $ANDERS_VMID --skiplock 1 2>/dev/null || true"
 sleep 5
 
-# Detach storage disk from VM config so it is NOT destroyed with the VM.
-info "Detaching scsi1 ($SCSI1_VOL) from VM config..."
-prox "qm set $ANDERS_VMID --delete scsi1"
+# Preserve the storage disk by renaming the LVM volume BEFORE destroy and
+# stripping all scsi1: lines from the config (including snapshot sections).
+# qm destroy honours --destroy-unreferenced-disks 0 only for volumes that are
+# truly not in any config section; snapshot sections still reference scsi1 if
+# we only remove the current-state line, so the volume gets deleted anyway.
+# Renaming + purging the config lines is the reliable workaround.
+info "Preserving storage disk — renaming LVM volume and removing scsi1 from all configs..."
+prox "lvrename pve vm-101-disk-1 bb-storage-preserved"
+prox "sed -i '/^scsi1:/d' /etc/pve/qemu-server/$ANDERS_VMID.conf"
 sleep 2
 
-# Destroy VM; --destroy-unreferenced-disks 0 prevents any stray volumes from being wiped.
+# Destroy VM; with scsi1 gone from every config section, only disk-0 and
+# cloud-init are destroyed. Orphaned snap_vm-101-disk-1_* LVs are left in
+# place (not referenced → not destroyed by --destroy-unreferenced-disks 0).
 info "Destroying VM $ANDERS_VMID..."
 prox "qm destroy $ANDERS_VMID --destroy-unreferenced-disks 0"
 
@@ -464,10 +472,10 @@ pass "VM $ANDERS_VMID destroyed"
 echo ""
 echo "=== Step 10: Verify storage disk preserved ==="
 
-LVS_OUT=$(prox "lvs 2>/dev/null | grep vm-101" || true)
-info "LVM volumes matching vm-101: ${LVS_OUT:-none}"
-[[ -n "$LVS_OUT" ]] || fail "Storage disk volume not found after VM destroy — data may be lost"
-pass "Storage disk LVM volume confirmed present"
+LVS_OUT=$(prox "lvs 2>/dev/null | grep 'bb-storage-preserved'" || true)
+info "Preserved storage volume (bb-storage-preserved): ${LVS_OUT:-none}"
+[[ -n "$LVS_OUT" ]] || fail "Preserved storage disk not found after VM destroy — data may be lost"
+pass "Storage disk LVM volume confirmed present as bb-storage-preserved"
 
 # ── Step 11: Clone template 9000 → new VM 101 ─────────────────────────────────
 echo ""
@@ -485,6 +493,8 @@ prox "qm set $ANDERS_VMID --ipconfig0 'ip=${ANDERS_LAN}/24,gw=10.99.0.1'"
 info "Resizing OS disk to 20G (no-op if already at target size)..."
 prox "qm resize $ANDERS_VMID scsi0 20G 2>/dev/null || true"
 
+info "Renaming preserved storage disk back to original name ($SCSI1_VOL)..."
+prox "lvrename pve bb-storage-preserved vm-101-disk-1"
 info "Reattaching storage disk ($SCSI1_VOL)..."
 prox "qm set $ANDERS_VMID --scsi1 '$SCSI1_VOL'"
 
