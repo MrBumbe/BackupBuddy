@@ -2541,7 +2541,7 @@ from gatekeeper.verify.nightly import NightlyVerifier
 
 ---
 
-### [ ] 1.17.8 — Phase G: Full disaster recovery (VM destroy + fresh install + GUI restore)
+### [x] 1.17.8 — Phase G: Full disaster recovery (VM destroy + fresh install + GUI restore)
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-a` on anders (101) — this phase sets up anders fresh via wizard
@@ -2661,12 +2661,25 @@ Expected: SHA-256 matches Step 4 reference exactly.
 >   without destroying the LVM volume before `qm destroy --destroy-unreferenced-disks 0`
 > - Tailscale state (/var/lib/tailscale/) saved to Proxmox host before destroy,
 >   restored to fresh VM (stop → restore → start) to preserve same Tailscale IP
+> - Tailscale auth is INVALIDATED after VM rollback (coordination server rejects
+>   rolled-back machine key). Fix: cache state to /tmp/ts_state_phase_a.tar.gz on
+>   Proxmox host before running test; step 1 restores it automatically.
+>   Pre-save: ssh -J root@192.168.1.60 root@10.99.0.11 "tar -czf - -C /var/lib tailscale"
+>             | ssh root@192.168.1.60 "cat - > /tmp/ts_state_phase_a.tar.gz"
+> - Tahoe-LAFS fork MUST be installed with pip install -e (editable). Non-editable
+>   install produces 0-byte stub .so files for ALL C-extensions including cryptography,
+>   fastapi, and allmydata. install/gatekeeper.sh runs editable + force-reinstall.
+> - LVM thin pool is overcommitted (16 GiB free / 413 GiB thin volumes). After pip
+>   fix, a qm snapshot can corrupt pip files (0-byte _rust.abi3.so again). Defense:
+>   step 1 always runs pip editable + force-reinstall + HKDF import check on every
+>   test run; step 15 (fresh VM before second wizard) does the same.
 > - Second wizard runs on fresh VM to get into normal mode before emergency restore
 > - profile must be switched to test (k=1, n=2, happy=1) both after first and
 >   second wizard — balanced (k=3, n=5) cannot be satisfied on a single node
 > - Emergency restore uses OLD recovery_kit.enc (pre-destroy), not second wizard's kit
 > - reconstruct_catalog signature: (root_dir_cap, *, catalog, tahoe, progress_queue) → int
 > - Script: tests/integration/proxmox/phase_g_disaster_recovery_test.sh
+> - PASSED: run 25, all 21 steps, 2026-06-01
 ```
 
 ---
