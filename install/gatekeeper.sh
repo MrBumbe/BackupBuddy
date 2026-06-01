@@ -105,10 +105,15 @@ setup_venv() {
     fi
 
     info "Installing Python dependencies (this may take a minute)..."
-    # Install the Tahoe-LAFS fork from source, then pin all deps from requirements.txt.
     "${INSTALL_DIR}/.venv/bin/pip" install --quiet --upgrade pip
-    "${INSTALL_DIR}/.venv/bin/pip" install --quiet \
-        "${INSTALL_DIR}" \
+    # The Tahoe-LAFS fork must be installed in editable mode (-e) so that
+    # src/allmydata/ is importable directly. Non-editable install produces
+    # empty 0-byte stub files for all modules and the tahoe CLI binary.
+    # The second pass force-reinstalls pinned packages from requirements.txt
+    # to replace any empty stubs the Tahoe fork installed for its dependencies
+    # (cryptography, fastapi, etc.).
+    "${INSTALL_DIR}/.venv/bin/pip" install --quiet -e "${INSTALL_DIR}"
+    "${INSTALL_DIR}/.venv/bin/pip" install --quiet --force-reinstall \
         -r "${INSTALL_DIR}/requirements.txt"
     success "Python dependencies installed"
 }
