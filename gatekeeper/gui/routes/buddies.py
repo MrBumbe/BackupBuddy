@@ -316,8 +316,10 @@ def create_buddies_router() -> APIRouter:
         if result == VoteResult.PASSED:
             target_nid = vote_row["target_node_id"]
             if vote_row["vote_type"] == "removal":
+                def _alert(node_id: str, message: str) -> None:
+                    logger.info("grace-alert [node=%s]: %s", node_id, message)
                 try:
-                    start_grace_period(db, target_nid)
+                    start_grace_period(db, target_nid, send_alert=_alert)
                 except ValueError as exc:
                     logger.warning(
                         "Grace period start failed for %s after vote passed: %s",

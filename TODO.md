@@ -2684,7 +2684,7 @@ Expected: SHA-256 matches Step 4 reference exactly.
 
 ---
 
-### [ ] 1.17.9 — Phase H: Three-node cluster + node removal flow
+### [x] 1.17.9 — Phase H: Three-node cluster + node removal flow
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-e` (two-node cluster: anders + bjorn active)
@@ -2760,6 +2760,21 @@ curl -sf -X POST "http://${CARINA_TS}:8080/api/buddies/vote/${VOTE_ID}" \
 
 ```
 > Kludde:
+> - API routes in the task spec were outdated; correct routes from code:
+>   POST /api/buddies/removal (not propose_removal),
+>   POST /api/buddies/vote/{vote_id}/cast with {"choice": true} (not /vote/{id} + {"vote":true})
+> - Cross-gatekeeper vote propagation is Phase 1 out-of-scope; carina's ballot is
+>   pre-inserted directly into anders vote_ballots via sqlite3 to reach majority (2/2)
+> - send_alert was not wired into start_grace_period call in buddies.py — fixed by adding
+>   a logging lambda; test verifies grace-alert log line in gatekeeper journal
+> - Orphan cleanup uses fake CHK cap strings (no real Tahoe delete) with mock delete_fragment
+>   returning 1024 bytes; cleaned_at set in cluster.db is the verifiable side effect
+> - Bjorn cluster.db only has 2 members (anders+bjorn) — cross-node propagation is Phase 1
+>   out-of-scope; carina's cluster.db gets all 3 members from the join cascade
+> - Carina disk at phase-a needs mkfs.ext4 -F /dev/sdb (same as bjorn in phase-e)
+> - Switch anders to adaptive profile after carina joins so new uploads use k=1, n=3
+>   and carina's storage node receives shares
+> - Script: tests/integration/proxmox/phase_h_three_node_removal_test.sh
 ```
 
 ---
