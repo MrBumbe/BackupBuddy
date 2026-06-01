@@ -203,15 +203,28 @@ anders "/opt/backup-buddy/.venv/bin/python -c \
     || fail "cryptography broken after step-1 pip fix"
 
 # Tailscale auth is invalidated by rollback — the coordination server rejects
-# the rolled-back machine key.  Re-run tailscale up; if a new auth URL is
-# required, display it and wait up to 3 min for the user to authenticate.
+# the rolled-back machine key.  Strategy:
+#   1. Try to restore cached state from a previous successful run on this host.
+#   2. If still not connected, run tailscale up, display the auth URL, and wait.
+#   3. After successful connection, save the fresh state for next run.
 _ts_ip=$(anders "tailscale ip -4 2>/dev/null | head -1" 2>/dev/null || true)
 if [[ -z "$_ts_ip" ]]; then
-    info "Tailscale not connected after rollback — starting tailscale up..."
-    # Run tailscale up in the background on anders; capture any auth URL it emits.
+    info "Tailscale not connected after rollback — trying cached state restore..."
+    if prox "test -s /tmp/ts_state_phase_a.tar.gz"; then
+        anders "systemctl stop tailscaled 2>/dev/null || true"
+        sleep 2
+        prox "cat /tmp/ts_state_phase_a.tar.gz" \
+            | ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" "tar -xzf - -C /var/lib 2>/dev/null"
+        anders "systemctl start tailscaled 2>/dev/null || true"
+        sleep 8
+        _ts_ip=$(anders "tailscale ip -4 2>/dev/null | head -1" 2>/dev/null || true)
+        [[ -n "$_ts_ip" ]] && info "Tailscale reconnected via cached state: $_ts_ip"
+    fi
+fi
+if [[ -z "$_ts_ip" ]]; then
+    info "Tailscale still not connected — running tailscale up..."
     anders "nohup tailscale up --accept-routes >/tmp/ts_up.log 2>&1 &"
     sleep 6
-    # URL appears on a line that may be indented with a tab — use grep -E to match it.
     _ts_url=$(anders "grep -Eo 'https://login\.tailscale\.com/[A-Za-z0-9/]+' /tmp/ts_up.log 2>/dev/null | head -1" || true)
     if [[ -n "$_ts_url" ]]; then
         echo ""
@@ -232,6 +245,10 @@ if [[ -z "$_ts_ip" ]]; then
     [[ -n "$_ts_ip" ]] || fail "Tailscale not authenticated within 3 min — authenticate the URL above and retry"
     info "Tailscale reconnected: $_ts_ip"
 fi
+# Cache current Tailscale state on Proxmox host — restored on next rollback.
+info "Caching Tailscale state for future rollback runs..."
+anders "tar -czf - -C /var/lib tailscale 2>/dev/null" \
+    | prox "cat - > /tmp/ts_state_phase_a.tar.gz" 2>/dev/null || true
 
 anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
 
