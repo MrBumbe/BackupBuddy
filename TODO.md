@@ -2790,6 +2790,242 @@ curl -sf -X POST "http://${CARINA_TS}:8080/api/buddies/vote/${VOTE_ID}" \
 
 ---
 
+### [ ] 1.17.10 — Pre-release: end-to-end restore integration test
+
+> **All work via SSH: `ssh root@192.168.1.60`**
+> Starting snapshot: `phase-h` (three-node cluster, anders + bjorn + carina)
+> Priority: HIGH — restore is the most critical untested path before real-world use.
+
+**Reads:** `gatekeeper/restore/restore.py`, `gatekeeper/tahoe/client.py`,
+  `gatekeeper/gui/routes/restore.py`, project-docs/testing.md
+
+**Background:** The restore code (`restore.py`, GUI routes `/api/restore/start/file`) is
+fully implemented but has never been run against a real Tahoe cluster. SHA-256
+verification path, TahoeClient.download(), and job-tracking flow are all untested
+in integration. Before real users trust BackupBuddy with their files, restore
+must be verified to work reliably.
+
+**Requirements:**
+
+**Step 1 — Verify a file is backed up in catalog:**
+- On anders, check `catalog.db` for at least one backed-up file via venv python3
+- Record `original_path`, `agent`, and `sha256` for a test file
+
+**Step 2 — Restore the file via the GUI API:**
+```bash
+ANDERS_TS=$(ssh -J root@192.168.1.60 root@10.99.0.11 tailscale ip -4 | head -1)
+curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/file" \
+  -H "Content-Type: application/json" \
+  -d '{"original_path": "<path>", "agent": "<agent>", "dest_path": "/tmp/restored_test"}'
+```
+- Poll job status until `status == "done"` or `"failed"`
+- Verify restore succeeded and SHA-256 in response matches catalog entry
+
+**Step 3 — Verify file integrity:**
+- `sha256sum /tmp/restored_test` on anders
+- Compare against catalog SHA-256 — must match exactly
+
+**Step 4 — Test restore failure case (wrong path):**
+- Request restore for a non-existent path
+- Verify `status == "failed"` with a user-readable error (no Tahoe internals exposed)
+
+**Step 5 — Verify agent API is bound to LAN IP (not 0.0.0.0):**
+- `ss -tlnp | grep 8081` on anders (or configured agent API port)
+- Confirm bind address is LAN IP (192.168.x.x), not `0.0.0.0`
+- Confirm GUI port is bound to Tailscale IP (100.x.x.x), not `0.0.0.0`
+
+**Done when:**
+- File restored via API and SHA-256 verified ✓
+- Failure case returns clean error ✓
+- Agent API bound to LAN IP confirmed ✓
+- GUI bound to Tailscale IP confirmed ✓
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.11 — Pre-release: wire orphan cleanup into production daily job
+
+> Priority: HIGH — without this, orphan fragments from removed nodes are never deleted.
+> Grace periods expire silently and storage is never reclaimed.
+
+**Reads:** `gatekeeper/cluster/orphans.py`, `gatekeeper/main.py`,
+  `gatekeeper/storage/pool.py`, `gatekeeper/tahoe/client.py`
+
+**Background:** `cleanup_orphans()` exists but is never called in production.
+The `delete_fragment` callback it requires must: (1) ask the Tahoe client to
+delete the file-cap, (2) call `StoragePoolManager.remove_fragment()` so the
+in-memory quota is updated. Neither of these is wired up in `main.py`.
+Additionally, no daily scheduler job calls `cleanup_orphans()`.
+
+**Requirements:**
+
+**Step 1 — Implement `delete_fragment` in `gatekeeper/storage/pool.py`:**
+- `async def delete_fragment(tahoe: TahoeClient, pool: StoragePoolManager, fragment_id: str) -> int`
+- Downloads size from catalog or estimates, calls `tahoe.delete(fragment_id)`,
+  calls `pool.remove_fragment(fragment_id)`
+- Returns bytes freed
+- If Tahoe delete fails, logs error and raises — do NOT silently ignore
+
+**Step 2 — Implement a daily orphan cleanup job in `gatekeeper/main.py`:**
+- Register as a background asyncio task (or APScheduler job) at startup
+- Run once daily at a fixed time or 24h after last run
+- Call `cleanup_orphans(db, orphan_grace_days=config.orphan_grace_days, ...)`
+- Pass `is_refrag_complete=lambda _: True` for Phase 1 (rebalance is Phase 2)
+- Log start, completion, and counts (eligible/deleted/skipped)
+- On error: log at ERROR, send alert if notify is configured
+
+**Step 3 — Unit test the production `delete_fragment` implementation:**
+- Mock `TahoeClient.delete()` and verify `StoragePoolManager.remove_fragment()` is called
+- Test failure path: Tahoe delete fails → exception propagated, quota NOT updated
+
+**Step 4 — Integration test via phase-h snapshot:**
+- Pre-insert an orphan with `marked_orphan_at` = 35 days ago
+- Trigger cleanup job manually (or reduce timer for test)
+- Verify `cleaned_at` set in `orphan_tags`, quota counter decremented
+
+**Done when:**
+- `delete_fragment` implemented with real Tahoe + pool calls ✓
+- Daily cleanup job wired in `main.py` ✓
+- Unit tests pass ✓
+- Integration test on Proxmox confirms orphan tags cleaned ✓
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.12 — Pre-release: document introducer SPOF and add health check
+
+> Priority: MEDIUM — users need to know this limitation before deploying.
+> No code change required for Phase 1; documentation + health check is the fix.
+
+**Reads:** `gatekeeper/tahoe/introducer.py`, `gatekeeper/main.py`,
+  `gatekeeper/gui/routes/dashboard.py`, DECISIONS.md
+
+**Background:** The Tahoe-LAFS introducer runs only on the node that created the
+cluster (anders in tests). If that node goes offline, storage uploads and downloads
+from all other nodes fail immediately. This is a known Phase 1 limitation
+(replacement: gossip protocol in Phase 2 per 2.3). Before real-world use, this
+limitation must be: (a) documented in DECISIONS.md, (b) surfaced in the dashboard
+GUI so users know which node is the introducer and what happens if it goes down.
+
+**Requirements:**
+
+**Step 1 — Add an ADR to DECISIONS.md:**
+- Document that the cluster-creator node hosts the Tahoe introducer
+- Explain the SPOF risk: if introducer goes down, uploads/downloads fail until it recovers
+- State the Phase 2 mitigation: gossip-based discovery per ADR/2.3
+- Note that Tahoe itself can recover if the introducer comes back (no data loss)
+
+**Step 2 — Surface introducer status in the dashboard:**
+- In `gatekeeper/gui/routes/dashboard.py`, add an `is_introducer` field to the
+  state data (true if this node runs the introducer, false otherwise)
+- In `dashboard.html`, show a visible notice when `is_introducer=true`:
+  "This node is the cluster introducer. If it goes offline, backups will pause
+  on all nodes until it recovers."
+- Show current introducer node name/address in the cluster overview
+
+**Step 3 — Integration test:**
+- On a phase-h snapshot, verify the introducer notice is shown on anders's GUI
+- Verify it is NOT shown on bjorn's or carina's GUI
+
+**Done when:**
+- DECISIONS.md ADR added ✓
+- Dashboard shows introducer notice on the correct node ✓
+- Integration test verified ✓
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.13 — Pre-release: cross-gatekeeper vote propagation (basic)
+
+> Priority: LOW — user confirmed this is a low-priority item.
+> Without this, all voters must cast their ballot on the same gatekeeper node,
+> which means someone must log in to a specific node's GUI to vote.
+> A workaround exists (log in to the proposer's GUI) and works for Phase 1 PoC.
+
+**Reads:** `gatekeeper/cluster/removal.py`, `gatekeeper/gui/routes/buddies.py`,
+  `gatekeeper/cluster/`, DECISIONS.md
+
+**Background:** When anders proposes a removal vote, the vote only exists in
+anders's `cluster.db`. For carina to cast a ballot, she must log in to anders's
+GUI (via Tailscale). This works but is confusing. A proper gossip mechanism
+would propagate the vote to all nodes so each user can vote from their own GUI.
+
+**Requirements:**
+
+**Step 1 — Design the propagation protocol:**
+- When a vote is created, the proposer pushes it to all active cluster members via
+  a new API endpoint `POST /api/cluster/sync/vote`
+- When a ballot is cast, it is pushed to the vote proposer node, which is the
+  authoritative holder of the vote record
+- Pydantic models for vote and ballot sync messages, validated on receipt
+
+**Step 2 — Implement:**
+- `POST /api/cluster/sync/vote` — receive a vote record from another node
+- `POST /api/cluster/sync/ballot` — receive a ballot from another node
+- Propagation triggered after: propose vote, cast ballot
+- All cluster comms over Tailscale (per ADR-002)
+
+**Step 3 — Integration test:**
+- On phase-h snapshot, propose removal from anders, cast ballot from carina's own GUI
+  (NOT by logging in to anders)
+- Verify vote reaches majority and grace period starts
+
+**Done when:**
+- Vote and ballot propagation implemented ✓
+- Integration test: carina votes from her own GUI ✓
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.17.14 — Installation guide
+
+> Priority: HIGH — nothing else matters if users cannot install and run BackupBuddy.
+> Write AFTER 1.17.10, 1.17.11, and 1.17.12 are done and tested.
+
+**Reads:** project-docs/onboarding.md, project-docs/configuration.md,
+  `install_gatekeeper.sh`, `install_agent.sh`, all wizard flow routes
+
+**Requirements:**
+- Target audience: a technically curious person with no Linux/homelab background
+  (assume they can follow instructions but do not know what SSH or sudo is without explanation)
+- Written in English (per CLAUDE.md language rules), plain language
+- Format: Markdown, suitable for a GitHub README or static site
+- Structure:
+  1. What is BackupBuddy? (1 paragraph, no jargon)
+  2. What you need (hardware / VM requirements, list)
+  3. Step-by-step: install the first node (gatekeeper), including Tailscale setup
+  4. Step-by-step: open the wizard and create a cluster
+  5. Step-by-step: install an agent on the computer you want to back up
+  6. Step-by-step: invite a friend (buddy), them joining your cluster
+  7. Verify your first backup was made
+  8. How to restore a file
+  9. Troubleshooting: the 5 most common problems and their solutions
+- Each step must be a single action with the exact command or UI click to use
+- No Tahoe jargon, no cap/FURL/share terminology
+- After the guide is written, send it to Johan as a file
+
+**Done when:**
+- `INSTALL.md` written and committed ✓
+- All steps verified against the current install scripts and wizard flow ✓
+
+```
+> Kludde:
+```
+
+---
+
 ---
 
 # Phase 2 — Maturity
