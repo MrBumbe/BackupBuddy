@@ -210,8 +210,9 @@ if [[ -z "$_ts_ip" ]]; then
     info "Tailscale not connected after rollback — starting tailscale up..."
     # Run tailscale up in the background on anders; capture any auth URL it emits.
     anders "nohup tailscale up --accept-routes >/tmp/ts_up.log 2>&1 &"
-    sleep 3
-    _ts_url=$(anders "grep -o 'https://login.tailscale.com/[^ ]*' /tmp/ts_up.log 2>/dev/null | head -1" || true)
+    sleep 6
+    # URL appears on a line that may be indented with a tab — use grep -E to match it.
+    _ts_url=$(anders "grep -Eo 'https://login\.tailscale\.com/[A-Za-z0-9/]+' /tmp/ts_up.log 2>/dev/null | head -1" || true)
     if [[ -n "$_ts_url" ]]; then
         echo ""
         echo "  ╔══════════════════════════════════════════════════════════════╗"
