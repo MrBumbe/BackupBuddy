@@ -189,6 +189,19 @@ anders "
     chown -R backupbuddy:backupbuddy '$ANDERS_DATA_DIR' /etc/backup-buddy
     chmod 750 '$ANDERS_DATA_DIR' /etc/backup-buddy
 " 2>/dev/null || true
+
+# Ensure pip packages are correctly installed — phase-a snapshot may have been
+# taken when pip had 0-byte stub files (Tahoe non-editable install side-effect).
+info "Ensuring editable install + force-reinstalling pinned packages..."
+anders "/opt/backup-buddy/.venv/bin/pip install -e /opt/backup-buddy" \
+    || fail "pip editable install failed in step 1"
+anders "/opt/backup-buddy/.venv/bin/pip install --force-reinstall \
+    -r /opt/backup-buddy/requirements.txt" \
+    || fail "pip force-reinstall failed in step 1"
+anders "/opt/backup-buddy/.venv/bin/python -c \
+    'from cryptography.hazmat.primitives.kdf.hkdf import HKDF; print(\"HKDF OK\")'" \
+    || fail "cryptography broken after step-1 pip fix"
+
 anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
 
 pass "Rollback complete"
