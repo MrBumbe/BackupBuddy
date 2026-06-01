@@ -511,6 +511,19 @@ pass "New VM $ANDERS_VMID running and reachable via SSH"
 echo ""
 echo "=== Step 12: Install BackupBuddy on fresh anders ==="
 
+# Wait for cloud-init apt operations to finish before running the install script.
+info "Waiting for apt lock to be released (cloud-init may be running)..."
+anders "
+deadline=\$(( \$(date +%s) + 120 ))
+while (( \$(date +%s) < deadline )); do
+    if ! fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock >/dev/null 2>&1; then
+        echo 'apt free'
+        break
+    fi
+    sleep 5
+done
+" || true
+
 info "Running install script from GitHub..."
 anders "curl -fsSL https://raw.githubusercontent.com/MrBumbe/BackupBuddy/master/install/gatekeeper.sh | bash" \
     || fail "Install script failed"
