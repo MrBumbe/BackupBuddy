@@ -311,8 +311,16 @@ pass "recovery_kit.enc saved and wizard confirmed"
 echo ""
 echo "=== Step 5: Restart in normal mode and switch to test profile ==="
 
-ANDERS_TS=$(anders "tailscale ip -4 2>/dev/null | head -1")
-[[ -n "$ANDERS_TS" ]] || fail "Could not resolve Anders Tailscale IP — is Tailscale running?"
+# Tailscale may need a moment to connect after rollback — poll up to 60 s.
+echo -n "  Waiting for Tailscale IP on anders..."
+ANDERS_TS=""
+_ts_deadline=$(( $(date +%s) + 60 ))
+while (( $(date +%s) < _ts_deadline )); do
+    ANDERS_TS=$(anders "tailscale ip -4 2>/dev/null | head -1" 2>/dev/null || true)
+    [[ -n "$ANDERS_TS" ]] && { echo " OK ($ANDERS_TS)"; break; }
+    echo -n "."; sleep 5
+done
+[[ -n "$ANDERS_TS" ]] || fail "Could not resolve Anders Tailscale IP after 60 s — is Tailscale running?"
 BASE_TS="http://$ANDERS_TS:8080"
 info "Anders Tailscale IP: $ANDERS_TS  →  $BASE_TS"
 
