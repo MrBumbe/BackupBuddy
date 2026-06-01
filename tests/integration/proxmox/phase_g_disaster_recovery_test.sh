@@ -172,6 +172,23 @@ if ! anders "grep -q '^Restart=always' /etc/systemd/system/$ANDERS_SVC.service 2
     } | ssh $SSH_OPTS -J "$PROXMOX" "root@$ANDERS_LAN" \
         "tee /etc/systemd/system/$ANDERS_SVC.service > /dev/null && systemctl daemon-reload"
 fi
+# Ensure wizard mode regardless of snapshot content — a previous failed run may
+# have left gatekeeper.cfg or Tahoe state in the snapshot.
+info "Ensuring clean wizard state (removing gatekeeper.cfg and Tahoe state)..."
+anders "
+    systemctl stop '$ANDERS_SVC' 2>/dev/null || true
+    rm -f '$GK_CFG'
+    rm -f '${ANDERS_DATA_DIR}/lifeboat.key' '${ANDERS_DATA_DIR}/root_dir.cap' \
+          '${ANDERS_DATA_DIR}/recovery_kit.enc' '${ANDERS_DATA_DIR}/onboarding_state.json'
+    rm -rf '${ANDERS_DATA_DIR}/tahoe' '${ANDERS_DATA_DIR}/upload_tmp'
+    rm -f '${ANDERS_DATA_DIR}/catalog.db' '${ANDERS_DATA_DIR}/catalog.db-shm' \
+          '${ANDERS_DATA_DIR}/catalog.db-wal'
+    rm -f '${ANDERS_DATA_DIR}/cluster.db' '${ANDERS_DATA_DIR}/cluster.db-shm' \
+          '${ANDERS_DATA_DIR}/cluster.db-wal'
+    mkdir -p '$ANDERS_DATA_DIR' /etc/backup-buddy
+    chown -R backupbuddy:backupbuddy '$ANDERS_DATA_DIR' /etc/backup-buddy
+    chmod 750 '$ANDERS_DATA_DIR' /etc/backup-buddy
+" 2>/dev/null || true
 anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
 
 pass "Rollback complete"
@@ -455,8 +472,10 @@ sleep 5
 # truly not in any config section; snapshot sections still reference scsi1 if
 # we only remove the current-state line, so the volume gets deleted anyway.
 # Renaming + purging the config lines is the reliable workaround.
-info "Preserving storage disk — renaming LVM volume and removing scsi1 from all configs..."
-prox "lvrename pve vm-101-disk-1 bb-storage-preserved"
+info "Preserving storage disk — removing disk-1 snapshot LVs, renaming origin, stripping scsi1..."
+# Remove snapshot LVs for disk-1 before rename — they become orphaned LVs otherwise.
+prox "for lv in \$(lvs --noheadings -o lv_name pve 2>/dev/null | awk '{print \$1}' | grep '^snap_vm-${ANDERS_VMID}-disk-1_'); do lvremove -f pve/\$lv; done 2>/dev/null || true"
+prox "lvrename pve vm-${ANDERS_VMID}-disk-1 bb-storage-preserved"
 prox "sed -i '/^scsi1:/d' /etc/pve/qemu-server/$ANDERS_VMID.conf"
 sleep 2
 
@@ -511,8 +530,12 @@ pass "New VM $ANDERS_VMID running and reachable via SSH"
 echo ""
 echo "=== Step 12: Install BackupBuddy on fresh anders ==="
 
-# Wait for cloud-init apt operations to finish before running the install script.
-info "Waiting for apt lock to be released (cloud-init may be running)..."
+# Wait for cloud-init to fully complete before running the install script.
+# cloud-init runs apt in multiple phases; waiting for status --wait is more
+# reliable than polling lock files, which can be briefly free between phases.
+info "Waiting for cloud-init to finish (may run apt in multiple phases)..."
+anders "cloud-init status --wait 2>/dev/null || true"
+info "cloud-init done — waiting for any remaining apt locks to clear..."
 anders "
 deadline=\$(( \$(date +%s) + 120 ))
 while (( \$(date +%s) < deadline )); do
@@ -527,6 +550,25 @@ done
 info "Running install script from GitHub..."
 anders "curl -fsSL https://raw.githubusercontent.com/MrBumbe/BackupBuddy/master/install/gatekeeper.sh | bash" \
     || fail "Install script failed"
+
+# The Tahoe-LAFS fork must be installed in editable mode so src/allmydata/ is
+# importable. Non-editable install produces 0-byte stubs. Also force-reinstall
+# pinned packages from requirements.txt to replace stubs for cryptography etc.
+# NOTE: do NOT pipe through 'tail' — that makes || fail unreachable (tail exits 0).
+info "Reinstalling BackupBuddy in editable mode (Tahoe fork requires -e)..."
+anders "/opt/backup-buddy/.venv/bin/pip install -e /opt/backup-buddy" \
+    || fail "editable install failed"
+info "Force-reinstalling pinned packages to replace Tahoe stub packages..."
+anders "/opt/backup-buddy/.venv/bin/pip install --force-reinstall \
+    -r /opt/backup-buddy/requirements.txt" \
+    || fail "pip force-reinstall failed"
+info "Verifying cryptography and FastAPI are functional after install..."
+anders "/opt/backup-buddy/.venv/bin/python -c \
+    'from cryptography.hazmat.primitives.kdf.hkdf import HKDF; print(\"HKDF OK\")'" \
+    || fail "cryptography broken after install — _rust.abi3.so may still be a 0-byte stub"
+anders "/opt/backup-buddy/.venv/bin/python -c \
+    'from fastapi import FastAPI; print(\"FastAPI OK\")'" \
+    || fail "fastapi broken after install"
 
 # Overlay the local dev code on top of the GitHub install.
 info "Overlaying local gatekeeper code on top of install..."
@@ -563,6 +605,34 @@ fi
 anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
 
 pass "BackupBuddy installed on fresh anders"
+
+# ── Step 12.5: Snapshot new VM as phase-a so next run is self-contained ───────
+echo ""
+echo "=== Step 12.5: Take phase-a snapshot on fresh VM ==="
+
+# Ensure phase-a captures wizard mode: no gatekeeper.cfg, no Tahoe state.
+# The install + earlier cascade steps may have created these; strip them so
+# rollback always lands in clean setup mode.
+anders "
+    systemctl stop '$ANDERS_SVC' 2>/dev/null || true
+    rm -f '$GK_CFG'
+    rm -rf '${ANDERS_DATA_DIR}/tahoe'
+    rm -f '${ANDERS_DATA_DIR}/catalog.db' '${ANDERS_DATA_DIR}/cluster.db'
+    chown -R backupbuddy:backupbuddy '$ANDERS_DATA_DIR' /etc/backup-buddy 2>/dev/null || true
+" 2>/dev/null || true
+
+info "Stopping VM $ANDERS_VMID for snapshot..."
+prox "qm stop $ANDERS_VMID --skiplock 1"
+sleep 5
+
+# Remove stale phase-a LV for disk-1 in case a previous failed run left one.
+prox "lvremove -f pve/snap_vm-${ANDERS_VMID}-disk-1_phase-a 2>/dev/null || true"
+
+prox "qm snapshot $ANDERS_VMID phase-a --description 'Phase A: BackupBuddy+Tailscale installed, no config'"
+info "Starting VM $ANDERS_VMID..."
+prox "qm start $ANDERS_VMID"
+wait_ssh_anders || fail "VM $ANDERS_VMID did not return after phase-a snapshot"
+pass "phase-a snapshot created on VM $ANDERS_VMID — test is repeatable from next run"
 
 # ── Step 13: Mount old storage disk by UUID ───────────────────────────────────
 echo ""
