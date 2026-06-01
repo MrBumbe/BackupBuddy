@@ -485,7 +485,7 @@ info "Cloning template $TEMPLATE_VMID to VM $ANDERS_VMID..."
 prox "qm clone $TEMPLATE_VMID $ANDERS_VMID --name gatekeeper-anders --full --storage local-lvm"
 
 info "Setting original MAC address: $ANDERS_MAC..."
-prox "qm set $ANDERS_VMID --net0 'virtio=${ANDERS_MAC},bridge=vmbr0'"
+prox "qm set $ANDERS_VMID --net0 'virtio=${ANDERS_MAC},bridge=vmbr99'"
 
 info "Setting static cloud-init IP: $ANDERS_LAN..."
 prox "qm set $ANDERS_VMID --ipconfig0 'ip=${ANDERS_LAN}/24,gw=10.99.0.1'"
