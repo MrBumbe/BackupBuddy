@@ -2775,6 +2775,17 @@ curl -sf -X POST "http://${CARINA_TS}:8080/api/buddies/vote/${VOTE_ID}" \
 > - Switch anders to adaptive profile after carina joins so new uploads use k=1, n=3
 >   and carina's storage node receives shares
 > - Script: tests/integration/proxmox/phase_h_three_node_removal_test.sh
+> - Bugs fixed during test run (2026-06-01):
+>   (a) VM 101 phase-a only (no phase-e) — test rebuilt 2-node cluster from scratch
+>   (b) Tailscale NeedsLogin after rollback — fixed with cached state restore (_fix_tailscale)
+>   (c) pip not in PATH — use full .venv/bin/pip path
+>   (d) LVM snapshot 0-byte venv files — pip install -r requirements.txt --force-reinstall first
+>   (e) wizard role "found" invalid — changed to "new"
+>   (f) wizard step/5 (new cluster) requires passphrase/passphrase_confirm fields
+>   (g) system python3 lacks pydantic — use .venv/bin/python3 for gatekeeper imports
+>   (h) tr -d '[:space:]' removes space from "k=1 n=3" — changed to tr -d '\n\r'
+>   (i) 15-second share propagation wait too short — replaced with 3-min poll
+> - Test PASSED 2026-06-01, phase-h snapshots created on 101, 102, 103, 301, 302, 303
 ```
 
 ---
