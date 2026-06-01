@@ -698,6 +698,20 @@ pass "Tailscale active on new anders (IP=$ANDERS_TS)"
 echo ""
 echo "=== Step 15: Run second wizard on fresh anders ==="
 
+# The fresh VM (template 9000 clone) can have broken pip from LVM thin pool
+# data corruption during the phase-a snapshot in step 12.5.  Reinstall
+# editable + force-reinstall before starting the wizard, same as step 1.
+info "Ensuring pip packages are correct on fresh VM before second wizard..."
+anders "/opt/backup-buddy/.venv/bin/pip install -e /opt/backup-buddy" \
+    || fail "pip editable install failed in step 15"
+anders "/opt/backup-buddy/.venv/bin/pip install --force-reinstall \
+    -r /opt/backup-buddy/requirements.txt" \
+    || fail "pip force-reinstall failed in step 15"
+anders "/opt/backup-buddy/.venv/bin/python -c \
+    'from cryptography.hazmat.primitives.kdf.hkdf import HKDF; print(\"HKDF OK\")'" \
+    || fail "cryptography broken before second wizard"
+anders "systemctl restart $ANDERS_SVC 2>/dev/null || true"
+
 wait_wizard_prox "$BASE_LAN" 120 || fail "Wizard not reachable on fresh anders within 120 s"
 
 step_post "$BASE_LAN/onboarding/step/1" \
