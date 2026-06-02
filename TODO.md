@@ -3012,7 +3012,7 @@ would propagate the vote to all nodes so each user can vote from their own GUI.
 
 ---
 
-### [ ] 1.17.14 — Installation guide
+### [x] 1.17.14 — Installation guide
 
 > Priority: HIGH — nothing else matters if users cannot install and run BackupBuddy.
 > Write AFTER 1.17.10, 1.17.11, and 1.17.12 are done and tested.
@@ -3045,6 +3045,8 @@ would propagate the vote to all nodes so each user can vote from their own GUI.
 
 ```
 > Kludde:
+> INSTALL.md written 2026-06-02. All steps verified against install/gatekeeper.sh,
+> install/agent.sh, and gatekeeper/gui/routes/onboarding.py. File sent to Johan.
 ```
 
 ---
