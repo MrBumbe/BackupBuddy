@@ -264,6 +264,39 @@ class ClusterDB:
         self._conn.commit()
         return cursor.lastrowid
 
+    def upsert_vote(
+        self,
+        vote_id: int,
+        vote_type: str,
+        target_node_id: str,
+        proposed_by: str,
+        proposed_at: float,
+        closes_at: float,
+        votes_yes: int = 0,
+        votes_no: int = 0,
+        resolved: bool = False,
+        grace_extension_days: int | None = None,
+    ) -> None:
+        """Insert or update a synced vote record from another node.
+
+        On conflict (same id), updates mutable tally fields only — immutable
+        identity fields (vote_type, target_node_id, proposed_by, proposed_at,
+        closes_at) are never overwritten by a peer.
+        """
+        self._conn.execute(
+            "INSERT INTO votes "
+            "(id, vote_type, target_node_id, proposed_by, proposed_at, closes_at, "
+            "votes_yes, votes_no, resolved, grace_extension_days) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "votes_yes=excluded.votes_yes, "
+            "votes_no=excluded.votes_no, "
+            "resolved=excluded.resolved",
+            (vote_id, vote_type, target_node_id, proposed_by, proposed_at, closes_at,
+             votes_yes, votes_no, 1 if resolved else 0, grace_extension_days),
+        )
+        self._conn.commit()
+
     def get_vote(self, vote_id: int) -> dict | None:
         row = self._conn.execute(
             "SELECT * FROM votes WHERE id = ?", (vote_id,)

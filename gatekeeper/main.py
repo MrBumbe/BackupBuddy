@@ -38,6 +38,13 @@ from pydantic import BaseModel
 
 from gatekeeper.cluster.join import JoinAcceptResponse, JoinRequest, accept_join
 from gatekeeper.cluster.orphans import cleanup_orphans
+from gatekeeper.cluster.removal import (
+    VoteResult,
+    apply_grace_extension,
+    cast_vote,
+    start_grace_period,
+)
+from gatekeeper.cluster.sync import BallotSyncMessage, VoteSyncMessage
 from gatekeeper.config import (
     ConfigError,
     GatekeeperConfig,
@@ -444,6 +451,94 @@ def _register_routes(app: FastAPI) -> None:
             "node": cfg.node.name,
             "display_name": cfg.node.display_name,
         })
+
+    @app.post("/api/cluster/sync/vote")
+    async def cluster_sync_vote(request: Request, body: VoteSyncMessage) -> JSONResponse:
+        """Receive a vote record pushed by the proposer node (ADR-021).
+
+        Bound to Tailscale interface — callers must be cluster members.
+        """
+        if request.app.state.setup_required:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+        db = request.app.state.cluster_db
+        if db is None:
+            return JSONResponse({"error": "Cluster database not available"}, status_code=503)
+        db.upsert_vote(
+            vote_id=body.vote_id,
+            vote_type=body.vote_type,
+            target_node_id=body.target_node_id,
+            proposed_by=body.proposed_by,
+            proposed_at=body.proposed_at,
+            closes_at=body.closes_at,
+            votes_yes=body.votes_yes,
+            votes_no=body.votes_no,
+            resolved=body.resolved,
+            grace_extension_days=body.grace_extension_days,
+        )
+        logger.info(
+            "Synced vote %d (type=%s target=%s) from peer",
+            body.vote_id, body.vote_type, body.target_node_id,
+        )
+        return JSONResponse({"status": "ok"})
+
+    @app.post("/api/cluster/sync/ballot")
+    async def cluster_sync_ballot(request: Request, body: BallotSyncMessage) -> JSONResponse:
+        """Receive a forwarded ballot from a non-proposer node (ADR-021).
+
+        Voter identity is derived from the sender's Tailscale IP — never from
+        the request body — to prevent ballot forgery (ADR-021 security).
+        """
+        if request.app.state.setup_required:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+        db = request.app.state.cluster_db
+        if db is None:
+            return JSONResponse({"error": "Cluster database not available"}, status_code=503)
+
+        sender_ip = request.client.host if request.client else ""
+        members = db.list_members()
+        voter = next((m for m in members if m["tailscale_hostname"] == sender_ip), None)
+        if voter is None:
+            logger.warning("sync/ballot rejected: unknown sender IP %s", sender_ip)
+            return JSONResponse({"error": "Sender not a cluster member"}, status_code=403)
+        voter_node_id: str = voter["node_id"]
+
+        vote_row = db.get_vote(body.vote_id)
+        if vote_row is None:
+            return JSONResponse({"error": "Vote not found"}, status_code=404)
+        if vote_row["proposed_by"] != request.app.state.local_node_id:
+            return JSONResponse({"error": "Not the proposer for this vote"}, status_code=403)
+
+        try:
+            result = cast_vote(db, body.vote_id, voter_node_id=voter_node_id, choice=body.choice)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        if result == VoteResult.PASSED:
+            target_nid: str = vote_row["target_node_id"]
+            if vote_row["vote_type"] == "removal":
+                def _sync_alert(node_id: str, message: str) -> None:
+                    logger.info("grace-alert [node=%s]: %s", node_id, message)
+                try:
+                    start_grace_period(db, target_nid, send_alert=_sync_alert)
+                except ValueError as exc:
+                    logger.warning(
+                        "Grace period start failed for %s after vote passed: %s",
+                        target_nid, exc,
+                    )
+            elif vote_row["vote_type"] == "grace_extension":
+                try:
+                    apply_grace_extension(db, body.vote_id)
+                except ValueError as exc:
+                    logger.warning(
+                        "Grace extension apply failed for vote %d: %s",
+                        body.vote_id, exc,
+                    )
+
+        logger.info(
+            "Ballot from %s (%s) on vote %d: choice=%s result=%s",
+            voter_node_id, sender_ip, body.vote_id, body.choice, result.value,
+        )
+        return JSONResponse({"result": result.value})
 
     @app.post("/api/cluster/join")
     async def cluster_join(request: Request, body: JoinRequest) -> JSONResponse:

@@ -14,6 +14,7 @@ filtered from GET /api/buddies.  The target must not know a vote is open.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -34,6 +35,7 @@ from gatekeeper.cluster.removal import (
     propose_removal,
     start_grace_period,
 )
+from gatekeeper.cluster.sync import BallotSyncMessage, push_ballot_to_proposer, push_vote_to_peers
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +287,20 @@ def create_buddies_router() -> APIRouter:
             record = propose_removal(db, body.target_node_id, proposed_by=local_node_id)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+
+        # Push vote to all peers (fire-and-forget per ADR-021)
+        config = getattr(request.app.state, "config", None)
+        web_port: int = config.web.port if config else 8080
+        vote_row = db.get_vote(record.vote_id)
+        if vote_row is not None:
+            members: list[dict] = db.list_members()
+            task = asyncio.create_task(
+                push_vote_to_peers(vote_row, members, local_node_id, web_port)
+            )
+            bg = getattr(request.app.state, "background_tasks", None)
+            if bg is not None:
+                bg.append(task)
+
         return JSONResponse({
             "vote_id": record.vote_id,
             "target_node_id": record.target_node_id,
@@ -303,11 +319,37 @@ def create_buddies_router() -> APIRouter:
             return JSONResponse({"error": "Cluster database not available"}, status_code=503)
         local_node_id: str = getattr(request.app.state, "local_node_id", "")
 
-        # Look up vote type before casting so we can auto-resolve if it passes
         vote_row = db.get_vote(vote_id)
         if vote_row is None:
             return JSONResponse({"error": "Vote not found"}, status_code=404)
 
+        # Non-proposer path: forward ballot to the proposer (ADR-021)
+        if vote_row["proposed_by"] != local_node_id:
+            proposer = db.get_member(vote_row["proposed_by"])
+            if proposer is None:
+                return JSONResponse({"error": "Proposer not found in cluster"}, status_code=400)
+            config = getattr(request.app.state, "config", None)
+            web_port: int = config.web.port if config else 8080
+            ballot_msg = BallotSyncMessage(
+                vote_id=vote_id,
+                voted_at=time.time(),
+                choice=body.choice,
+            )
+            try:
+                response_data = await push_ballot_to_proposer(
+                    ballot_msg, proposer["tailscale_hostname"], web_port
+                )
+            except ValueError as exc:
+                logger.error("Failed to forward ballot for vote %d: %s", vote_id, exc)
+                return JSONResponse({"error": "Could not reach proposer"}, status_code=503)
+            # Store locally so already_voted check reflects true state on next poll
+            try:
+                db.insert_ballot(vote_id, local_node_id, ballot_msg.voted_at, 1 if body.choice else 0)
+            except ValueError:
+                pass  # already recorded locally
+            return JSONResponse(response_data)
+
+        # Proposer path: cast vote directly
         try:
             result = cast_vote(db, vote_id, voter_node_id=local_node_id, choice=body.choice)
         except ValueError as exc:
@@ -352,6 +394,20 @@ def create_buddies_router() -> APIRouter:
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+
+        # Push vote to all peers (fire-and-forget per ADR-021)
+        config = getattr(request.app.state, "config", None)
+        web_port: int = config.web.port if config else 8080
+        vote_row = db.get_vote(record.vote_id)
+        if vote_row is not None:
+            members: list[dict] = db.list_members()
+            task = asyncio.create_task(
+                push_vote_to_peers(vote_row, members, local_node_id, web_port)
+            )
+            bg = getattr(request.app.state, "background_tasks", None)
+            if bg is not None:
+                bg.append(task)
+
         return JSONResponse({
             "vote_id": record.vote_id,
             "target_node_id": record.target_node_id,

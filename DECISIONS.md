@@ -664,5 +664,62 @@ in Phase 1.
 
 ---
 
+## ADR-021 — Phase 1 vote sync protocol between gatekeeper nodes
+
+**Status:** Accepted
+
+**Decision:** Cross-gatekeeper vote propagation in Phase 1 uses two lightweight
+HTTP endpoints on each gatekeeper:
+
+- `POST /api/cluster/sync/vote` — receive a vote record pushed by the proposer
+- `POST /api/cluster/sync/ballot` — receive a ballot forwarded from the voter
+
+Both endpoints are bound to the Tailscale interface and reachable only within
+the cluster (ADR-002). The voter's identity is derived server-side from the
+sender's Tailscale IP matched against `tailscale_hostname` in the members table
+— it is never accepted from the request body.
+
+**Push flow:**
+
+1. When a node calls `POST /api/buddies/removal` (or `grace-extend`), the vote
+   record is pushed to all active cluster members via `POST /api/cluster/sync/vote`.
+2. When a non-proposer node calls `POST /api/buddies/vote/{id}/cast`, the ballot
+   is forwarded to the proposer via `POST /api/cluster/sync/ballot`. The ballot is
+   stored locally only if the proposer confirms success (HTTP 200).
+3. The proposer node resolves the forwarded ballot's voter identity by looking up
+   the sender's Tailscale IP in the members table. This prevents any member from
+   forging a ballot in another member's name.
+
+**Phase 1 assumptions:**
+
+- All gatekeeper nodes use the same web port (`config.web.port`). A heterogeneous
+  web-port configuration is a Phase 2 concern.
+- Push operations are fire-and-forget: the proposer does not retry if a peer is
+  offline when the vote is created. Peers that were offline will not see the vote.
+  Gossip-based eventual consistency and retry queues are Phase 2.
+- The `proposed_by` field in `votes` stores the node_id of the proposer.
+  The vote sync endpoint resolves the proposer's Tailscale hostname from the
+  members table to know where to forward ballots.
+
+**Security properties maintained:**
+
+- ADR-010 filter (hide open removal votes from the target) applies on each
+  node independently using the local `local_node_id` — the target never sees
+  the vote regardless of which node's GUI they access.
+- Sender IP validation on `sync/ballot` prevents ballot forgery. A malicious
+  node cannot claim to vote as another member.
+
+**Consequences:**
+
+- Nodes that are offline when a vote is created will not have the vote in their
+  local database and cannot cast ballots until someone pushes the vote again
+  (manual retry is out of Phase 1 scope).
+- The `votes` table gains an `upsert_vote()` path so synced votes can be
+  inserted with their canonical `id` from the proposer's database.
+- Ballot forwarding latency adds one round-trip to the cast-vote path; this is
+  acceptable for the Phase 1 homelab target audience.
+
+---
+
 _BackupBuddy DECISIONS.md_
 _Read relevant ADRs before implementing any related feature._
