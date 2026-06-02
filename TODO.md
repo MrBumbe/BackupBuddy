@@ -2854,7 +2854,7 @@ curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/file" \
 
 ---
 
-### [ ] 1.17.11 — Pre-release: wire orphan cleanup into production daily job
+### [x] 1.17.11 — Pre-release: wire orphan cleanup into production daily job
 
 > Priority: HIGH — without this, orphan fragments from removed nodes are never deleted.
 > Grace periods expire silently and storage is never reclaimed.
@@ -2902,7 +2902,13 @@ Additionally, no daily scheduler job calls `cleanup_orphans()`.
 
 ```
 > Kludde:
+> Design: cleanup_orphans() stays sync (backward-compatible with existing tests and integration
+> scripts). Daily job uses asyncio.to_thread + run_coroutine_threadsafe to bridge sync callback
+> with async TahoeClient. StoragePoolManager.sync_usage() rescans filesystem after deletion
+> (no per-fragment size tracking needed). TahoeClient.delete() calls DELETE /uri/<cap> on the
+> Tahoe gateway. All 7 integration test steps passed on phase-h snapshot 2026-06-02.
 ```
+> Test PASSED 2026-06-02
 
 ---
 
