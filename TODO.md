@@ -2958,7 +2958,7 @@ GUI so users know which node is the introducer and what happens if it goes down.
 
 ---
 
-### [ ] 1.17.13 — Pre-release: cross-gatekeeper vote propagation (basic)
+### [x] 1.17.13 — Pre-release: cross-gatekeeper vote propagation (basic)
 
 > Priority: LOW — user confirmed this is a low-priority item.
 > Without this, all voters must cast their ballot on the same gatekeeper node,
@@ -2998,7 +2998,16 @@ would propagate the vote to all nodes so each user can vote from their own GUI.
 - Integration test: carina votes from her own GUI ✓
 
 ```
-> Kludde:
+> Kludde: Implemented ADR-021 Phase 1 vote sync protocol.
+> New gatekeeper/cluster/sync.py with VoteSyncMessage, BallotSyncMessage, push_vote_to_peers(),
+> push_ballot_to_proposer(). ClusterDB.upsert_vote() for INSERT...ON CONFLICT.
+> Two new endpoints: POST /api/cluster/sync/vote (receive synced vote) and
+> POST /api/cluster/sync/ballot (receive forwarded ballot, voter identity from sender TS IP).
+> Buddies routes patched: propose_removal and grace-extend push vote to peers;
+> cast_vote non-proposer path forwards ballot to proposer.
+> Integration test phase_k_vote_propagation_test.sh: anders proposes grace_extension (+7 days)
+> for bjorn, carina votes from her own GUI — vote passes, bjorn grace_days 7→14.
+> phase-k snapshots on 101, 102, 103, 301, 302, 303. 2026-06-02.
 ```
 
 ---

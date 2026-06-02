@@ -161,6 +161,12 @@ wait_ssh "$ANDERS_LAN" "anders" || fail "Anders did not come up within 150 s"
 wait_ssh "$BJORN_LAN"  "bjorn"  || fail "Bjorn did not come up within 150 s"
 wait_ssh "$CARINA_LAN" "carina" || fail "Carina did not come up within 150 s"
 
+info "Mounting storage disks (sdb not auto-mounted after LVM snapshot rollback)..."
+for _LAN in "$ANDERS_LAN" "$BJORN_LAN" "$CARINA_LAN"; do
+    ssh $SSH_OPTS -J "$PROXMOX" "root@$_LAN" \
+        "mountpoint -q /mnt/storage || mount /dev/sdb /mnt/storage"
+done
+
 # Sync current gatekeeper code to all VMs (includes new cluster/sync.py)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -200,6 +206,35 @@ CARINA_TS_URL="http://$CARINA_TS:8080"
 info "Anders TS: $ANDERS_TS → $ANDERS_TS_URL"
 info "Bjorn  TS: $BJORN_TS  → $BJORN_TS_URL"
 info "Carina TS: $CARINA_TS → $CARINA_TS_URL"
+
+info "Fixing peer tailscale_hostname entries (snapshot stores node names, not IPs)..."
+anders "python3 << 'PYEOF'
+import sqlite3
+db = sqlite3.connect('${ANDERS_DATA_DIR}/cluster.db')
+db.execute('UPDATE members SET tailscale_hostname=? WHERE node_id=?', ('${BJORN_TS}',  'bjorn'))
+db.execute('UPDATE members SET tailscale_hostname=? WHERE node_id=?', ('${CARINA_TS}', 'carina'))
+db.commit()
+db.close()
+print('anders cluster.db patched')
+PYEOF"
+bjorn "python3 << 'PYEOF'
+import sqlite3
+db = sqlite3.connect('${BJORN_DATA_DIR}/cluster.db')
+db.execute('UPDATE members SET tailscale_hostname=? WHERE node_id=?', ('${ANDERS_TS}', 'anders'))
+db.execute('UPDATE members SET tailscale_hostname=? WHERE node_id=?', ('${CARINA_TS}', 'carina'))
+db.commit()
+db.close()
+print('bjorn cluster.db patched')
+PYEOF"
+carina "python3 << 'PYEOF'
+import sqlite3
+db = sqlite3.connect('${CARINA_DATA_DIR}/cluster.db')
+db.execute('UPDATE members SET tailscale_hostname=? WHERE node_id=?', ('${ANDERS_TS}', 'anders'))
+db.execute('UPDATE members SET tailscale_hostname=? WHERE node_id=?', ('${BJORN_TS}',  'bjorn'))
+db.commit()
+db.close()
+print('carina cluster.db patched')
+PYEOF"
 
 info "Restarting gatekeepers with new code..."
 anders "systemctl reset-failed $GK_SVC 2>/dev/null || true && systemctl restart $GK_SVC"
