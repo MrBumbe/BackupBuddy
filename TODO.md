@@ -2912,7 +2912,7 @@ Additionally, no daily scheduler job calls `cleanup_orphans()`.
 
 ---
 
-### [ ] 1.17.12 — Pre-release: document introducer SPOF and add health check
+### [x] 1.17.12 — Pre-release: document introducer SPOF and add health check
 
 > Priority: MEDIUM — users need to know this limitation before deploying.
 > No code change required for Phase 1; documentation + health check is the fix.
