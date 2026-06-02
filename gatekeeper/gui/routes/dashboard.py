@@ -36,6 +36,9 @@ def _build_dashboard_data(request: Request) -> dict:
     if setup_required:
         return {"setup_required": True, "node_name": node_name}
 
+    is_introducer: bool = bool(config and config.tahoe.run_introducer)
+    local_node_id: str | None = config.node.name if config else None
+
     catalog_db = getattr(state, "catalog_db", None)
     cluster_db = getattr(state, "cluster_db", None)
     pool = getattr(state, "pool", None)
@@ -68,6 +71,7 @@ def _build_dashboard_data(request: Request) -> dict:
             "profile": m.get("profile", ""),
             "warning": warning,
             "error": error,
+            "is_introducer": is_introducer and m.get("node_id") == local_node_id,
         })
 
     # Storage pool
@@ -110,6 +114,7 @@ def _build_dashboard_data(request: Request) -> dict:
     return {
         "setup_required": False,
         "node_name": node_name,
+        "is_introducer": is_introducer,
         "cluster": {
             "total_members": len(raw_members),
             "online_count": online_count,

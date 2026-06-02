@@ -61,6 +61,22 @@ h1 {
     color: #721c24;
 }
 
+.badge-info {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.notice-warning {
+    background: #fffbea;
+    border: 1px solid #fcd34d;
+    border-left: 4px solid #f59e0b;
+    border-radius: 0.4rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    margin-bottom: 1.5rem;
+    color: #92400e;
+}
+
 p {
     margin: 0.5rem 0;
     color: #444;

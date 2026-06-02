@@ -18,6 +18,15 @@
 <p>The gatekeeper has not been configured yet. Open the setup wizard to complete onboarding.</p>
 {% else %}
 
+<div id="introducer-notice">
+{% if data.is_introducer %}
+<div class="notice-warning">
+    <strong>This node is the cluster introducer.</strong>
+    If it goes offline, backups will pause on all nodes until it recovers.
+</div>
+{% endif %}
+</div>
+
 <section class="card" id="cluster-section">
     <h2>Cluster</h2>
     <p class="section-summary">
@@ -39,7 +48,7 @@
         <tbody>
             {% for m in data.cluster.members %}
             <tr{% if m.error %} class="row-error"{% elif m.warning %} class="row-warning"{% endif %}>
-                <td>{{ m.display_name }}</td>
+                <td>{{ m.display_name }}{% if m.is_introducer %} <span class="badge badge-info">introducer</span>{% endif %}</td>
                 <td>
                     {% if m.status == "active" %}
                     <span class="badge badge-ok">active</span>
@@ -224,7 +233,8 @@
                 ratioText = '—';
                 ratioCls = ' class="text-muted"';
             }
-            html += '<tr' + rowCls + '><td>' + esc(m.display_name) + '</td><td>' + statusBadge + '</td>'
+            var introTag = m.is_introducer ? ' <span class="badge badge-info">introducer</span>' : '';
+            html += '<tr' + rowCls + '><td>' + esc(m.display_name) + introTag + '</td><td>' + statusBadge + '</td>'
                 + '<td>' + humanBytes(m.contribution_bytes) + '</td>'
                 + '<td>' + humanBytes(m.usage_bytes) + '</td>'
                 + '<td><span' + ratioCls + '>' + ratioText + '</span></td>'
@@ -293,6 +303,12 @@
 
     function applyUpdate(data) {
         if (data.setup_required) return;
+        var notice = document.getElementById('introducer-notice');
+        if (notice) {
+            notice.innerHTML = data.is_introducer
+                ? '<div class="notice-warning"><strong>This node is the cluster introducer.</strong> If it goes offline, backups will pause on all nodes until it recovers.</div>'
+                : '';
+        }
         document.getElementById('cluster-section').innerHTML = renderCluster(data.cluster);
         document.getElementById('storage-section').innerHTML = renderStorage(data.storage_pool);
         document.getElementById('agents-section').innerHTML = renderAgents(data.agents);

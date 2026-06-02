@@ -618,5 +618,51 @@ The same FastAPI application, port, and systemd unit handle both modes.
 
 ---
 
+## ADR-020 — Tahoe introducer is a single point of failure in Phase 1
+
+**Status:** Accepted
+
+**Decision:** In Phase 1, exactly one node in the cluster runs the Tahoe-LAFS
+introducer process — the node that created the cluster (the "founder").
+All other nodes connect to the Tahoe network through this introducer.
+If the introducer node goes offline, uploads and downloads fail on all nodes
+until the introducer comes back. No data is lost — Tahoe retains all fragments
+on the storage nodes — but no new files can be backed up and existing files
+cannot be restored until connectivity is restored.
+
+This limitation is documented in the dashboard GUI so that users are aware
+of it before deploying BackupBuddy in a production environment.
+
+**Rationale:**
+
+- Tahoe-LAFS requires an introducer to bootstrap peer discovery between storage
+  nodes and clients. There is no built-in mechanism in Tahoe for multiple
+  introducers or gossip-based discovery.
+- Implementing a distributed discovery mechanism in Phase 1 would require
+  significant additional complexity (custom gossip protocol or DHT) that is
+  out of scope given the homelab target audience and Phase 1 simplicity goal.
+- The failure mode is non-destructive: no data is lost if the introducer goes
+  offline. The cluster self-heals as soon as the introducer node recovers.
+- For the typical homelab use case (nodes on the same LAN / Tailscale network),
+  the introducer node is unlikely to be offline for extended periods.
+
+**Phase 2 mitigation:** ADR/2.3 describes a gossip-based discovery protocol that
+eliminates the introducer SPOF by letting storage nodes announce themselves
+directly to each other. This is a Phase 2 feature and must not be implemented
+in Phase 1.
+
+**Consequences:**
+
+- The dashboard surfaces a visible notice on the introducer node:
+  "This node is the cluster introducer. If it goes offline, backups will pause
+  on all nodes until it recovers."
+- The cluster overview shows which node is the introducer so users can make
+  informed operational decisions (e.g. which node to prioritise for uptime).
+- Installation documentation must state this limitation clearly.
+- The introducer node is determined by `[tahoe] run_introducer = true` in
+  `gatekeeper.cfg`. Only the founder node should have this set.
+
+---
+
 _BackupBuddy DECISIONS.md_
 _Read relevant ADRs before implementing any related feature._
