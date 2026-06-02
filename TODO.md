@@ -2790,11 +2790,12 @@ curl -sf -X POST "http://${CARINA_TS}:8080/api/buddies/vote/${VOTE_ID}" \
 
 ---
 
-### [ ] 1.17.10 — Pre-release: end-to-end restore integration test
+### [x] 1.17.10 — Pre-release: end-to-end restore integration test
 
 > **All work via SSH: `ssh root@192.168.1.60`**
 > Starting snapshot: `phase-h` (three-node cluster, anders + bjorn + carina)
 > Priority: HIGH — restore is the most critical untested path before real-world use.
+> Test PASSED 2026-06-02
 
 **Reads:** `gatekeeper/restore/restore.py`, `gatekeeper/tahoe/client.py`,
   `gatekeeper/gui/routes/restore.py`, project-docs/testing.md
@@ -2842,6 +2843,13 @@ curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/file" \
 
 ```
 > Kludde:
+> Bug: /mnt/storage owned by root but service runs as backupbuddy — storage pool
+> validation failed silently at startup (GUI never bound, only agent API started).
+> Fix: chown backupbuddy:backupbuddy /mnt/storage in install_gatekeeper.sh.
+> On phase-h snapshot, catalog.db had 67 synthetic test entries with real caps but
+> no actual Tahoe shares. Uploaded a fresh test file (35 KB) via TahoeClient.upload()
+> and inserted into catalog to create a real end-to-end restore scenario.
+> All five steps passed on anders (Tailscale IP 100.124.183.52).
 ```
 
 ---
