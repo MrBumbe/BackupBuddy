@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from gatekeeper.cluster.join import JoinAcceptResponse, JoinRequest, accept_join
+from gatekeeper.cluster.orphans import cleanup_orphans
 from gatekeeper.config import (
     ConfigError,
     GatekeeperConfig,
@@ -50,7 +51,7 @@ from gatekeeper.fragmenter.fragmenter import Fragmenter, derive_metadata_key
 from gatekeeper.fragmenter.profiles import get_profile
 from gatekeeper.fragmenter.queue_worker import UploadItem, UploadQueueWorker
 from gatekeeper.lifeboat.distributor import LifeboatDistributor
-from gatekeeper.storage.pool import PoolPathError, StoragePoolManager
+from gatekeeper.storage.pool import PoolPathError, StoragePoolManager, delete_fragment as _pool_delete_fragment
 from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
 from gatekeeper.tahoe.storage_node import StorageNode
@@ -123,8 +124,67 @@ async def _verify_stub() -> None:
     logger.info("Verify scheduler: pending implementation (task 1.13.2)")
 
 
+async def _orphan_cleanup_loop(
+    cluster_db: "ClusterDB",
+    tahoe_client: TahoeClient,
+    pool: StoragePoolManager,
+    config: "GatekeeperConfig",
+) -> None:
+    """Daily orphan fragment cleanup.
+
+    Waits one full interval before the first run so Tahoe is fully started
+    and the cluster has stabilised.  Runs every orphan_check_interval_seconds
+    thereafter.
+
+    Uses asyncio.to_thread to call the sync cleanup_orphans() function,
+    and bridges the async delete_fragment() call back to the main event loop
+    via run_coroutine_threadsafe so the httpx client stays on its own loop.
+    """
+    interval = config.maintenance.orphan_check_interval_seconds
+    logger.info("Orphan cleanup loop started — first run in %ds", interval)
+
+    while True:
+        await asyncio.sleep(interval)
+
+        logger.info("Orphan cleanup job started")
+        loop = asyncio.get_running_loop()
+
+        def _delete_fragment_sync(fragment_id: str) -> int:
+            # Called from a worker thread (via asyncio.to_thread).
+            # Dispatch async delete back to the main event loop so the
+            # httpx.AsyncClient runs on the loop it was created on.
+            future = asyncio.run_coroutine_threadsafe(
+                _pool_delete_fragment(tahoe_client, pool, fragment_id),
+                loop,
+            )
+            return future.result(timeout=300)
+
+        try:
+            result = await asyncio.to_thread(
+                cleanup_orphans,
+                cluster_db,
+                orphan_grace_days=config.maintenance.orphan_grace_days,
+                is_refrag_complete=lambda _: True,
+                delete_fragment=_delete_fragment_sync,
+            )
+            logger.info(
+                "Orphan cleanup complete: eligible=%d deleted=%d "
+                "skipped_grace=%d skipped_refrag=%d",
+                result["eligible"],
+                result["deleted"],
+                result["skipped_grace"],
+                result["skipped_refrag"],
+            )
+        except Exception:
+            logger.error("Orphan cleanup job failed", exc_info=True)
+
+
 def _register_background_tasks(
     lifeboat_distributor: LifeboatDistributor | None = None,
+    cluster_db: "ClusterDB | None" = None,
+    tahoe_client: TahoeClient | None = None,
+    pool: StoragePoolManager | None = None,
+    config: "GatekeeperConfig | None" = None,
 ) -> list[asyncio.Task]:
     tasks: list[asyncio.Task] = []
     tasks.append(asyncio.create_task(_watcher_stub(), name="watcher"))
@@ -134,6 +194,13 @@ def _register_background_tasks(
         )
     tasks.append(asyncio.create_task(_rebalance_stub(), name="rebalance"))
     tasks.append(asyncio.create_task(_verify_stub(), name="verify"))
+    if cluster_db is not None and tahoe_client is not None and pool is not None and config is not None:
+        tasks.append(
+            asyncio.create_task(
+                _orphan_cleanup_loop(cluster_db, tahoe_client, pool, config),
+                name="orphan_cleanup",
+            )
+        )
     return tasks
 
 
@@ -310,7 +377,13 @@ async def lifespan(app: FastAPI):
                     agent_token=config.agent_api.token,
                     interval_seconds=config.lifeboat.interval_seconds,
                 )
-            background_tasks = _register_background_tasks(lifeboat_distributor)
+            background_tasks = _register_background_tasks(
+                lifeboat_distributor,
+                cluster_db=cluster_db,
+                tahoe_client=tahoe_client,
+                pool=pool,
+                config=config,
+            )
             app.state.background_tasks = background_tasks  # keep refs to prevent GC
 
         # Expose shared state to route handlers (None in setup mode)

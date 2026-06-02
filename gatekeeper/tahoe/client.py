@@ -243,6 +243,22 @@ class TahoeClient:
         except Exception:
             return None
 
+    async def delete(self, file_ref: str) -> None:
+        """
+        Delete a file from the Tahoe grid.
+
+        Calls DELETE /uri/<ref> on the gateway node.  The gateway removes
+        the file cap; share-level cleanup is handled by Tahoe's garbage
+        collector.
+
+        Raises TahoeError if the operation fails (HTTP >= 400).
+        Does NOT silently ignore failures.
+        """
+        encoded_ref = urlquote(file_ref, safe="")
+        response = await self._http.delete(f"{self._node_url}/uri/{encoded_ref}")
+        _raise_for_tahoe_error(response, "delete")
+        logger.debug("Delete complete for ref (len=%d)", len(file_ref))
+
     async def link_file(
         self,
         dir_ref: str,

@@ -10,9 +10,12 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from gatekeeper.config import StoragePoolEntry
+
+if TYPE_CHECKING:
+    from gatekeeper.tahoe.client import TahoeClient
 
 logger = logging.getLogger(__name__)
 
@@ -147,3 +150,36 @@ class StoragePoolManager:
                 }
                 for entry in self._entries
             ]
+
+    def sync_usage(self) -> None:
+        """Re-scan all pool directories and refresh the in-memory usage counters.
+
+        Called after out-of-band deletions (e.g. orphan cleanup) to keep
+        the quota counter accurate without restarting.
+        """
+        with self._lock:
+            for entry in self._entries:
+                self._used_bytes[entry.path] = self._compute_used_bytes(entry.path)
+
+
+# ── Module-level helpers ──────────────────────────────────────────────────────
+
+async def delete_fragment(
+    tahoe: "TahoeClient",
+    pool: StoragePoolManager,
+    fragment_id: str,
+) -> int:
+    """Delete a fragment from the Tahoe grid and sync the pool quota.
+
+    Steps:
+      1. Snapshot current pool usage.
+      2. Call tahoe.delete(fragment_id) — raises TahoeError on failure.
+         Does NOT silently ignore failures.
+      3. Re-sync pool usage from the filesystem.
+      4. Return bytes freed (pre minus post usage across all pool paths).
+    """
+    usage_before = sum(e["used_bytes"] for e in pool.get_usage())
+    await tahoe.delete(fragment_id)
+    pool.sync_usage()
+    usage_after = sum(e["used_bytes"] for e in pool.get_usage())
+    return max(0, usage_before - usage_after)
