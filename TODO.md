@@ -3053,6 +3053,392 @@ would propagate the vote to all nodes so each user can vote from their own GUI.
 
 ---
 
+## 1.18 — User acceptance test: end-to-end simulation
+
+> **Goal:** Confirm that a real user can follow INSTALL.md from a blank VM, form a
+> three-node cluster, back up files, and restore them with verifiable checksums.
+>
+> **Method:** Act as three separate users (Anders, Björn, Carina) — each with their own
+> gatekeeper + agent on an isolated LAN — following INSTALL.md step by step, using SSH
+> only. No test scripts. No simulations. No auto-fill helpers. Every command typed as a
+> real user would type it.
+>
+> **Error policy:** All problems encountered are recorded in `tests/integration/1.18.1-issues.md`.
+> Nothing is fixed unless the error completely blocks progress. If a blocking fix is required:
+> fix it, record it in issues file under `BLOCKING FIX:`, then roll all nodes back to
+> `clean-ubuntu` and restart the test from the beginning.
+
+---
+
+### [ ] 1.18.1 — Three-user install-and-restore simulation (manual, SSH-only)
+
+> **Reads:** INSTALL.md, project-docs/onboarding.md
+>
+> **Prerequisite — Tailscale auth:**
+> The `clean-ubuntu` Proxmox snapshots (taken 2026-05-30) have Tailscale installed and
+> authenticated. After rollback, `tailscale status` should show the node as connected.
+> If the machine key has expired or been revoked, this task cannot start until Johan
+> provides a **reusable (non-ephemeral) Tailscale auth key** from the Tailscale admin panel
+> at tailscale.com/admin — one key covers all three gatekeepers.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+> All VM and LXC operations go through this host.
+
+---
+
+#### A. Infrastructure setup
+
+**A1 — Roll back all six nodes to `clean-ubuntu`:**
+
+Run on Proxmox (192.168.1.60):
+
+```bash
+# Gatekeepers (QEMU VMs — stop, rollback, start)
+for vmid in 101 102 103; do
+  qm stop $vmid --skiplock 1
+  sleep 3
+  qm rollback $vmid clean-ubuntu
+  qm start $vmid
+done
+
+# Agent containers (LXC)
+for ctid in 301 302 303; do
+  pct stop $ctid
+  sleep 2
+  pct rollback $ctid clean-ubuntu
+  pct start $ctid
+done
+```
+
+Verify all six are running:
+
+```bash
+qm status 101; qm status 102; qm status 103
+pct status 301; pct status 302; pct status 303
+```
+
+**A2 — Node layout for this test:**
+
+| User | Role | VM/LXC ID | Hostname | LAN IP | Tailscale IP |
+|------|------|-----------|----------|--------|-------------|
+| Anders | Gatekeeper | VM 101 | gatekeeper-anders | 10.99.0.11 | resolve with `tailscale ip -4` after rollback |
+| Björn | Gatekeeper | VM 102 | gatekeeper-bjorn | 10.99.0.12 | resolve with `tailscale ip -4` after rollback |
+| Carina | Gatekeeper | VM 103 | gatekeeper-carina | 10.99.0.13 | resolve with `tailscale ip -4` after rollback |
+| Anders | Agent | LXC 301 | agent-anders-pc | 10.99.0.31 | n/a (no Tailscale on agents) |
+| Björn | Agent | LXC 303 | agent-bjorn-pc | 10.99.0.33 | n/a |
+| Carina | Agent | LXC 302 | agent-anders-nas | 10.99.0.32 | n/a (repurposed as Carina's agent for this test) |
+
+> Note: All six nodes share the same 10.99.0.x Proxmox bridge. True VLAN isolation
+> (separate vmbr per user) is desirable for realism but would require Proxmox network
+> reconfiguration. For this test, logical isolation is enforced by configuration: each
+> agent's `backup.cfg` points only to its own gatekeeper's LAN IP. If Proxmox network
+> reconfiguration is feasible, add separate bridges vmbr1/vmbr2/vmbr3 as a follow-up.
+
+**A3 — Verify Tailscale after rollback:**
+
+SSH to each gatekeeper and confirm Tailscale is connected:
+
+```bash
+ssh gk-anders "tailscale status"
+ssh gk-bjorn  "tailscale status"
+ssh gk-carina "tailscale status"
+```
+
+Expected: each shows the node as online with a 100.x.x.x address. If any show
+"Logged out", stop — the Tailscale machine key has expired. Ask Johan for a reusable
+auth key, then run `sudo tailscale up --auth-key=<key>` on the affected node(s).
+
+Record actual Tailscale IPs for later steps:
+
+```bash
+ssh gk-anders "tailscale ip -4"   # e.g. 100.64.235.77
+ssh gk-bjorn  "tailscale ip -4"
+ssh gk-carina "tailscale ip -4"
+```
+
+---
+
+#### B. Download test files (on the Proxmox host or Anders's agent)
+
+All test files are placed on the **agent machines** inside `/home/testuser/backup-test/`.
+They are downloaded once (on the Proxmox host to save time) and then copied via `pct push`
+or `scp` to the agent containers.
+
+Download a representative mix of file types — at least two of each:
+
+- **`.jpg`** — public domain photos, at least 5 MB each (e.g. from Wikimedia Commons)
+- **`.zip`** — a moderately large archive (50–200 MB)
+- **`.iso`** — a small Linux ISO (200–700 MB; avoid full desktop ISOs)
+- **`.docx`** — sample word-processor documents (1–10 MB)
+
+After download, record SHA-256 checksums **before** any backup:
+
+```bash
+sha256sum /tmp/testfiles/*.jpg /tmp/testfiles/*.zip \
+          /tmp/testfiles/*.iso /tmp/testfiles/*.docx \
+  | tee /tmp/checksums_before.txt
+```
+
+Copy files to each user's agent container so all three users have data to back up.
+Use different subsets per user to test cross-node restore later:
+
+- Anders's agent (LXC 301): all .jpg and .iso files
+- Björn's agent (LXC 303): all .zip files and one .docx
+- Carina's agent (LXC 302): remaining .docx files and one .jpg
+
+---
+
+#### C. Install and configure — Anders (VM 101 + LXC 301)
+
+Follow INSTALL.md sections 3–5 exactly. Every command below mirrors the guide.
+
+**C1 — SSH to Anders's gatekeeper:**
+
+```bash
+ssh gk-anders
+```
+
+**C2 — Install BackupBuddy gatekeeper (INSTALL.md §3):**
+
+```bash
+curl -sSL https://get.backupbuddy.io | sudo bash
+```
+
+Wait for the installer to complete. Note the LAN IP it prints and confirm the service
+is shown as running.
+
+**C3 — Connect Tailscale (INSTALL.md §3a):**
+
+```bash
+sudo tailscale up
+```
+
+If the node was already authenticated (rollback preserved auth state), this command
+returns immediately with no URL. If a URL is printed, open it in a browser, log in,
+and return here. Record whether interactive auth was needed.
+
+**C4 — Open the setup wizard:**
+
+From any browser on the 10.99.0.x network, open `http://10.99.0.11:8080`.
+If the wizard does not load, note it in the issues file and try `hostname -I`
+on the gatekeeper to find the correct LAN IP.
+
+**C5 — Complete the wizard (INSTALL.md §4):**
+
+- Step 1: **Start a new cluster**
+- Step 2: Node ID `anders-home`, display name `Anders home node`
+- Step 3: Storage path `/mnt/buddy-storage`, quota `50` GB
+- Step 4: Profile **Adaptive** (default)
+- Step 5: Skip notification email. Passphrase: choose a passphrase, write it down.
+- Finish: Download `recovery-kit.enc`, save it. Click "I have saved my recovery key".
+- Record the **invite code** shown (e.g. `kaffe-trumpet-7`).
+- Record the **Tailscale address** shown (e.g. `http://100.64.235.77:8080`).
+
+**C6 — Install the agent on LXC 301 (INSTALL.md §5):**
+
+```bash
+ssh agent-anders-pc
+curl -sSL https://get.backupbuddy.io/agent | sudo bash
+# Answer: gatekeeper IP = 10.99.0.11, agent name = anders-laptop
+```
+
+Edit backup paths:
+
+```bash
+sudo nano /etc/backup-buddy/backup.cfg
+# Add under [backup]:
+# /home/testuser/backup-test
+```
+
+Copy agent token to Anders's gatekeeper (INSTALL.md §5b):
+
+```bash
+# On agent: find the token
+sudo grep token /etc/backup-buddy/backup.cfg
+
+# On gatekeeper: paste token
+ssh gk-anders "sudo nano /etc/backup-buddy/gatekeeper.cfg"
+# Update [agent_api] token = <token>
+ssh gk-anders "sudo systemctl restart backup-buddy-gatekeeper"
+
+# Start the agent
+sudo systemctl start backup-buddy-agent
+```
+
+---
+
+#### D. Install and configure — Björn (VM 102 + LXC 303)
+
+Repeat the same steps as section C, with:
+- Node ID: `bjorn-home`, display name: `Björn home node`
+- Storage path: `/mnt/buddy-storage`, quota `50` GB
+- Agent LXC: 303 (`ssh agent-bjorn-pc`), gatekeeper IP: `10.99.0.12`
+- Agent name: `bjorn-laptop`
+
+In the wizard, Björn selects **"Join an existing cluster"** and enters:
+- Anders's invite code (from C5)
+- Anders's Tailscale address (from C5, e.g. `http://100.64.235.77:8080`)
+
+Record whether both nodes appear in each other's dashboard after Björn joins.
+
+---
+
+#### E. Install and configure — Carina (VM 103 + LXC 302)
+
+Repeat the same steps, with:
+- Node ID: `carina-home`, display name: `Carina home node`
+- Storage path: `/mnt/buddy-storage`, quota `50` GB
+- Agent LXC: 302 (`ssh agent-anders-nas`, repurposed), gatekeeper IP: `10.99.0.13`
+- Agent name: `carina-laptop`
+
+Anders must generate a **new invite code** from his dashboard (Buddies page)
+before Carina can join. Carina selects "Join an existing cluster" and uses that code
+and Anders's Tailscale address.
+
+Record whether all three nodes appear online in each other's dashboards.
+
+---
+
+#### F. Wait for backups and verify
+
+**F1 — Watch agent logs on each agent container:**
+
+```bash
+ssh agent-anders-pc  "journalctl -u backup-buddy-agent -f"
+ssh agent-bjorn-pc   "journalctl -u backup-buddy-agent -f"
+ssh agent-anders-nas "journalctl -u backup-buddy-agent -f"  # Carina's agent
+```
+
+Wait until each agent shows `SUCCESS` entries for all test files.
+
+**F2 — Check gatekeeper dashboards:**
+
+Open each gatekeeper's Tailscale dashboard URL. Confirm:
+- "Last backup" shows a recent timestamp
+- "Files backed up" is non-zero
+
+---
+
+#### G. Restore and verify checksums
+
+**G1 — Restore from Anders's dashboard:**
+
+Open `http://<anders-tailscale-ip>:8080` → Restore.
+Restore each of Anders's test files to `/tmp/restored/anders/` on the gatekeeper.
+
+**G2 — Restore from Björn's dashboard:**
+
+Open Björn's dashboard. Restore Björn's test files to `/tmp/restored/bjorn/`.
+
+**G3 — Restore from Carina's dashboard:**
+
+Open Carina's dashboard. Restore Carina's test files to `/tmp/restored/carina/`.
+
+**G4 — Compute checksums after restore:**
+
+On each gatekeeper:
+
+```bash
+ssh gk-anders  "sha256sum /tmp/restored/anders/*"
+ssh gk-bjorn   "sha256sum /tmp/restored/bjorn/*"
+ssh gk-carina  "sha256sum /tmp/restored/carina/*"
+```
+
+Compare against `/tmp/checksums_before.txt`. Every hash must match.
+
+---
+
+#### H. Manual test checklist
+
+Run through every item. Mark PASS / FAIL / N/A. Add notes to the issues file for
+every FAIL.
+
+**Installation:**
+- [ ] Installer completes without errors on fresh Ubuntu 24.04
+- [ ] `backup-buddy-gatekeeper` service is `active (running)` after install
+- [ ] Wizard is reachable at `http://<LAN-IP>:8080` before Tailscale is configured
+- [ ] `sudo tailscale up` connects without requiring a new browser auth (rollback preserved state)
+- [ ] Wizard completes all five steps without error
+- [ ] `recovery-kit.enc` download works and produces a non-empty file
+- [ ] Invite code is generated and displayed after wizard completes
+- [ ] Dashboard switches to Tailscale address after wizard completes
+- [ ] Dashboard is **not** reachable on the LAN IP after Tailscale binds (security check)
+
+**Cluster formation:**
+- [ ] Björn can join using Anders's invite code and Tailscale address
+- [ ] Carina can join using a freshly generated second invite code
+- [ ] All three nodes appear as **Online** in Anders's dashboard
+- [ ] All three nodes appear as **Online** in Björn's dashboard
+- [ ] All three nodes appear as **Online** in Carina's dashboard
+- [ ] Reusing an expired invite code produces an error message, not a silent failure
+
+**Agent:**
+- [ ] Agent installer asks for gatekeeper IP and agent name interactively
+- [ ] `backup-buddy-agent` service starts successfully
+- [ ] Agent appears in its gatekeeper's dashboard after token is copied
+- [ ] Editing `backup.cfg` and restarting the agent picks up the new folders
+- [ ] Agent log shows `SUCCESS` for each backed-up file
+
+**Backup integrity:**
+- [ ] All `.jpg` test files backed up successfully
+- [ ] All `.zip` test files backed up successfully
+- [ ] All `.iso` test files backed up successfully
+- [ ] All `.docx` test files backed up successfully
+- [ ] No `FAILED` entries in any agent log for the test files
+
+**Restore and checksums:**
+- [ ] Single-file restore completes without error
+- [ ] Restored `.jpg` SHA-256 matches original
+- [ ] Restored `.zip` SHA-256 matches original
+- [ ] Restored `.iso` SHA-256 matches original
+- [ ] Restored `.docx` SHA-256 matches original
+- [ ] Restoring a folder (not a single file) completes without error
+- [ ] Restored files land in the correct destination folder on the gatekeeper
+
+**Resilience (basic):**
+- [ ] Stopping **one** gatekeeper (simulate node failure) and restoring from the other two still succeeds
+- [ ] Bring the stopped gatekeeper back up — it reconnects and dashboard shows it Online
+
+**UI and UX:**
+- [ ] Dashboard shows an obvious error or warning if an agent has not sent data for > 1 hour
+- [ ] Recovery kit re-download is accessible from the dashboard after wizard completes
+- [ ] Navigating the dashboard without any data causes no crashes or blank pages
+- [ ] All button clicks in the wizard produce visible feedback within 3 seconds
+
+---
+
+#### I. Error worklist
+
+**File:** `tests/integration/1.18.1-issues.md`
+
+Format for each issue:
+
+```
+## ISSUE-001
+Step: C2 (install)
+Symptom: Installer exited with status 1 — "curl: command not found"
+Blocking: yes / no
+Fix applied (if blocking): installed curl with apt, restarted test from A1
+```
+
+Create the file at the start of the test, even if empty. Update it throughout.
+
+---
+
+#### Done when:
+
+- All six nodes installed and cluster formed ✓
+- All test files backed up with `SUCCESS` in agent logs ✓
+- All restore checksums match originals ✓
+- Manual checklist completed (all items PASS or documented in issues file) ✓
+- `tests/integration/1.18.1-issues.md` committed with all encountered problems ✓
+- This task marked `[x]` with a kludde block summarising what passed, what failed,
+  and how many blocking fixes were required ✓
+
+---
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
