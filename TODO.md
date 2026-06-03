@@ -3474,6 +3474,433 @@ Create the file at the start of the test, even if empty. Update it throughout.
 
 ---
 
+### [ ] 1.18.2 — INSTALL.md: replace placeholder install URL with working command
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-005
+> **Reads:** `INSTALL.md`, `install/gatekeeper.sh`
+
+`INSTALL.md §3` tells the user to run `curl -sSL https://get.backupbuddy.io | sudo bash`.
+That hostname does not exist — the very first command a new user runs fails with
+`curl: (6) Could not resolve host: get.backupbuddy.io`.
+
+**Requirements:**
+
+Replace the install command in `INSTALL.md §3` with the working GitHub-based procedure:
+
+```bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/gatekeeper.sh
+```
+
+Add a note that `git` must be installed (`sudo apt-get install -y git` if absent).
+If and when `get.backupbuddy.io` is ever registered and hosted, revert to the
+one-liner — but do not document a URL that does not work.
+
+**Done when:**
+- `INSTALL.md §3` contains no reference to `get.backupbuddy.io` ✓
+- The documented install command works on a fresh Ubuntu 24.04 machine ✓
+
+---
+
+### [ ] 1.18.3 — Wizard: auto-create and chown storage path on step 3
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-006, ISSUE-007
+> **Reads:** `gatekeeper/gui/routes/wizard.py`, `INSTALL.md`
+
+Two compounding failures on wizard step 3 (storage path):
+
+1. **ISSUE-006:** INSTALL.md says "This folder will be created for you if it does not
+   exist" — but the wizard rejects a non-existent path with "Path does not exist".
+2. **ISSUE-007:** Even after the user creates the directory as root, the wizard rejects
+   it with "Path is not writable" because `backupbuddy` (uid=999) has no write access
+   to a root-owned 0755 directory.
+
+A user following INSTALL.md hits both errors in sequence before the step works.
+
+**Requirements:**
+
+In the wizard step 3 handler (`wizard.py`), when a submitted path does not exist:
+- Attempt to create it with `os.makedirs(path, exist_ok=True)`
+- Immediately `chown` it to the `backupbuddy` user (uid=999 / gid=999)
+- If creation fails (e.g. parent is not writable by the service), return a clear
+  error: "Could not create directory `<path>`. Create it manually and ensure it
+  is writable by the backup service."
+
+When the path does exist but is not writable by the service user:
+- Attempt `os.chown(path, 999, 999)` (service runs as root during startup)
+- If chown also fails, return a specific error rather than the generic "not writable".
+
+Update `INSTALL.md §4 Step 3` to remove the false "created for you" claim.
+Replace with: "Enter the path where BackupBuddy will store fragments. The directory
+will be created automatically if it does not exist."
+
+**Done when:**
+- Wizard step 3 accepts a non-existent path and creates + chowns it ✓
+- Wizard step 3 accepts a root-owned 0755 directory and chowns it ✓
+- `INSTALL.md §4 Step 3` no longer contains the false claim ✓
+- Integration test on a fresh VM confirms both paths work ✓
+
+---
+
+### [ ] 1.18.4 — Wizard: change default erasure profile to 'adaptive'; fix INSTALL.md
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-008
+> **Reads:** `gatekeeper/gui/routes/wizard.py`, `gatekeeper/gui/templates/wizard.html`,
+>   `INSTALL.md`
+
+`INSTALL.md §4 Step 4` says "leave this set to Adaptive (the default)" but the
+wizard pre-selects **balanced**, not adaptive. A user who follows the guide
+literally ends up with the wrong profile without realising it.
+
+**Requirements:**
+
+Option A (preferred): Change the wizard's default selection for the profile field
+from `balanced` to `adaptive` in both the route handler and the HTML template.
+Update `INSTALL.md §4 Step 4` to match ("leave this set to Adaptive (the default)").
+
+Option B (if adaptive cannot be the default for a design reason): Update `INSTALL.md §4
+Step 4` to say "leave this set to Balanced (the default)" and remove the mention of
+adaptive as the default. Add a note explaining when a user might choose adaptive.
+
+Pick option A unless there is an existing ADR or design decision that prevents it.
+
+**Done when:**
+- Wizard step 4 pre-selects the same profile that INSTALL.md describes as default ✓
+- `INSTALL.md §4 Step 4` matches the wizard's actual default ✓
+
+---
+
+### [ ] 1.18.5 — Installer: verify venv integrity after force-reinstall step
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-004
+> **Reads:** `install/gatekeeper.sh`
+
+After `pip install -e` for the Tahoe-LAFS fork, the installer runs
+`pip install --force-reinstall -r requirements.txt` to replace stub files.
+If this step fails partway (network blip, disk pressure, SIGKILL), some stubs remain
+as 0-byte files. The gatekeeper service then crashes at startup with an unhelpful
+`ImportError` — there is no indication at install time that anything went wrong.
+
+**Requirements:**
+
+At the end of `setup_venv()` in `install/gatekeeper.sh`, after the force-reinstall
+step, add a check:
+
+```bash
+zero_byte_files=$(find /opt/backup-buddy/.venv/lib -name "*.py" -size 0 2>/dev/null)
+if [ -n "$zero_byte_files" ]; then
+  echo "ERROR: venv integrity check failed — 0-byte .py files found:"
+  echo "$zero_byte_files"
+  echo "Re-run this installer to fix."
+  exit 1
+fi
+echo "Venv integrity check passed."
+```
+
+If any 0-byte `.py` files are found, the installer must exit with a non-zero status
+and a clear message. Do not silently continue — a user who hits this will end up with
+a gatekeeper that fails to start with a confusing Python import error.
+
+**Done when:**
+- Installer exits with an error and prints the offending file paths if 0-byte stubs remain ✓
+- Installer prints "Venv integrity check passed" when all stubs were replaced ✓
+- Manually verifiable: create a dummy 0-byte `.py` in the venv and confirm the check catches it ✓
+
+---
+
+### [ ] 1.18.6 — INSTALL.md: document non-interactive agent install for LXC / no-TTY
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-010
+> **Reads:** `INSTALL.md`, `install/agent.sh`
+
+`install/agent.sh` tries to open `/dev/tty` for interactive input (line 146:
+`exec 3</dev/tty`). Inside an LXC container without a real TTY this fails with:
+`/dev/tty: No such device or address`. The script supports non-interactive mode via
+`BB_GATEKEEPER_IP` and `BB_AGENT_NAME` environment variables, but `INSTALL.md §5`
+does not mention this.
+
+**Requirements:**
+
+In `INSTALL.md §5` (agent installation), add a note immediately after the standard
+install command:
+
+> **Running in a container or over SSH without a TTY?**
+> Pass the required values as environment variables to skip interactive prompts:
+> ```bash
+> BB_GATEKEEPER_IP=<gatekeeper-ip> BB_AGENT_NAME=<name> sudo -E bash install/agent.sh
+> ```
+> `BB_GATEKEEPER_IP` — the LAN IP of this agent's gatekeeper (e.g. `10.99.0.11`)
+> `BB_AGENT_NAME` — a short name for this machine (e.g. `anders-laptop`)
+
+No code changes required — the env var path already exists in `agent.sh`.
+
+**Done when:**
+- `INSTALL.md §5` documents `BB_GATEKEEPER_IP` and `BB_AGENT_NAME` ✓
+- The note appears before any step that could fail in a no-TTY environment ✓
+
+---
+
+### [ ] 1.18.7 — INSTALL.md: show complete required backup.cfg [gatekeeper] section
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-011
+> **Reads:** `INSTALL.md`, `agent/config.py`
+
+`INSTALL.md §5a` tells users to edit `backup.cfg` and add paths under `[backup]`.
+It does not show the required `[gatekeeper]` fields: `token`, `name`, and
+`lifeboat_path`. When a user reconstructs or edits the file manually, the agent
+crashes:
+```
+CRITICAL — Configuration error: [gatekeeper] 'token' is required
+CRITICAL — Configuration error: [gatekeeper] 'name' is required
+```
+
+**Requirements:**
+
+In `INSTALL.md §5a`, replace the partial backup.cfg snippet with a complete example
+showing every required section and field:
+
+```ini
+[schedule]
+full_scan = 24h
+stability_minutes = 1
+
+[backup]
+/home/username/documents
+/home/username/photos
+
+[exclude]
+
+[node]
+share_log = false
+
+[gatekeeper]
+url = http://<gatekeeper-ip>:8081
+token = <token-from-gatekeeper-dashboard>
+name = <this-machine-name>
+lifeboat_path = /etc/backup-buddy/lifeboat.enc
+
+[lifeboat_server]
+enabled = true
+port = 8082
+```
+
+Add a note that `name` must be unique within the cluster, and that `token` is found
+in the gatekeeper dashboard under Settings → Agent token.
+
+Consider also making `name` default to the system hostname in `agent/config.py`
+if the field is absent — reducing the number of required fields a user must set.
+
+**Done when:**
+- `INSTALL.md §5a` shows a complete backup.cfg with all required fields ✓
+- A fresh manual edit following the guide starts the agent without config errors ✓
+
+---
+
+### [ ] 1.18.8 — Cluster: push updated member list to all peers when a new node joins
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-009
+> **Reads:** `gatekeeper/cluster/`, `gatekeeper/db/cluster_db.py`,
+>   `DECISIONS.md` (ADR-021 — vote propagation, same pattern)
+
+When a new node joins via the introducer, the introducer's member list is updated
+and the new node receives the full list. However, existing members (e.g. Björn) are
+not notified — their member count stays stale until they restart or query the
+introducer themselves. In the test, Björn showed 2/3 members throughout the entire
+session with no self-healing.
+
+**Requirements:**
+
+After a successful join handshake (in the introducer's join handler), push the updated
+member list to all currently-known peers using the same pattern as ADR-021's vote
+propagation (`gatekeeper/cluster/propagate.py` or equivalent):
+
+```python
+async def on_node_joined(new_member: ClusterMember, all_members: list[ClusterMember]):
+    # Notify all existing members of the new member list
+    for peer in all_members:
+        if peer.node_id == new_member.node_id:
+            continue  # new member already has the full list
+        await push_member_list(peer, all_members)
+```
+
+The receiving end must accept a member-list push and update `cluster.db` accordingly.
+
+Add a periodic reconciliation fallback (e.g. every 5 minutes): each node polls the
+introducer for the current member list and updates local state if it differs. This
+ensures eventual consistency even if a push is lost.
+
+**Done when:**
+- After a new node joins, all existing members' dashboards show the updated count
+  within 10 seconds ✓
+- If the push fails (peer offline), the periodic reconciliation catches up within
+  5 minutes ✓
+- Unit test: mock a 3-node cluster, simulate a join, assert all nodes receive the
+  updated list ✓
+
+---
+
+### [ ] 1.18.9 — Restore: handle directory dest_path; surface actionable error messages
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-012
+> **Reads:** `gatekeeper/restore/restore.py`, `gatekeeper/gui/routes/restore.py`
+
+Two issues found during restore testing:
+
+1. **dest_path directory semantics:** The restore API uses `dest_path` as the exact
+   output file path. If the caller passes an existing directory, `os.rename()` fails
+   with `PermissionError (EACCES)` or `IsADirectoryError`. Users expect `cp`-like
+   behaviour: if `dest_path` is a directory, write the file inside it with the
+   original filename.
+
+2. **Opaque error message:** Any restore failure surfaces as
+   "Restore failed. Check the gatekeeper log for details." — not actionable for users
+   who cannot read the server logs.
+
+**Requirements:**
+
+In `restore.py → _safe_move()` (or wherever the rename occurs):
+- Before the rename, check `if os.path.isdir(dest_path)`: if true, append the
+  original filename: `dest_path = os.path.join(dest_path, original_filename)`.
+- If the rename still fails with `PermissionError`, catch it and raise a
+  `RestoreError` with a human-readable message:
+  "Cannot write to `<dest_path>`: permission denied. Ensure the destination is
+  writable by the backup service user."
+
+In `restore.py → _run()` (the route handler), propagate `RestoreError.message`
+into the job's `error` field rather than the generic fallback string. The API
+response for a failed job should already return this field — just ensure it is
+populated with the specific cause.
+
+**Done when:**
+- `POST /api/restore/start/file` with a directory `dest_path` writes the file
+  inside that directory with the original filename ✓
+- A failed restore due to permissions returns the specific error message in the
+  API response `error` field ✓
+- Unit tests cover: dest_path is a file path, dest_path is a directory,
+  dest_path is unwritable ✓
+
+---
+
+### [ ] 1.18.10 — Tahoe client: cache storage server addresses to survive introducer loss
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-013
+> **Reads:** `gatekeeper/tahoe/client.py`, `gatekeeper/tahoe/storage_node.py`,
+>   DECISIONS.md (ADR for introducer SPOF, task 1.17.12)
+> **Depends on:** 1.17.12 (introducer SPOF documentation) being complete
+
+When the introducer node goes offline, Tahoe clients on other nodes lose all grid
+connectivity — even though their local storage nodes and peer storage nodes are still
+running. All download attempts return HTTP 410 (Gone) because the Tahoe client
+cannot locate any shares without a live introducer connection.
+
+The root cause: Tahoe-LAFS clients discover storage servers via the introducer at
+connection time and do not persist that list. When the introducer is unreachable,
+the client's server list is empty.
+
+**Requirements:**
+
+After the Tahoe client connects to the grid and receives the list of available
+storage servers from the introducer, persist that list locally:
+
+- Write the server FURLs to a cache file (e.g.
+  `/var/lib/backup-buddy/tahoe/client/server_cache.json`) after each successful
+  introducer contact.
+- On startup, if the introducer is unreachable within a timeout (e.g. 10 s), load
+  the cached server list and inject it into the Tahoe client's server pool so that
+  downloads can proceed against known-good peers.
+- Log a visible warning when operating from cache: "Introducer unreachable —
+  operating from cached server list (N servers). Uploads may be incomplete."
+
+This does not eliminate the introducer SPOF for uploads (new shares must go somewhere
+the introducer can record), but it allows downloads to work as long as enough cached
+servers hold the required shares.
+
+Note: the server cache must not store share caps or any secret material — only the
+server FURLs (which are already semi-public within the cluster).
+
+**Done when:**
+- After the introducer is stopped, a download from a peer node that has a cached
+  server list succeeds (HTTP 200, correct file returned) ✓
+- The warning message appears in the gatekeeper log when operating from cache ✓
+- Integration test on Proxmox: stop Anders (introducer), trigger restore on Björn,
+  verify restore succeeds using cached server addresses ✓
+
+---
+
+### [ ] 1.18.11 — Test infra: retake clean-ubuntu snapshot for VM 101 with Tailscale authenticated
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-001, ISSUE-003
+> **Reads:** `tests/integration/1.18.1-issues.md`
+
+VM 101 (gatekeeper-anders) has no `clean-ubuntu` snapshot. The oldest available
+snapshot (`phase-a`) was taken before Tailscale was authenticated on that node,
+requiring a manual re-auth with a pre-auth key at the start of every test run.
+VMs 102, 103, and all three LXCs already have `clean-ubuntu` snapshots.
+
+**Requirements:**
+
+On Proxmox (192.168.1.60):
+
+1. Ensure VM 101 is at a known good baseline: BackupBuddy installed, Tailscale
+   authenticated and connected (`tailscale status` shows the node online with a
+   100.x.x.x address), wizard **not** yet run.
+2. Stop the VM cleanly:
+   ```bash
+   qm stop 101 --skiplock 1
+   ```
+3. Create the snapshot:
+   ```bash
+   qm snapshot 101 clean-ubuntu --description "Clean baseline: BB installed, Tailscale authenticated, wizard not run"
+   ```
+4. Start the VM and verify it comes up with Tailscale connected.
+
+After this, all six nodes will roll back to a consistent `clean-ubuntu` baseline for
+future test runs, matching the prerequisite in task 1.18.1.
+
+**Done when:**
+- `qm listsnapshot 101` shows a `clean-ubuntu` snapshot ✓
+- After rolling VM 101 back to `clean-ubuntu`, `tailscale status` shows the node
+  connected without any manual intervention ✓
+
+---
+
+### [ ] 1.18.12 — Test procedure: add SSH known_hosts pre-cleanup to 1.18.1
+
+> **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-002
+> **Reads:** `TODO.md §1.18.1 — Step A1`
+
+Every time nodes are rolled back to a snapshot, their SSH host keys change. The
+operator's `~/.ssh/known_hosts` retains the previous keys, causing
+"WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!" and blocking SSH access until
+the stale entries are removed manually. This hits at the very start of every re-run.
+
+**Requirements:**
+
+In `TODO.md §1.18.1`, add an explicit sub-step to the rollback section (Step A1),
+immediately after the VMs and containers are started:
+
+```
+**A1a — Clear stale SSH host keys:**
+
+After rollback, run on the operator machine:
+```bash
+for ip in 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33; do
+  ssh-keygen -R $ip
+done
+ssh-keyscan -H 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33 \
+  >> ~/.ssh/known_hosts
+```
+This avoids the "Host key verification failed" error caused by key rotation on rollback.
+```
+
+No code changes required — this is a test procedure update only.
+
+**Done when:**
+- `TODO.md §1.18.1 Step A1` includes the known_hosts cleanup sub-step ✓
+- A test re-run from snapshots reaches Step A2 without any SSH key errors ✓
+
+---
+
 ---
 
 # Phase 2 — Maturity
