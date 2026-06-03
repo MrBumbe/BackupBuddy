@@ -19,7 +19,7 @@ rebuild it from scratch using a recovery key you saved when you first set up.
 - A computer, virtual machine, or small server (e.g. Proxmox VM, a spare PC, a NUC)
 - **Operating system:** Ubuntu 22.04 or Ubuntu 24.04 — no other OS is supported
 - **RAM:** 1 GB minimum, 2 GB recommended
-- **CPU:** Any 64-bit processor
+- **CPU:** Any 64-bit processor — x86-64 or ARM64 (e.g. Raspberry Pi 4 or 5 running Ubuntu arm64)
 - **Storage (two separate parts):**
   - A small system disk: 20 GB for the OS and BackupBuddy itself
   - A larger disk or folder where your buddy's encrypted data will be stored (at least 10 GB,
