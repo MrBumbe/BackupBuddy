@@ -3070,7 +3070,7 @@ would propagate the vote to all nodes so each user can vote from their own GUI.
 
 ---
 
-### [ ] 1.18.1 — Three-user install-and-restore simulation (manual, SSH-only)
+### [x] 1.18.1 — Three-user install-and-restore simulation (manual, SSH-only)
 
 > **Reads:** INSTALL.md, project-docs/onboarding.md
 >
@@ -3434,6 +3434,43 @@ Create the file at the start of the test, even if empty. Update it throughout.
 - `tests/integration/1.18.1-issues.md` committed with all encountered problems ✓
 - This task marked `[x]` with a kludde block summarising what passed, what failed,
   and how many blocking fixes were required ✓
+
+---
+
+> **Kludde — test run 2026-06-03**
+>
+> **Overall result:** PASS with findings — all core flows work, two design gaps logged.
+>
+> **What passed:**
+> - All 3 gatekeepers installed and cluster formed (Anders as introducer, Björn and Carina joined)
+> - All 8 test files backed up without error (4× Anders, 2× Björn, 2× Carina)
+> - All 8 restored file SHA256 checksums match originals exactly (cross-checked against
+>   pre-backup reference file on Proxmox)
+> - File types covered: .iso (217 MB), .jpg (×4), .zip (934 KB), .docx (×2)
+> - Stopped gatekeeper (Anders) restarts and comes back active
+>
+> **What failed / was not confirmed:**
+> - **Resilience (ISSUE-013):** Stopping the introducer (Anders) causes all Tahoe downloads
+>   to fail with HTTP 410 on the remaining nodes — cluster is not resilient to introducer loss.
+>   This is a significant design gap.
+> - **Member list propagation (ISSUE-009):** Björn's dashboard showed 2/3 members throughout
+>   the entire test. No self-healing observed after 2+ hours. Carina's join was never pushed
+>   to Björn.
+> - **Folder restore:** not tested — API only exercised via single-file endpoint; no
+>   `/api/restore/start/folder` test performed.
+> - **Dashboard UX items** (agent-offline warning, recovery kit re-download, wizard timing):
+>   observed as functional but not formally ticked off against the checklist.
+>
+> **Blocking fixes (4 — none required test restart):**
+> 1. ISSUE-002: SSH host key rotation after snapshot rollback (Kludde-only)
+> 2. ISSUE-003: Tailscale logged out on VM 101 phase-a snapshot (Kludde-only)
+> 3. ISSUE-004: uvicorn basereload.py 0-byte stub — re-ran installer (idempotent)
+> 4. ISSUE-005: `get.backupbuddy.io` DNS does not exist — used GitHub clone instead
+>
+> **Non-blocking issues:** 9 (ISSUE-001, -006, -007, -008, -009, -010, -011, -012, -013)
+>
+> **Total issues logged:** 13
+> Full worklist: `tests/integration/1.18.1-issues.md`
 
 ---
 
