@@ -228,13 +228,37 @@ Open the agent configuration file in a text editor:
 sudo nano /etc/backup-buddy/backup.cfg
 ```
 
-Find the `[backup]` section and add your folders, one per line:
+Replace the file contents with the complete example below, filling in your own values:
 
 ```ini
+[schedule]
+full_scan = 24h
+stability_minutes = 1
+
 [backup]
 /home/yourname/documents
 /home/yourname/pictures
+
+[exclude]
+
+[node]
+share_log = false
+
+[gatekeeper]
+url = http://<gatekeeper-ip>:8081
+token = <token-from-gatekeeper-dashboard>
+name = <this-machine-name>
+lifeboat_path = /etc/backup-buddy/lifeboat.enc
+
+[lifeboat_server]
+enabled = true
+port = 8082
 ```
+
+- `url` — replace `<gatekeeper-ip>` with your gatekeeper's local IP (e.g. `192.168.1.50`).
+- `token` — found in the gatekeeper dashboard under **Settings → Agent token**.
+- `name` — a short, unique name for this machine within the cluster (e.g. `anders-laptop`).
+  Each agent in the cluster must have a different name.
 
 Save the file (in nano: press `Ctrl+O`, then Enter, then `Ctrl+X`).
 

@@ -3669,7 +3669,7 @@ No code changes required — the env var path already exists in `agent.sh`.
 
 ---
 
-### [ ] 1.18.7 — INSTALL.md: show complete required backup.cfg [gatekeeper] section
+### [x] 1.18.7 — INSTALL.md: show complete required backup.cfg [gatekeeper] section
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-011
 > **Reads:** `INSTALL.md`, `agent/config.py`

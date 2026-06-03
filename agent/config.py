@@ -8,6 +8,7 @@ import configparser
 import fnmatch
 import os
 import re
+import socket
 import threading
 import time as _time
 from pathlib import Path
@@ -160,13 +161,14 @@ def _parse_ini(parser: configparser.ConfigParser) -> AgentConfig:
 
     # [gatekeeper] — required
     gk_raw = sec("gatekeeper")
-    for required_key in ("url", "token", "name"):
+    for required_key in ("url", "token"):
         if not gk_raw.get(required_key):
             raise ConfigError(f"[gatekeeper] {required_key!r} is required")
+    agent_name = gk_raw.get("name") or socket.gethostname()
     gatekeeper = GatekeeperConnectionConfig(
         url=gk_raw["url"],
         token=gk_raw["token"],
-        name=gk_raw["name"],
+        name=agent_name,
         lifeboat_path=gk_raw.get("lifeboat_path", "/etc/backup-buddy/lifeboat.enc"),
     )
 
