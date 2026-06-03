@@ -200,6 +200,14 @@ git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
 sudo bash /opt/backup-buddy/install/agent.sh
 ```
 
+> **Running in a container or over SSH without a TTY?**
+> Pass the required values as environment variables to skip interactive prompts:
+> ```bash
+> BB_GATEKEEPER_IP=<gatekeeper-ip> BB_AGENT_NAME=<name> sudo -E bash /opt/backup-buddy/install/agent.sh
+> ```
+> `BB_GATEKEEPER_IP` — the LAN IP of this agent's gatekeeper (e.g. `10.99.0.11`)
+> `BB_AGENT_NAME` — a short name for this machine (e.g. `anders-laptop`)
+
 The installer will ask you two questions:
 
 ```

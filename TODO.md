@@ -3637,7 +3637,7 @@ a gatekeeper that fails to start with a confusing Python import error.
 
 ---
 
-### [ ] 1.18.6 — INSTALL.md: document non-interactive agent install for LXC / no-TTY
+### [x] 1.18.6 — INSTALL.md: document non-interactive agent install for LXC / no-TTY
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-010
 > **Reads:** `INSTALL.md`, `install/agent.sh`
