@@ -115,6 +115,16 @@ setup_venv() {
     "${INSTALL_DIR}/.venv/bin/pip" install --quiet -e "${INSTALL_DIR}"
     "${INSTALL_DIR}/.venv/bin/pip" install --quiet --force-reinstall \
         -r "${INSTALL_DIR}/requirements.txt"
+    # Verify no 0-byte stub .py files remain — a partial force-reinstall
+    # (network blip, disk pressure, SIGKILL) leaves stubs intact and causes
+    # confusing ImportError at gatekeeper startup.
+    zero_byte_files=$(find "${INSTALL_DIR}/.venv/lib" -name "*.py" -size 0 2>/dev/null)
+    if [ -n "$zero_byte_files" ]; then
+        warn "Venv integrity check failed — 0-byte .py files found:"
+        echo "$zero_byte_files" >&2
+        die "Re-run this installer to fix."
+    fi
+    success "Venv integrity check passed"
     success "Python dependencies installed"
 }
 

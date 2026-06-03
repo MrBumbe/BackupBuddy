@@ -3599,7 +3599,7 @@ Pick option A unless there is an existing ADR or design decision that prevents i
 
 ---
 
-### [ ] 1.18.5 — Installer: verify venv integrity after force-reinstall step
+### [x] 1.18.5 — Installer: verify venv integrity after force-reinstall step
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-004
 > **Reads:** `install/gatekeeper.sh`
