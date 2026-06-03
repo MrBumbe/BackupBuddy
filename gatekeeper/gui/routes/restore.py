@@ -38,6 +38,7 @@ from gatekeeper.lifeboat.crypto import IntegrityError
 from gatekeeper.lifeboat.recovery_kit import extract_recovery_kit
 from gatekeeper.restore.reconstruct import reconstruct_catalog
 from gatekeeper.restore.restore import (
+    RestoreError,
     RestoreIntegrityError,
     RestoreNotFoundError,
     restore_file,
@@ -253,6 +254,9 @@ def create_restore_router() -> APIRouter:
                     "Integrity check failed — the restored file may be damaged. "
                     "Try again or contact your buddies to check cluster health."
                 )
+            except RestoreError as exc:
+                job["status"] = "failed"
+                job["error"] = str(exc)
             except Exception:
                 job["status"] = "failed"
                 job["error"] = "Restore failed. Check the gatekeeper log for details."
@@ -305,6 +309,9 @@ def create_restore_router() -> APIRouter:
                     }
                     for r in summary.results
                 ]
+            except RestoreError as exc:
+                job["status"] = "failed"
+                job["error"] = str(exc)
             except Exception:
                 job["status"] = "failed"
                 job["error"] = "Folder restore failed. Check the gatekeeper log for details."
@@ -351,7 +358,7 @@ def create_restore_router() -> APIRouter:
                     {"error": "Recovery kit file is invalid or corrupted."},
                     status_code=400,
                 )
-        elif body.recovery_key:
+        elif body.recovery_key.strip():
             root_dir_cap = body.recovery_key.strip()
         else:
             return JSONResponse(

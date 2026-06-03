@@ -42,6 +42,10 @@ class RestoreIntegrityError(Exception):
     """Raised when hash verification fails after all retry attempts."""
 
 
+class RestoreError(Exception):
+    """Raised for recoverable restore failures with a user-facing message."""
+
+
 # ── Result types ──────────────────────────────────────────────────────────────
 
 @dataclass
@@ -89,10 +93,24 @@ def _check_temp_dir_not_in_pool(tmpdir: str) -> None:
             break
 
 
-def _safe_move(src: str, dest: str) -> None:
-    """Move src to dest atomically, creating parent directories as needed."""
+def _safe_move(src: str, dest: str, original_filename: str) -> str:
+    """Move src to dest, creating parent directories as needed.
+
+    If dest is an existing directory, writes the file inside it using
+    original_filename (cp-like semantics). Returns the resolved dest path.
+    Raises RestoreError on PermissionError.
+    """
+    if os.path.isdir(dest):
+        dest = os.path.join(dest, original_filename)
     os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-    os.replace(src, dest)
+    try:
+        os.replace(src, dest)
+    except PermissionError:
+        raise RestoreError(
+            f"Cannot write to {dest!r}: permission denied. "
+            "Ensure the destination is writable by the backup service user."
+        )
+    return dest
 
 
 def _alert(send_alert: Callable | None, message: str) -> None:
@@ -160,15 +178,16 @@ async def _restore_from_record(
             tahoe, file_ref, tmp_file, expected_sha256, agent, send_alert,
         )
 
-        _safe_move(tmp_file, dest_path)
+        original_filename = os.path.basename(record["original_path"])
+        resolved_dest = _safe_move(tmp_file, dest_path, original_filename)
 
         logger.info(
             "Restore complete: agent=%s dest=%s sha256=%.16s…",
-            agent, dest_path, actual_sha256,
+            agent, resolved_dest, actual_sha256,
         )
         return RestoreFileResult(
             success=True,
-            dest_path=dest_path,
+            dest_path=resolved_dest,
             sha256=actual_sha256,
         )
 

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from gatekeeper.restore.restore import (
+    RestoreError,
     RestoreFileResult,
     RestoreFolderResult,
     RestoreIntegrityError,
@@ -74,7 +75,7 @@ class TestRestoreFile(unittest.IsolatedAsyncioTestCase):
         content = b"important backup data"
         sha = _sha256(content)
 
-        record = {"cap": "URI:CHK:abc", "sha256": sha}
+        record = {"cap": "URI:CHK:abc", "sha256": sha, "original_path": "/home/user/file.txt"}
         catalog = _make_catalog(record)
 
         async def fake_download(file_ref, dest_path):
@@ -130,7 +131,7 @@ class TestRestoreFile(unittest.IsolatedAsyncioTestCase):
         content = b"retry succeeds"
         sha = _sha256(content)
 
-        record = {"cap": "URI:CHK:abc", "sha256": sha}
+        record = {"cap": "URI:CHK:abc", "sha256": sha, "original_path": "/home/user/file.txt"}
         catalog = _make_catalog(record)
 
         call_count = 0
@@ -172,7 +173,7 @@ class TestRestoreFile(unittest.IsolatedAsyncioTestCase):
         content = b"cleanup test"
         sha = _sha256(content)
 
-        record = {"cap": "URI:CHK:abc", "sha256": sha}
+        record = {"cap": "URI:CHK:abc", "sha256": sha, "original_path": "/home/user/file.txt"}
         catalog = _make_catalog(record)
 
         created_tmpdirs: list[str] = []
@@ -264,11 +265,63 @@ class TestRestoreFile(unittest.IsolatedAsyncioTestCase):
                 send_alert=None,
             )
 
+    async def test_dest_path_is_directory_writes_file_inside_it(self):
+        content = b"dir dest test"
+        sha = _sha256(content)
+
+        record = {"cap": "URI:CHK:abc", "sha256": sha, "original_path": "/home/user/report.pdf"}
+        catalog = _make_catalog(record)
+
+        async def fake_download(file_ref, dest_path):
+            with open(dest_path, "wb") as f:
+                f.write(content)
+            return sha
+
+        tahoe = MagicMock()
+        tahoe.download = AsyncMock(side_effect=fake_download)
+
+        with tempfile.TemporaryDirectory() as dest_dir:
+            # Pass the directory itself — file must land inside with original name
+            result = await restore_file(
+                "/home/user/report.pdf", "agent-01", dest_dir,
+                catalog=catalog, tahoe=tahoe,
+            )
+
+        self.assertTrue(result.success)
+        self.assertTrue(result.dest_path.endswith("report.pdf"))
+
+    async def test_dest_path_unwritable_raises_restore_error(self):
+        content = b"perm test"
+        sha = _sha256(content)
+
+        record = {"cap": "URI:CHK:abc", "sha256": sha, "original_path": "/home/user/file.txt"}
+        catalog = _make_catalog(record)
+
+        async def fake_download(file_ref, dest_path):
+            with open(dest_path, "wb") as f:
+                f.write(content)
+            return sha
+
+        tahoe = MagicMock()
+        tahoe.download = AsyncMock(side_effect=fake_download)
+
+        with patch("gatekeeper.restore.restore.os.replace", side_effect=PermissionError("denied")):
+            with tempfile.TemporaryDirectory() as dest_dir:
+                dest = os.path.join(dest_dir, "out.txt")
+                with self.assertRaises(RestoreError) as ctx:
+                    await restore_file(
+                        "/home/user/file.txt", "agent-01", dest,
+                        catalog=catalog, tahoe=tahoe,
+                    )
+        self.assertIn("permission denied", str(ctx.exception).lower())
+        self.assertNotIn("FURL", str(ctx.exception))
+        self.assertNotIn("cap", str(ctx.exception).lower().replace("cannot", ""))
+
     async def test_dest_path_parent_created_if_missing(self):
         content = b"nested dest test"
         sha = _sha256(content)
 
-        record = {"cap": "URI:CHK:abc", "sha256": sha}
+        record = {"cap": "URI:CHK:abc", "sha256": sha, "original_path": "/home/user/file.txt"}
         catalog = _make_catalog(record)
 
         async def fake_download(file_ref, dest_path):

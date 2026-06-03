@@ -12,7 +12,10 @@ Covers:
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import unittest
+import httpx
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
@@ -21,6 +24,7 @@ from starlette.testclient import TestClient
 from gatekeeper.gui.app import setup_gui
 import gatekeeper.gui.routes.restore as restore_module
 from gatekeeper.gui.routes.restore import _validate_dest_path
+from gatekeeper.restore.restore import RestoreError
 
 # Platform-appropriate absolute path for use in test payloads.
 _DEST = os.path.abspath("bb_test_restore_dest")
@@ -384,3 +388,35 @@ class TestJobPruning:
         restore_module._prune_jobs()
         # All running jobs still present (no completed jobs to evict)
         assert all(j["status"] == "running" for j in restore_module._restore_jobs.values())
+
+
+# ── RestoreError propagation (async) ─────────────────────────────────────────
+
+class TestRestoreErrorPropagation(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        restore_module._restore_jobs.clear()
+
+    def tearDown(self) -> None:
+        restore_module._restore_jobs.clear()
+
+    async def test_restore_error_message_in_job_error(self) -> None:
+        error_msg = (
+            "Cannot write to '/tmp/out.txt': permission denied. "
+            "Ensure the destination is writable by the backup service user."
+        )
+        body = {"original_path": "/home/user/a.txt", "agent": "laptop", "dest_path": _DEST}
+
+        with patch(
+            "gatekeeper.gui.routes.restore.restore_file",
+            new_callable=AsyncMock,
+            side_effect=RestoreError(error_msg),
+        ):
+            transport = httpx.ASGITransport(app=_make_app(), client=("100.64.0.1", 9999))
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/api/restore/start/file", json=body)
+                job_id = resp.json()["job_id"]
+                await asyncio.sleep(0)  # yield so the background task runs
+
+        job = restore_module._restore_jobs[job_id]
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(job["error"], error_msg)
