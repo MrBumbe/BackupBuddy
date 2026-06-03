@@ -3474,7 +3474,7 @@ Create the file at the start of the test, even if empty. Update it throughout.
 
 ---
 
-### [ ] 1.18.2 — INSTALL.md: replace placeholder install URL with working command
+### [x] 1.18.2 — INSTALL.md: replace placeholder install URL with working command
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-005
 > **Reads:** `INSTALL.md`, `install/gatekeeper.sh`
@@ -3499,6 +3499,19 @@ one-liner — but do not document a URL that does not work.
 **Done when:**
 - `INSTALL.md §3` contains no reference to `get.backupbuddy.io` ✓
 - The documented install command works on a fresh Ubuntu 24.04 machine ✓
+
+> **Kludde — 2026-06-03**
+>
+> Replaced all `curl -sSL https://get.backupbuddy.io` occurrences with the
+> working `git clone` + `sudo bash` procedure. Updated files:
+> - `INSTALL.md` §3 (gatekeeper), §5 (agent), §6 (buddy install)
+> - `install/gatekeeper.sh` Usage comment
+> - `install/agent.sh` Usage comment
+> - `project-docs/onboarding.md` (gatekeeper and agent install sections)
+> - `project-docs/testing.md` (Step 6 test environment setup)
+>
+> Added git prerequisite note in each install section. Historical references
+> to the broken URL remain only in `TODO.md` and `tests/integration/1.18.1-issues.md`.
 
 ---
 

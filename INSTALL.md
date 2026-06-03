@@ -47,16 +47,19 @@ rebuild it from scratch using a recovery key you saved when you first set up.
 
 Do this on the machine that will be your gatekeeper — the server that manages your cluster.
 
+> If `git` is not installed on your machine, install it first:
+> ```bash
+> sudo apt-get install -y git
+> ```
+
 **Open a terminal on your gatekeeper machine and run:**
 
 ```bash
-curl -sSL https://get.backupbuddy.io | sudo bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/gatekeeper.sh
 ```
 
-> If you are already logged in as root, you can omit `sudo`.
-
-The installer takes 2–5 minutes. It downloads and installs everything automatically.
-When it finishes, you will see:
+The installer takes 2–5 minutes. When it finishes, you will see:
 
 ```
   [✓] Service backup-buddy-gatekeeper is running
@@ -188,10 +191,13 @@ The agent is a small program that watches your files and sends them to your gate
 Run this on the computer whose files you want to back up (it must be on the same local
 network as your gatekeeper).
 
+> If `git` is not installed, install it first: `sudo apt-get install -y git`
+
 **Open a terminal on the computer you want to back up and run:**
 
 ```bash
-curl -sSL https://get.backupbuddy.io/agent | sudo bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/agent.sh
 ```
 
 The installer will ask you two questions:
@@ -279,8 +285,11 @@ To join your cluster, your buddy needs:
 
 **Your buddy runs the installer on their machine:**
 
+> If `git` is not installed, install it first: `sudo apt-get install -y git`
+
 ```bash
-curl -sSL https://get.backupbuddy.io | sudo bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/gatekeeper.sh
 ```
 
 After the installer finishes, your buddy runs:

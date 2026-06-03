@@ -15,7 +15,8 @@ produces a working system.
 ### One command to start
 
 ```bash
-curl -sSL https://get.backupbuddy.io | bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/gatekeeper.sh
 ```
 
 The install script handles:
@@ -219,7 +220,8 @@ It only needs to know what to back up and where its gatekeeper is.
 ### Install command
 
 ```bash
-curl -sSL https://get.backupbuddy.io/agent | bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/agent.sh
 ```
 
 The script asks two questions and exits:

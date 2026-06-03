@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # BackupBuddy agent install script
-# Usage:  curl -sSL https://get.backupbuddy.io/agent | bash
-#         sudo bash install/agent.sh
+# Usage:  git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+#         sudo bash /opt/backup-buddy/install/agent.sh
 #
 # Supported OS: Ubuntu 22.04 (jammy), Ubuntu 24.04 (noble)
 # Idempotent: safe to run multiple times — each step is a no-op if already done.

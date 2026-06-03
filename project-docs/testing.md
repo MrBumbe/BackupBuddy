@@ -230,11 +230,13 @@ This goes into gatekeeper.cfg on all gatekeeper VMs.
 
 ```bash
 # On each gatekeeper
-curl -sSL https://get.backupbuddy.io | bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/gatekeeper.sh
 # Complete the onboarding wizard or use a pre-seeded config for testing
 
 # On each agent container
-curl -sSL https://get.backupbuddy.io/agent | bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/agent.sh
 ```
 
 For automated testing, gatekeeper.cfg and backup.cfg can be

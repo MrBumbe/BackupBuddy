@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # BackupBuddy gatekeeper install script
-# Usage:  curl -sSL https://get.backupbuddy.io | bash
-#         sudo bash install/gatekeeper.sh
+# Usage:  git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+#         sudo bash /opt/backup-buddy/install/gatekeeper.sh
 #
 # Supported OS: Ubuntu 22.04 (jammy), Ubuntu 24.04 (noble)
 # Idempotent: safe to run multiple times — each step is a no-op if already done.
