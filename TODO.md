@@ -3768,7 +3768,7 @@ ensures eventual consistency even if a push is lost.
 
 ---
 
-### [ ] 1.18.9 — Restore: handle directory dest_path; surface actionable error messages
+### [x] 1.18.9 — Restore: handle directory dest_path; surface actionable error messages
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-012
 > **Reads:** `gatekeeper/restore/restore.py`, `gatekeeper/gui/routes/restore.py`
