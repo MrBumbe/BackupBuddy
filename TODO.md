@@ -3515,7 +3515,7 @@ one-liner — but do not document a URL that does not work.
 
 ---
 
-### [ ] 1.18.3 — Wizard: auto-create and chown storage path on step 3
+### [x] 1.18.3 — Wizard: auto-create and chown storage path on step 3
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-006, ISSUE-007
 > **Reads:** `gatekeeper/gui/routes/wizard.py`, `INSTALL.md`
@@ -3552,6 +3552,15 @@ will be created automatically if it does not exist."
 - Wizard step 3 accepts a root-owned 0755 directory and chowns it ✓
 - `INSTALL.md §4 Step 3` no longer contains the false claim ✓
 - Integration test on a fresh VM confirms both paths work ✓
+
+> **Kludde — 2026-06-03**
+>
+> Implemented auto-create and chown in `_validate_storage_paths` (onboarding.py).
+> Non-existent paths are now created with `os.makedirs` and then `chown`ed to
+> uid=999/gid=999 (backupbuddy). Existing paths that are not writable are chowned
+> rather than rejected. Specific error messages guide the user if creation or chown
+> fails. Updated INSTALL.md §4 Step 3: replaced "will be created for you" with
+> "will be created automatically". Integration test on a fresh VM still pending.
 
 ---
 

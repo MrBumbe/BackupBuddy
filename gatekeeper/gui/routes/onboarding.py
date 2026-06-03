@@ -105,7 +105,8 @@ def _validate_storage_paths(raw: str) -> tuple[list[str], str]:
     """Parse and validate newline-separated storage paths.
 
     Returns (resolved_paths, error_message).  error_message is empty on success.
-    Paths must be absolute, exist, and be writable.
+    Non-existent paths are created and chowned to the service user (uid=999).
+    Existing paths that are not writable are chowned to make them accessible.
     """
     lines = [p.strip() for p in raw.splitlines() if p.strip()]
     if not lines:
@@ -116,12 +117,31 @@ def _validate_storage_paths(raw: str) -> tuple[list[str], str]:
         if not os.path.isabs(raw_path):
             return [], f"Path must be absolute: {raw_path!r}"
         real = os.path.realpath(raw_path)
+
         if not os.path.exists(real):
-            return [], f"Path does not exist: {raw_path!r}"
-        if not os.path.isdir(real):
-            return [], f"Not a directory: {raw_path!r}"
-        if not os.access(real, os.W_OK):
-            return [], f"Path is not writable: {raw_path!r}"
+            try:
+                os.makedirs(real, exist_ok=True)
+            except OSError:
+                return [], (
+                    f"Could not create directory {raw_path!r}. "
+                    "Create it manually and ensure it is writable by the backup service."
+                )
+            try:
+                os.chown(real, 999, 999)  # type: ignore[attr-defined]
+            except (OSError, AttributeError):
+                logger.warning("Could not set ownership of %s to uid=999:gid=999", real)
+        else:
+            if not os.path.isdir(real):
+                return [], f"Not a directory: {raw_path!r}"
+            if not os.access(real, os.W_OK):
+                try:
+                    os.chown(real, 999, 999)  # type: ignore[attr-defined]
+                except (OSError, AttributeError):
+                    return [], (
+                        f"Directory {raw_path!r} is not writable by the backup service. "
+                        f"Run: sudo chown backupbuddy:backupbuddy {real}"
+                    )
+
         resolved.append(real)
 
     return resolved, ""

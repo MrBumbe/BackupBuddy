@@ -127,7 +127,7 @@ Enter the full path to a folder where your buddy's encrypted data will be stored
 for example `/mnt/nas/buddy-storage`. Then set a quota in GB — this is how much space
 you are willing to give.
 
-> This folder will be created for you if it does not exist.
+> The directory will be created automatically if it does not exist.
 > It is automatically excluded from your own backups — you cannot accidentally back it up.
 
 Click **Continue**.
