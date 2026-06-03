@@ -3564,7 +3564,7 @@ will be created automatically if it does not exist."
 
 ---
 
-### [ ] 1.18.4 — Wizard: change default erasure profile to 'adaptive'; fix INSTALL.md
+### [x] 1.18.4 — Wizard: change default erasure profile to 'adaptive'; fix INSTALL.md
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-008
 > **Reads:** `gatekeeper/gui/routes/wizard.py`, `gatekeeper/gui/templates/wizard.html`,
@@ -3589,6 +3589,13 @@ Pick option A unless there is an existing ADR or design decision that prevents i
 **Done when:**
 - Wizard step 4 pre-selects the same profile that INSTALL.md describes as default ✓
 - `INSTALL.md §4 Step 4` matches the wizard's actual default ✓
+
+> **Kludde — 2026-06-03**
+>
+> Changed `WizardState.profile` default from `"balanced"` to `"adaptive"` in
+> `wizard_state.py`. No template or route changes needed — the template already
+> reads from `state.profile` dynamically. INSTALL.md already said "Adaptive (the
+> default)" and required no update.
 
 ---
 

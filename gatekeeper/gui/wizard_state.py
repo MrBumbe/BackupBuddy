@@ -27,7 +27,7 @@ class WizardState:
     node_display_name: str = ""         # friendly name shown in UI
     storage_paths: list[str] = field(default_factory=list)
     storage_quota_gb: int = 500         # GB quota applied to every storage path
-    profile: str = "balanced"
+    profile: str = "adaptive"
     notify_smtp_enabled: bool = False
     notify_smtp_host: str = ""
     notify_smtp_port: int = 587
