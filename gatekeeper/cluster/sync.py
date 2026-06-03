@@ -121,3 +121,97 @@ async def push_ballot_to_proposer(
             f"Proposer rejected ballot: HTTP {resp.status_code} — {resp.text[:200]}"
         )
     return resp.json()
+
+
+# ── Member list sync ──────────────────────────────────────────────────────────
+
+class MemberEntry(BaseModel):
+    """A single cluster member's identity fields for list sync."""
+
+    node_id: str
+    display_name: str
+    tailscale_hostname: str
+    profile: str
+
+
+class MemberListPushMessage(BaseModel):
+    """Member list pushed to peers after a new node joins, or returned for polling."""
+
+    members: list[MemberEntry]
+
+
+async def push_member_list_to_peers(
+    members: list[dict[str, Any]],
+    local_node_id: str,
+    web_port: int,
+    exclude_node_id: str | None = None,
+) -> None:
+    """Push updated member list to all active cluster peers.
+
+    Fire-and-forget: logs failures but does not raise.
+    exclude_node_id skips the newly-joined node — it already received the full
+    list in the join response body.
+    """
+    msg = MemberListPushMessage(members=[
+        MemberEntry(
+            node_id=m["node_id"],
+            display_name=m["display_name"],
+            tailscale_hostname=m["tailscale_hostname"],
+            profile=m.get("profile", "lagom"),
+        )
+        for m in members
+        if m.get("status") in ("active", "grace")
+    ])
+
+    target_peers = [
+        m for m in members
+        if m["node_id"] != local_node_id
+        and m["node_id"] != exclude_node_id
+        and m.get("status") in ("active", "grace")
+    ]
+
+    payload = msg.model_dump()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for peer in target_peers:
+            hostname = peer.get("tailscale_hostname", "")
+            if not hostname:
+                continue
+            url = f"http://{hostname}:{web_port}/api/cluster/sync/members"
+            try:
+                resp = await client.post(url, json=payload)
+                if resp.status_code != 200:
+                    logger.warning(
+                        "sync/members to %s returned HTTP %d", hostname, resp.status_code
+                    )
+                else:
+                    logger.debug("sync/members pushed to %s", hostname)
+            except httpx.RequestError as exc:
+                logger.warning("sync/members to %s failed: %s", hostname, exc)
+
+
+async def fetch_member_list_from_peer(
+    hostname: str,
+    web_port: int,
+) -> list[dict[str, Any]] | None:
+    """GET the member list from a peer for periodic reconciliation.
+
+    Returns the validated member list on success, None on any failure.
+    """
+    url = f"http://{hostname}:{web_port}/api/cluster/sync/members"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+    except httpx.RequestError as exc:
+        logger.warning("fetch member list from %s failed: %s", hostname, exc)
+        return None
+    if resp.status_code != 200:
+        logger.warning(
+            "fetch member list from %s returned HTTP %d", hostname, resp.status_code
+        )
+        return None
+    try:
+        data = MemberListPushMessage.model_validate(resp.json())
+    except Exception as exc:
+        logger.warning("Invalid member list response from %s: %s", hostname, exc)
+        return None
+    return [m.model_dump() for m in data.members]

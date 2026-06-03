@@ -44,7 +44,13 @@ from gatekeeper.cluster.removal import (
     cast_vote,
     start_grace_period,
 )
-from gatekeeper.cluster.sync import BallotSyncMessage, VoteSyncMessage
+from gatekeeper.cluster.sync import (
+    BallotSyncMessage,
+    MemberListPushMessage,
+    VoteSyncMessage,
+    fetch_member_list_from_peer,
+    push_member_list_to_peers,
+)
 from gatekeeper.config import (
     ConfigError,
     GatekeeperConfig,
@@ -186,6 +192,60 @@ async def _orphan_cleanup_loop(
             logger.error("Orphan cleanup job failed", exc_info=True)
 
 
+async def _member_reconciliation_loop(
+    cluster_db: "ClusterDB",
+    local_node_id: str,
+    web_port: int,
+) -> None:
+    """Periodic member list reconciliation (5-minute interval).
+
+    Polls a random active peer for their member list and upserts any identity
+    changes locally.  Ensures eventual consistency if an on-join push was lost.
+    Runs forever; asyncio.CancelledError propagates on shutdown.
+    """
+    import random as _random
+
+    _INTERVAL = 300  # 5 minutes
+    logger.info("Member reconciliation loop started (interval=%ds)", _INTERVAL)
+
+    while True:
+        await asyncio.sleep(_INTERVAL)
+
+        peers = [
+            m for m in cluster_db.list_members(status="active")
+            if m["node_id"] != local_node_id
+        ]
+        if not peers:
+            continue
+
+        peer = _random.choice(peers)
+        hostname = peer.get("tailscale_hostname", "")
+        if not hostname:
+            continue
+
+        logger.debug("Member reconciliation: polling %s", hostname)
+        received = await fetch_member_list_from_peer(hostname, web_port)
+        if received is None:
+            continue
+
+        upserted = 0
+        for entry in received:
+            if entry["node_id"] == local_node_id:
+                continue
+            cluster_db.upsert_peer_member(
+                node_id=entry["node_id"],
+                display_name=entry["display_name"],
+                tailscale_hostname=entry["tailscale_hostname"],
+                profile=entry.get("profile", "lagom"),
+            )
+            upserted += 1
+
+        if upserted:
+            logger.info(
+                "Member reconciliation: upserted %d peer(s) from %s", upserted, hostname
+            )
+
+
 def _register_background_tasks(
     lifeboat_distributor: LifeboatDistributor | None = None,
     cluster_db: "ClusterDB | None" = None,
@@ -206,6 +266,17 @@ def _register_background_tasks(
             asyncio.create_task(
                 _orphan_cleanup_loop(cluster_db, tahoe_client, pool, config),
                 name="orphan_cleanup",
+            )
+        )
+    if cluster_db is not None and config is not None:
+        tasks.append(
+            asyncio.create_task(
+                _member_reconciliation_loop(
+                    cluster_db,
+                    local_node_id=config.node.name,
+                    web_port=config.web.port,
+                ),
+                name="member_reconciliation",
             )
         )
     return tasks
@@ -540,6 +611,65 @@ def _register_routes(app: FastAPI) -> None:
         )
         return JSONResponse({"result": result.value})
 
+    @app.post("/api/cluster/sync/members")
+    async def cluster_sync_members(
+        request: Request, body: MemberListPushMessage
+    ) -> JSONResponse:
+        """Receive a member list push from a peer after a new node joins.
+
+        Upserts identity fields (display_name, tailscale_hostname, profile) for
+        each received entry.  Never overwrites status, grace columns, or joined_at
+        — those fields are managed locally.  Never updates the local node's own row.
+
+        Bound to Tailscale interface — callers must be cluster members.
+        """
+        if request.app.state.setup_required:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+        db = request.app.state.cluster_db
+        if db is None:
+            return JSONResponse({"error": "Cluster database not available"}, status_code=503)
+        local_node_id: str = getattr(request.app.state, "local_node_id", "") or ""
+
+        upserted = 0
+        for entry in body.members:
+            if entry.node_id == local_node_id:
+                continue
+            db.upsert_peer_member(
+                node_id=entry.node_id,
+                display_name=entry.display_name,
+                tailscale_hostname=entry.tailscale_hostname,
+                profile=entry.profile,
+            )
+            upserted += 1
+        logger.info("sync/members: upserted %d peer(s) from push", upserted)
+        return JSONResponse({"status": "ok", "upserted": upserted})
+
+    @app.get("/api/cluster/sync/members")
+    async def get_cluster_sync_members(request: Request) -> JSONResponse:
+        """Return the local member list for peer reconciliation polling.
+
+        Used by the periodic reconciliation loop on other nodes.
+        Returns active and grace members; omits removed/evicted nodes.
+        """
+        if request.app.state.setup_required:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+        db = request.app.state.cluster_db
+        if db is None:
+            return JSONResponse({"error": "Cluster database not available"}, status_code=503)
+
+        return JSONResponse({
+            "members": [
+                {
+                    "node_id": m["node_id"],
+                    "display_name": m["display_name"],
+                    "tailscale_hostname": m["tailscale_hostname"],
+                    "profile": m.get("profile", "lagom"),
+                }
+                for m in db.list_members()
+                if m.get("status") in ("active", "grace")
+            ]
+        })
+
     @app.post("/api/cluster/join")
     async def cluster_join(request: Request, body: JoinRequest) -> JSONResponse:
         """Accept a cluster join request from a new gatekeeper node.
@@ -567,6 +697,24 @@ def _register_routes(app: FastAPI) -> None:
             result: JoinAcceptResponse = accept_join(db, body.invite_code, body.node_info, furl)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+
+        # Push updated member list to existing peers (fire-and-forget, ADR-021 pattern).
+        # The new joiner already has the full list in the response body, so exclude it.
+        local_node_id: str = getattr(request.app.state, "local_node_id", "") or ""
+        config = getattr(request.app.state, "config", None)
+        web_port: int = config.web.port if config else 8080
+        all_members = db.list_members(status="active")
+        task = asyncio.create_task(
+            push_member_list_to_peers(
+                all_members,
+                local_node_id=local_node_id,
+                web_port=web_port,
+                exclude_node_id=body.node_info.node_id,
+            )
+        )
+        bg = getattr(request.app.state, "background_tasks", None)
+        if bg is not None:
+            bg.append(task)
 
         return JSONResponse({
             "introducer_furl": result.introducer_furl,

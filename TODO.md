@@ -3725,7 +3725,7 @@ if the field is absent — reducing the number of required fields a user must se
 
 ---
 
-### [ ] 1.18.8 — Cluster: push updated member list to all peers when a new node joins
+### [x] 1.18.8 — Cluster: push updated member list to all peers when a new node joins
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-009
 > **Reads:** `gatekeeper/cluster/`, `gatekeeper/db/cluster_db.py`,
