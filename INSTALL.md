@@ -123,12 +123,27 @@ Click **Continue**.
 
 **Step 3 — Choose where to store your buddy's data:**
 
-Enter the full path to a folder where your buddy's encrypted data will be stored,
-for example `/mnt/nas/buddy-storage`. Then set a quota in GB — this is how much space
-you are willing to give.
+Enter the full path to a folder where your buddy's encrypted data will be stored.
+Then set a quota in GB — this is how much space you are willing to give.
 
-> The directory will be created automatically if it does not exist.
-> It is automatically excluded from your own backups — you cannot accidentally back it up.
+The simplest choice is `/var/lib/backup-buddy/storage` — the installer creates this
+directory and sets the correct ownership automatically, so the wizard can use it
+without any extra steps.
+
+If you prefer a path on a separate disk (for example `/mnt/buddy-storage`), the parent
+directory must be writable by the `backupbuddy` service user. Directories like `/mnt`
+are owned by root by default, so the wizard cannot create subdirectories inside them.
+Create the directory manually before entering it in the wizard:
+
+```bash
+sudo mkdir -p /mnt/buddy-storage
+sudo chown backupbuddy:backupbuddy /mnt/buddy-storage
+```
+
+Replace `/mnt/buddy-storage` with your chosen path.
+
+> The storage directory is automatically excluded from your own backups — you cannot
+> accidentally back it up.
 
 Click **Continue**.
 

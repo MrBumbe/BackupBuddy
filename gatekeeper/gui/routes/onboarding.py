@@ -123,8 +123,9 @@ def _validate_storage_paths(raw: str) -> tuple[list[str], str]:
                 os.makedirs(real, exist_ok=True)
             except OSError:
                 return [], (
-                    f"Could not create directory {raw_path!r}. "
-                    "Create it manually and ensure it is writable by the backup service."
+                    f"Could not create directory {raw_path!r} — the parent directory is "
+                    f"not writable by the backup service. Run as root and try again: "
+                    f"sudo mkdir -p {raw_path} && sudo chown backupbuddy:backupbuddy {raw_path}"
                 )
             try:
                 os.chown(real, 999, 999)  # type: ignore[attr-defined]

@@ -147,12 +147,12 @@ create_service_user() {
 }
 
 create_directories() {
-    for dir in "$CONFIG_DIR" "$DATA_DIR"; do
+    for dir in "$CONFIG_DIR" "$DATA_DIR" "$DATA_DIR/storage"; do
         mkdir -p "$dir"
         chown "${SERVICE_USER}:${SERVICE_GROUP}" "$dir"
         chmod 750 "$dir"
     done
-    success "Directories ready: $CONFIG_DIR, $DATA_DIR"
+    success "Directories ready: $CONFIG_DIR, $DATA_DIR, $DATA_DIR/storage"
 }
 
 write_systemd_unit() {
