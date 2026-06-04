@@ -4115,7 +4115,7 @@ authoritative default profile value.
 
 ---
 
-### [ ] 1.18.20 — Second three-user simulation, Part 1: infrastructure + cluster formation
+### [x] 1.18.20 — Second three-user simulation, Part 1: infrastructure + cluster formation
 
 > **Test run:** Second full end-to-end simulation verifying that all 1.18.x fixes hold
 > together in a clean environment. Picks up where the original 1.18.1 left off and confirms
@@ -4304,6 +4304,43 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 - State file updated with all runtime values ✓
 - Issues file updated with any problems found ✓
 - Task marked `[x]` and `git commit chore(test): 1.18.20 part 1 done` ✓
+
+```
+> Kludde — 2026-06-04
+>
+> All six nodes rolled back to clean-ubuntu and cluster of 3 formed from scratch. 7 issues found:
+>
+> **Blocking fixes (2):**
+> - ISSUE-003: 21 commits (all 1.18.x fixes) were never pushed to GitHub. VMs installed old code
+>   from GitHub without 1.18.x fixes. Fix: committed and pushed. All nodes rolled back again.
+> - ISSUE-004: 1.18.5 venv integrity check flagged legitimate empty __init__.py namespace
+>   initializers as 0-byte stubs. Service wouldn't start. Fixed in two commits (exclude __init__.py,
+>   then also exclude tests/ dirs for stevedore/tests/extension_unimportable.py).
+>
+> **Non-blocking issues (5):**
+> - ISSUE-001: Wrong install URL in TODO text (johankyrkjerod vs MrBumbe). Used INSTALL.md procedure.
+> - ISSUE-002: VM 101 clean-ubuntu snapshot mislabelled "wizard not run" but had full wizard state.
+>   Reset wizard state manually (delete gatekeeper.cfg + data files).
+> - ISSUE-005: 1.18.3 storage-path auto-create fix only works when parent dir is writable by service.
+>   /mnt is root-owned; backupbuddy (uid=999) can't create /mnt/buddy-storage. Pre-created dirs manually.
+> - ISSUE-006: _cascade_join() calls initiate_join() (consuming the invite) before checking
+>   state.storage_paths. First Björn attempt consumed invite crowd-eagle-5 then failed with IndexError.
+>   Generated new invite jiffy-tidal-8 and re-ran with pre-created storage dir.
+> - ISSUE-007: tailscale_hostname stored as node_name ("bjorn-home") not Tailscale IP. Member-sync
+>   push/reconciliation failed with DNS resolution error. Fixed in code (use get_tailscale_ip()) and
+>   manually patched cluster.db. 1.18.8 member-sync only works correctly after this fix.
+>
+> **Verified working (matching 1.18.x intent):**
+> - 1.18.2: INSTALL.md install procedure works (git clone + sudo bash)
+> - 1.18.3: Storage path auto-create works when parent is writable (tested on Anders)
+> - 1.18.4: Wizard defaults to adaptive profile ✓
+> - 1.18.5: Venv integrity check detects real stubs (after false-positive fix) ✓
+> - 1.18.8: Member-sync push/reconciliation works after ISSUE-007 tailscale_hostname fix
+>
+> **Final state:** All 3 nodes in normal mode, all 3 dashboards show 3 active cluster members.
+> Anders TS: 100.105.236.56, Björn TS: 100.104.224.41, Carina TS: 100.87.217.128
+> Test files in LXCs 301/302/303 (7 files, pre-backup SHA-256 checksums in state file).
+```
 
 > **Hand-off to 1.18.21:** Ensure `1.18.20-state.md` is committed before starting Part 2.
 
