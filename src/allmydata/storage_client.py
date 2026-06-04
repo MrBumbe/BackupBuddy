@@ -83,7 +83,8 @@ from allmydata.crypto import (
     ed25519,
 )
 from allmydata.util.tor_provider import _Provider as TorProvider
-from allmydata.util import log, base32, connection_status
+from allmydata.util import log, base32, connection_status, yamlutil
+import os
 from allmydata.util.assertutil import precondition
 from allmydata.util.observer import ObserverList
 from allmydata.util.rrefutil import add_version_to_remote_reference
@@ -507,6 +508,53 @@ class StorageFarmBroker(service.MultiService):
         s.start_connecting(self._trigger_connections)
         # the descriptor will manage their own Reconnector, and each time we
         # need servers, we'll ask them if they're connected or not.
+        self._save_servers_yaml()
+
+    def _save_servers_yaml(self):
+        """
+        Persist the current set of known Foolscap storage server FURLs to
+        private/servers.yaml so that load_static_servers() can restore them on
+        the next startup if the introducer is unreachable.
+
+        Only the fields required for reconnection are saved.  Python-specific
+        objects (sets, bytes) in the announcement dict are intentionally
+        excluded so that yaml.safe_dump() always succeeds.
+        """
+        try:
+            private_path = self.node_config.get_private_path("servers.yaml")
+        except AttributeError:
+            # node_config is a test stub without get_private_path; skip silently.
+            return
+
+        servers = {}
+        for server_id, srv in self.servers.items():
+            ann = srv.get_announcement()
+            furl = ann.get("anonymous-storage-FURL", "")
+            if isinstance(furl, bytes):
+                furl = furl.decode("utf-8", errors="replace")
+            if not furl:
+                continue
+            if isinstance(server_id, bytes):
+                server_id_str = server_id.decode("utf-8", errors="replace")
+            else:
+                server_id_str = str(server_id)
+            safe_ann = {"anonymous-storage-FURL": furl}
+            seed = ann.get("permutation-seed-base32", "")
+            if seed:
+                if isinstance(seed, bytes):
+                    seed = seed.decode("utf-8", errors="replace")
+                safe_ann["permutation-seed-base32"] = seed
+            servers[server_id_str] = {"ann": safe_ann}
+
+        if not servers:
+            return
+
+        try:
+            os.makedirs(os.path.dirname(private_path), exist_ok=True)
+            with open(private_path, "w") as f:
+                f.write(yamlutil.safe_dump({"storage": servers}))
+        except Exception:
+            pass
 
     def _trigger_connections(self):
         # when one connection is established, reset the timers on all others,

@@ -3810,7 +3810,7 @@ populated with the specific cause.
 
 ---
 
-### [ ] 1.18.10 — Tahoe client: cache storage server addresses to survive introducer loss
+### [x] 1.18.10 — Tahoe client: cache storage server addresses to survive introducer loss
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-013
 > **Reads:** `gatekeeper/tahoe/client.py`, `gatekeeper/tahoe/storage_node.py`,

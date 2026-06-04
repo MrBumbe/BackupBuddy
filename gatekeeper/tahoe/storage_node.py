@@ -10,10 +10,13 @@ import asyncio
 import configparser
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,39 @@ def _find_tahoe() -> str:
 
 
 _DEFAULT_WEB_PORT = 3456
+_INTRODUCER_CONNECT_TIMEOUT = 10.0
+
+
+def _parse_furl_locations(furl: str) -> list[tuple[str, int]]:
+    """Extract (host, port) pairs from a Foolscap FURL for reachability checks.
+
+    Handles single and multi-hint FURLs in both HOST:PORT and tcp:HOST:PORT form.
+    Returns an empty list if the FURL cannot be parsed.
+    """
+    match = re.search(r'@([^/]+)/', furl)
+    if not match:
+        return []
+    locations = []
+    for hint in match.group(1).split(","):
+        hint = hint.strip()
+        if hint.startswith("tcp:"):
+            hint = hint[4:]
+        try:
+            if hint.startswith("["):
+                # IPv6 address
+                bracket_end = hint.index("]")
+                host = hint[1:bracket_end]
+                port = int(hint[bracket_end + 2:])
+            else:
+                last_colon = hint.rfind(":")
+                if last_colon < 0:
+                    continue
+                host = hint[:last_colon]
+                port = int(hint[last_colon + 1:])
+            locations.append((host, port))
+        except (ValueError, IndexError):
+            continue
+    return locations
 
 
 def _parse_tub_port(tub_port_str: str) -> int:
@@ -222,6 +258,20 @@ class StorageNode:
                     "is available to fix it. Check network interfaces."
                 )
 
+        if not await self._check_introducer_reachable(cfg):
+            cached_count = self._count_cached_servers()
+            if cached_count > 0:
+                logger.warning(
+                    "Introducer unreachable — operating from cached server list "
+                    "(%d servers). Uploads may be incomplete.",
+                    cached_count,
+                )
+            else:
+                logger.warning(
+                    "Introducer unreachable and no server cache found. "
+                    "Grid operations will fail until the introducer recovers."
+                )
+
         logger.info("Starting storage node")
         # Discard all Tahoe output — reading from a PIPE without draining blocks
         # the subprocess's reactor once the OS buffer fills.  Readiness is
@@ -295,3 +345,45 @@ class StorageNode:
                 await asyncio.sleep(0.5)
 
         return False
+
+    async def _check_introducer_reachable(
+        self, cfg: configparser.ConfigParser
+    ) -> bool:
+        """Return True if the introducer can be reached via TCP within the timeout.
+
+        Returns True when no introducer FURL is configured, or when the FURL
+        cannot be parsed, so that ambiguous cases never block startup.
+        """
+        furl = cfg.get("client", "introducer.furl", fallback="").strip()
+        if not furl:
+            return True
+        locations = _parse_furl_locations(furl)
+        if not locations:
+            return True
+        for host, port in locations:
+            try:
+                _reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port),
+                    timeout=_INTRODUCER_CONNECT_TIMEOUT,
+                )
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                return True
+            except (OSError, asyncio.TimeoutError):
+                continue
+        return False
+
+    def _count_cached_servers(self) -> int:
+        """Return the number of storage servers in private/servers.yaml, or 0."""
+        servers_yaml = self.basedir / "private" / "servers.yaml"
+        if not servers_yaml.exists():
+            return 0
+        try:
+            with open(servers_yaml) as f:
+                data = yaml.safe_load(f) or {}
+            return len(data.get("storage", {}))
+        except Exception:
+            return 0
