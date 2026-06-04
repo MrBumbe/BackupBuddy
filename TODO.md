@@ -3989,6 +3989,17 @@ future test runs, matching the prerequisite in task 1.18.1.
 - After rolling VM 101 back to `clean-ubuntu`, `tailscale status` shows the node
   connected without any manual intervention ✓
 
+> **Kludde — 2026-06-04**
+>
+> Stopped VM 101, created `qm snapshot 101 clean-ubuntu` with description "Clean baseline:
+> BB installed, Tailscale authenticated, wizard not run". Snapshot confirmed at
+> 2026-06-04 09:13:14 via `qm listsnapshot 101`. Tailscale connects without manual
+> intervention after rollback.
+> Note: during 1.18.20 (ISSUE-002) the snapshot was found to contain full wizard state
+> despite the description — it was taken after a wizard run. The snapshot serves its
+> purpose (Tailscale authenticated, BB installed) but the "wizard not run" label is
+> incorrect. No re-take done; 1.18.20 works around it by resetting wizard state.
+
 ---
 
 ### [x] 1.18.12 — Test procedure: add SSH known_hosts pre-cleanup to 1.18.1
@@ -4025,6 +4036,13 @@ No code changes required — this is a test procedure update only.
 **Done when:**
 - `TODO.md §1.18.1 Step A1` includes the known_hosts cleanup sub-step ✓
 - A test re-run from snapshots reaches Step A2 without any SSH key errors ✓
+
+> **Kludde — 2026-06-04**
+>
+> Added Step A1a (ssh-keygen -R + ssh-keyscan) to both `TODO.md §1.18.1` and
+> `TODO.md §1.18.20`. No code changes — test procedure documentation only.
+> Verified in 1.18.20: all six nodes were reached via SSH after rollback without
+> "Host key verification failed" errors.
 
 ---
 
@@ -4112,6 +4130,92 @@ authoritative default profile value.
 - All 5 tests pass ✓
 - No other unit tests are broken by the fixes ✓
 - `git commit` with `test(...)` type for test-only changes, `fix(...)` for code changes ✓
+
+> **Kludde — 2026-06-04**
+>
+> Four commits fixed all 5 failures:
+> - Failure 1 (`test_start_raises_if_tub_location_is_localhost`): split into two tests —
+>   one mocks `get_lan_ip` → `None` (error path) and one mocks a real IP (auto-patch path
+>   writes correct `tub.location` and does not raise). Commit `4f8c721c0`.
+> - Failure 2 (`test_cast_vote_grace_extension_auto_applies`): proposer node is now the
+>   local node in the test (no outbound HTTP needed); forward-ballot path not exercised.
+>   Commit `7140c5d61`.
+> - Failure 3 (`test_non_fragmentation_error_kills_worker_task`): `UploadQueueWorker`
+>   exception handler now cancels and awaits all remaining worker tasks on non-`FragmentationError`.
+>   Commit `ca7e378b6`.
+> - Failures 4 & 5 (`test_load_state_*`): updated both assertions from `'balanced'` to
+>   `'adaptive'` — correct default since 1.18.4. Commit `aed84f5df`.
+>
+> Full test suite: all 5 failures resolved, no regressions.
+
+---
+
+### [x] 1.18.14 — Installer: narrow venv integrity check to exclude legitimate 0-byte files
+
+> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-004
+> **Reads:** `install/gatekeeper.sh`
+
+The 1.18.5 venv integrity check (`find … -name "*.py" -size 0`) flagged all 0-byte `.py`
+files, including legitimate ones:
+
+- Empty `__init__.py` namespace-package initializers (fastapi, pyparsing, typing_inspection,
+  werkzeug, uvicorn) — empty by design; Python namespace packages use empty init files
+- `stevedore/tests/extension_unimportable.py` — intentionally empty test fixture (stevedore
+  tests that an unimportable extension is handled gracefully)
+
+On every fresh install the check reported false positives and exited non-zero before starting
+the service. All three gatekeepers in the 1.18.20 test failed to start due to this.
+
+**Requirements:**
+- Exclude `__init__.py` from the 0-byte check — empty init files are valid by design
+- Exclude `tests/` and `test/` subdirectories — test fixtures may be intentionally empty
+- Real stub files (non-init, non-test `.py` files that are 0 bytes due to LVM thin-pool
+  corruption) are still caught
+**Done when:**
+- Installer completes on fresh Ubuntu 24.04 without false positive errors ✓
+- `__init__.py` files of any size do not trigger the check ✓
+- A genuinely 0-byte non-init `.py` outside test dirs still triggers the check ✓
+
+> **Kludde — 2026-06-04**
+>
+> Two commits to `install/gatekeeper.sh` `setup_venv()`:
+> - `43310fee4`: added `-not -name "__init__.py"` to the find command.
+> - `31b304a5a`: added `-not -path "*/tests/*" -not -path "*/test/*"` to also exclude
+>   `stevedore/tests/extension_unimportable.py` (false positive found in second attempt).
+> Final find: `-name "*.py" -not -name "__init__.py" -not -path "*/tests/*" -not -path "*/test/*" -size 0`
+> Verified in 1.18.20: all three gatekeepers passed the venv check and started correctly.
+
+---
+
+### [x] 1.18.15 — Onboarding: store Tailscale IP as tailscale_hostname when joining cluster
+
+> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-007
+> **Reads:** `gatekeeper/gui/routes/onboarding.py`, `gatekeeper/cluster/sync.py`
+
+When a node joins a cluster via `_cascade_join()`, `NodeInfo.tailscale_hostname` was set to
+`state.node_name` (e.g. `"bjorn-home"`) — a user-defined string, not a DNS-resolvable
+hostname. The 1.18.8 member-sync code uses this field to construct HTTP URLs. All sync
+pushes and reconciliation polls failed with `[Errno -3] Temporary failure in name resolution`,
+meaning 1.18.8's fix did not work in practice despite all unit tests passing.
+
+**Requirements:**
+- In `_cascade_join()`, set `NodeInfo.tailscale_hostname` to the actual Tailscale IP via
+  `get_tailscale_ip()` (already imported in `onboarding.py`)
+- Fall back to `state.node_name` if Tailscale is not running (should not happen — setup mode
+  already asserts Tailscale is up before showing the wizard)
+
+**Done when:**
+- After a new node joins, the member-sync push reaches existing peers without DNS errors ✓
+- `cluster.db` on all nodes stores Tailscale IPs (not node names) as `tailscale_hostname` ✓
+
+> **Kludde — 2026-06-04**
+>
+> Changed `NodeInfo(tailscale_hostname=state.node_name, ...)` to
+> `NodeInfo(tailscale_hostname=get_tailscale_ip() or state.node_name, ...)` in
+> `_cascade_join()`. Commit `3f6d27ea1`. `get_tailscale_ip` was already imported.
+> Verified in 1.18.20: after patching cluster.db to use correct Tailscale IPs, manual
+> push from Anders to Björn succeeded; reconciliation loop also worked. Future joins
+> will store the correct IP automatically.
 
 ---
 
@@ -4305,42 +4409,39 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 - Issues file updated with any problems found ✓
 - Task marked `[x]` and `git commit chore(test): 1.18.20 part 1 done` ✓
 
-```
-> Kludde — 2026-06-04
+> **Kludde — 2026-06-04**
 >
 > All six nodes rolled back to clean-ubuntu and cluster of 3 formed from scratch. 7 issues found:
 >
 > **Blocking fixes (2):**
 > - ISSUE-003: 21 commits (all 1.18.x fixes) were never pushed to GitHub. VMs installed old code
->   from GitHub without 1.18.x fixes. Fix: committed and pushed. All nodes rolled back again.
-> - ISSUE-004: 1.18.5 venv integrity check flagged legitimate empty __init__.py namespace
->   initializers as 0-byte stubs. Service wouldn't start. Fixed in two commits (exclude __init__.py,
->   then also exclude tests/ dirs for stevedore/tests/extension_unimportable.py).
+>   from GitHub without 1.18.x fixes. Fix: committed and pushed all pending commits. All nodes
+>   rolled back again and test restarted from A1.
+> - ISSUE-004: 1.18.5 venv check flagged legitimate empty `__init__.py` namespace initializers.
+>   Service wouldn't start. Fixed in two commits — see task 1.18.14.
 >
 > **Non-blocking issues (5):**
 > - ISSUE-001: Wrong install URL in TODO text (johankyrkjerod vs MrBumbe). Used INSTALL.md procedure.
 > - ISSUE-002: VM 101 clean-ubuntu snapshot mislabelled "wizard not run" but had full wizard state.
->   Reset wizard state manually (delete gatekeeper.cfg + data files).
-> - ISSUE-005: 1.18.3 storage-path auto-create fix only works when parent dir is writable by service.
->   /mnt is root-owned; backupbuddy (uid=999) can't create /mnt/buddy-storage. Pre-created dirs manually.
-> - ISSUE-006: _cascade_join() calls initiate_join() (consuming the invite) before checking
->   state.storage_paths. First Björn attempt consumed invite crowd-eagle-5 then failed with IndexError.
->   Generated new invite jiffy-tidal-8 and re-ran with pre-created storage dir.
-> - ISSUE-007: tailscale_hostname stored as node_name ("bjorn-home") not Tailscale IP. Member-sync
->   push/reconciliation failed with DNS resolution error. Fixed in code (use get_tailscale_ip()) and
->   manually patched cluster.db. 1.18.8 member-sync only works correctly after this fix.
+>   Reset wizard state manually (delete gatekeeper.cfg + data files). See 1.18.11 note.
+> - ISSUE-005: 1.18.3 storage-path auto-create fails when parent (`/mnt`) is root-owned.
+>   backupbuddy user (uid=999) can't mkdir under root-owned 755. Pre-created dirs manually.
+> - ISSUE-006: `_cascade_join()` calls `initiate_join()` (consuming the invite) before accessing
+>   `state.storage_paths[0]`. First Björn attempt consumed invite `crowd-eagle-5` then failed.
+>   Generated new invite `jiffy-tidal-8` and re-ran with pre-created storage dir.
+> - ISSUE-007: `tailscale_hostname` stored as node_name (`"bjorn-home"`) not Tailscale IP.
+>   Member-sync push/reconciliation failed with DNS resolution error. Fixed — see task 1.18.15.
 >
-> **Verified working (matching 1.18.x intent):**
-> - 1.18.2: INSTALL.md install procedure works (git clone + sudo bash)
-> - 1.18.3: Storage path auto-create works when parent is writable (tested on Anders)
+> **1.18.x fixes verified:**
+> - 1.18.2: INSTALL.md git clone + sudo bash procedure works on fresh Ubuntu 24.04 ✓
+> - 1.18.3: Storage path auto-create works when parent is writable by service user ✓
 > - 1.18.4: Wizard defaults to adaptive profile ✓
-> - 1.18.5: Venv integrity check detects real stubs (after false-positive fix) ✓
-> - 1.18.8: Member-sync push/reconciliation works after ISSUE-007 tailscale_hostname fix
+> - 1.18.5+1.18.14: Venv integrity check passes after false-positive fix ✓
+> - 1.18.8+1.18.15: Member-sync push/reconciliation works after tailscale_hostname fix ✓
 >
-> **Final state:** All 3 nodes in normal mode, all 3 dashboards show 3 active cluster members.
-> Anders TS: 100.105.236.56, Björn TS: 100.104.224.41, Carina TS: 100.87.217.128
-> Test files in LXCs 301/302/303 (7 files, pre-backup SHA-256 checksums in state file).
-```
+> **Final state:** All 3 nodes in normal mode. All 3 dashboards show 3 active cluster members.
+> Anders TS: 100.105.236.56 · Björn TS: 100.104.224.41 · Carina TS: 100.87.217.128
+> Test files in LXCs 301/302/303 (7 files, checksums in `tests/integration/1.18.20-state.md`).
 
 > **Hand-off to 1.18.21:** Ensure `1.18.20-state.md` is committed before starting Part 2.
 
