@@ -4115,6 +4115,439 @@ authoritative default profile value.
 
 ---
 
+### [ ] 1.18.20 — Second three-user simulation, Part 1: infrastructure + cluster formation
+
+> **Test run:** Second full end-to-end simulation verifying that all 1.18.x fixes hold
+> together in a clean environment. Picks up where the original 1.18.1 left off and confirms
+> ISSUE-002, -003, -005, -006, -007, -008, -009 are resolved.
+>
+> **State file:** `tests/integration/1.18.20-state.md` — update after each section.
+> Read this file first when resuming after a context compression or `/clear`.
+>
+> **Issues file:** `tests/integration/1.18.20-issues.md` — record all problems here.
+>
+> **Error policy:** All problems are recorded in the issues file. Nothing is fixed unless
+> it completely blocks progress. If a blocking fix is required: fix it, record it as
+> `BLOCKING FIX`, roll all nodes back to `clean-ubuntu`, restart from A1.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+>
+> **Prerequisite:** None — this is Part 1.
+
+---
+
+#### A. Infrastructure setup
+
+**A1 — Roll back all six nodes to `clean-ubuntu`:**
+
+```bash
+# Gatekeepers (QEMU VMs)
+for vmid in 101 102 103; do
+  qm stop $vmid --skiplock 1
+  sleep 3
+  qm rollback $vmid clean-ubuntu
+  qm start $vmid
+done
+
+# Agent containers (LXC)
+for ctid in 301 302 303; do
+  pct stop $ctid
+  sleep 2
+  pct rollback $ctid clean-ubuntu
+  pct start $ctid
+done
+```
+
+Verify all six are running:
+
+```bash
+qm status 101; qm status 102; qm status 103
+pct status 301; pct status 302; pct status 303
+```
+
+**A1a — Clear stale SSH host keys (on operator machine):**
+
+```bash
+for ip in 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33; do
+  ssh-keygen -R $ip
+done
+ssh-keyscan -H 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33 \
+  >> ~/.ssh/known_hosts
+```
+
+**A2 — Node layout:**
+
+| User | Role | VM/LXC | Hostname | LAN IP |
+|------|------|--------|----------|--------|
+| Anders | Gatekeeper | VM 101 | gatekeeper-anders | 10.99.0.11 |
+| Björn | Gatekeeper | VM 102 | gatekeeper-bjorn | 10.99.0.12 |
+| Carina | Gatekeeper | VM 103 | gatekeeper-carina | 10.99.0.13 |
+| Anders | Agent | LXC 301 | agent-anders-pc | 10.99.0.31 |
+| Björn | Agent | LXC 303 | agent-bjorn-pc | 10.99.0.33 |
+| Carina | Agent | LXC 302 | agent-anders-nas | 10.99.0.32 |
+
+**A3 — Verify Tailscale after rollback:**
+
+```bash
+ssh gk-anders "tailscale status"
+ssh gk-bjorn  "tailscale status"
+ssh gk-carina "tailscale status"
+```
+
+Expected: each shows node as online with a 100.x.x.x address.
+If any show "Logged out": ask Johan for a reusable auth key, then
+`sudo tailscale up --auth-key=<key>` on the affected node(s).
+
+Record Tailscale IPs in state file:
+
+```bash
+ssh gk-anders "tailscale ip -4"
+ssh gk-bjorn  "tailscale ip -4"
+ssh gk-carina "tailscale ip -4"
+```
+
+> **State update:** After A3, update `1.18.20-state.md` → Tailscale IPs table.
+
+---
+
+#### B. Download test files
+
+Place on Proxmox host (`/tmp/testfiles/`), then copy to agent containers via `pct push`.
+
+Mix: at least two `.jpg` (≥5 MB each), one `.zip` (50–200 MB), one `.iso` (200–700 MB), two `.docx`.
+
+Compute checksums **before any backup**:
+
+```bash
+sha256sum /tmp/testfiles/* | tee /tmp/checksums_before.txt
+```
+
+Copy subsets:
+- LXC 301 (Anders): all `.jpg` + `.iso`
+- LXC 303 (Björn): all `.zip` + one `.docx`
+- LXC 302 (Carina): remaining `.docx` + one `.jpg`
+
+> **State update:** After B, paste checksum output into `1.18.20-state.md` → Test file checksums.
+
+---
+
+#### C. Install and configure — Anders (VM 101)
+
+**C1 — SSH to gatekeeper:**
+
+```bash
+ssh gk-anders
+```
+
+**C2 — Install BackupBuddy gatekeeper:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/johankyrkjerod/backupbuddy/master/install/gatekeeper.sh \
+  | sudo bash
+```
+
+**C3 — Tailscale should already be connected from rollback. Verify:**
+
+```bash
+tailscale status
+```
+
+**C4 — Open wizard:** `http://10.99.0.11:8080` in browser.
+
+**C5 — Complete wizard:**
+
+- Step 1: Start a new cluster
+- Step 2: Node ID `anders-home`, display name `Anders home node`
+- Step 3: Storage path `/mnt/buddy-storage`, quota `50` GB
+- Step 4: Profile **Adaptive** (default)
+- Step 5: Skip notification email. Choose a passphrase, write it down.
+- Download `recovery-kit.enc`. Click "I have saved my recovery key".
+
+Record in state file: **invite code** and **Tailscale address** shown after wizard.
+
+**Verify:** Dashboard switches to Tailscale address; LAN IP is no longer accessible.
+
+---
+
+#### D. Install and configure — Björn (VM 102)
+
+Same steps as C with:
+- Node ID `bjorn-home`, display name `Björn home node`
+- Gatekeeper IP: `10.99.0.12`, agent LXC: 303
+- In wizard: **Join an existing cluster** → enter Anders's invite code + Tailscale address
+
+Record in state file: confirm both nodes appear in each other's dashboards.
+
+---
+
+#### E. Install and configure — Carina (VM 103)
+
+Same steps as C with:
+- Node ID `carina-home`, display name `Carina home node`
+- Gatekeeper IP: `10.99.0.13`, agent LXC: 302
+
+**Anders must generate a new invite code** from his Buddies page before Carina can join.
+Record new invite code in state file.
+
+Record in state file: confirm all three nodes appear Online in all three dashboards.
+
+---
+
+#### Done when (Part 1):
+
+- All six nodes running on clean-ubuntu rollback ✓
+- Tailscale connected on all three gatekeepers ✓
+- Test files downloaded with pre-backup checksums recorded in state file ✓
+- Anders's wizard complete; invite code and Tailscale address recorded in state file ✓
+- Björn joined cluster; both nodes visible in each other's dashboards ✓
+- Carina joined cluster; all three nodes visible as Online in all dashboards ✓
+- State file updated with all runtime values ✓
+- Issues file updated with any problems found ✓
+- Task marked `[x]` and `git commit chore(test): 1.18.20 part 1 done` ✓
+
+> **Hand-off to 1.18.21:** Ensure `1.18.20-state.md` is committed before starting Part 2.
+
+---
+
+### [ ] 1.18.21 — Second three-user simulation, Part 2: agent setup + backup monitoring
+
+> **Resume:** Before starting, read `tests/integration/1.18.20-state.md`.
+> All three gatekeepers must be installed and cluster formed (1.18.20 done).
+>
+> **State file:** `tests/integration/1.18.20-state.md` — continue updating.
+> **Issues file:** `tests/integration/1.18.20-issues.md` — continue recording problems.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+
+---
+
+#### F. Agent setup and backup monitoring
+
+**F1 — Install agent on LXC 301 (Anders):**
+
+```bash
+ssh agent-anders-pc
+curl -sSL https://raw.githubusercontent.com/johankyrkjerod/backupbuddy/master/install/agent.sh \
+  | sudo bash
+# Gatekeeper IP: 10.99.0.11, agent name: anders-laptop
+```
+
+Edit backup paths:
+
+```bash
+sudo nano /etc/backup-buddy/backup.cfg
+# Add under [backup]: /home/testuser/backup-test
+```
+
+Copy agent token to Anders's gatekeeper:
+
+```bash
+sudo grep token /etc/backup-buddy/backup.cfg
+# On gatekeeper: paste token into gatekeeper.cfg [agent_api] token = ...
+ssh gk-anders "sudo systemctl restart backup-buddy-gatekeeper"
+sudo systemctl start backup-buddy-agent
+```
+
+**F2 — Install agent on LXC 303 (Björn):**
+
+Same as F1 but:
+- `ssh agent-bjorn-pc`, gatekeeper IP: `10.99.0.12`, agent name: `bjorn-laptop`
+- Copy token to `gk-bjorn`
+
+**F3 — Install agent on LXC 302 (Carina):**
+
+Same as F1 but:
+- `ssh agent-anders-nas`, gatekeeper IP: `10.99.0.13`, agent name: `carina-laptop`
+- Copy token to `gk-carina`
+
+**F4 — Watch agent logs until SUCCESS:**
+
+```bash
+ssh agent-anders-pc  "journalctl -u backup-buddy-agent -f"
+ssh agent-bjorn-pc   "journalctl -u backup-buddy-agent -f"
+ssh agent-anders-nas "journalctl -u backup-buddy-agent -f"
+```
+
+Wait until each agent shows `SUCCESS` for all its test files. Note any `FAILED` entries
+in the issues file.
+
+**F5 — Confirm on gatekeeper dashboards:**
+
+Open each gatekeeper's Tailscale URL. Confirm:
+- "Last backup" shows a recent timestamp
+- "Files backed up" count is non-zero
+
+> **State update:** Update `1.18.20-state.md` section log rows F1–F3.
+
+---
+
+#### Done when (Part 2):
+
+- All three agents installed and registered on their gatekeepers ✓
+- All three agents show `SUCCESS` for every test file in journalctl ✓
+- All three gatekeeper dashboards show non-zero "Files backed up" ✓
+- State file updated ✓
+- Issues file updated ✓
+- Task marked `[x]` and `git commit chore(test): 1.18.21 part 2 done` ✓
+
+> **Hand-off to 1.18.22:** Ensure `1.18.20-state.md` is committed before starting Part 3.
+
+---
+
+### [ ] 1.18.22 — Second three-user simulation, Part 3: restore, checksums, and full checklist
+
+> **Resume:** Before starting, read `tests/integration/1.18.20-state.md`.
+> All agents must be installed and backups confirmed successful (1.18.21 done).
+> Pre-backup checksums must be recorded in state file.
+>
+> **State file:** `tests/integration/1.18.20-state.md` — final updates here.
+> **Issues file:** `tests/integration/1.18.20-issues.md` — record all problems.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+
+---
+
+#### G. Restore and checksum verification
+
+**G1 — Restore from Anders's dashboard:**
+
+Open `http://<anders-tailscale-ip>:8080` → Restore.
+Restore each of Anders's test files to `/tmp/restored/anders/` on the gatekeeper.
+
+**G2 — Restore from Björn's dashboard:**
+
+Restore Björn's test files to `/tmp/restored/bjorn/`.
+
+**G3 — Restore from Carina's dashboard:**
+
+Restore Carina's test files to `/tmp/restored/carina/`.
+
+**G4 — Compute checksums after restore:**
+
+```bash
+ssh gk-anders  "sha256sum /tmp/restored/anders/*"
+ssh gk-bjorn   "sha256sum /tmp/restored/bjorn/*"
+ssh gk-carina  "sha256sum /tmp/restored/carina/*"
+```
+
+Compare against pre-backup checksums in `1.18.20-state.md`. Every hash must match.
+Record PASS / FAIL in state file.
+
+**G5 — Folder restore test:**
+
+Restore an entire folder (not just a single file) via the dashboard to confirm
+the folder restore path works. Record PASS / FAIL.
+
+---
+
+#### H. Resilience test
+
+Stop one gatekeeper (simulate node failure) and confirm the others can still restore:
+
+```bash
+ssh proxmox "qm stop 101"   # Stop Anders's gatekeeper
+```
+
+From Björn's dashboard: attempt a restore. Should succeed even without Anders.
+From Carina's dashboard: attempt a restore. Should succeed.
+
+Bring Anders back:
+
+```bash
+ssh proxmox "qm start 101"
+```
+
+Confirm Anders's dashboard reconnects and shows all three nodes as Online.
+
+Record PASS / FAIL in state file and issues file.
+
+---
+
+#### H2. Manual checklist
+
+Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
+
+**Installation:**
+- [ ] Installer completes without errors on fresh Ubuntu 24.04
+- [ ] `backup-buddy-gatekeeper` service is `active (running)` after install
+- [ ] Wizard is reachable at `http://<LAN-IP>:8080`
+- [ ] `sudo tailscale up` connects without new browser auth (rollback preserved state)
+- [ ] Wizard completes all five steps without error
+- [ ] `recovery-kit.enc` download works and produces a non-empty file
+- [ ] Invite code generated and displayed after wizard completes
+- [ ] Dashboard switches to Tailscale address after wizard completes
+- [ ] Dashboard is **not** reachable on LAN IP after Tailscale binds (security check)
+
+**Cluster formation:**
+- [ ] Björn can join using Anders's invite code and Tailscale address
+- [ ] Carina can join using a freshly generated second invite code
+- [ ] All three nodes appear as **Online** in Anders's dashboard
+- [ ] All three nodes appear as **Online** in Björn's dashboard
+- [ ] All three nodes appear as **Online** in Carina's dashboard
+- [ ] Reusing an expired invite code produces an error, not a silent failure
+
+**Agent:**
+- [ ] Agent installer works; `backup-buddy-agent` service starts
+- [ ] Agent appears in gatekeeper's dashboard after token is copied
+- [ ] Editing `backup.cfg` + restarting agent picks up new folders
+- [ ] Agent log shows `SUCCESS` for each backed-up file
+
+**Backup integrity:**
+- [ ] All `.jpg` test files backed up successfully
+- [ ] All `.zip` test files backed up successfully
+- [ ] All `.iso` test files backed up successfully
+- [ ] All `.docx` test files backed up successfully
+- [ ] No `FAILED` entries in any agent log for the test files
+
+**Restore and checksums:**
+- [ ] Single-file restore completes without error
+- [ ] Restored `.jpg` SHA-256 matches original
+- [ ] Restored `.zip` SHA-256 matches original
+- [ ] Restored `.iso` SHA-256 matches original
+- [ ] Restored `.docx` SHA-256 matches original
+- [ ] Folder restore completes without error
+- [ ] Restored files land in the correct destination folder
+
+**Resilience:**
+- [ ] Stopping one gatekeeper; restore from the other two still succeeds
+- [ ] Stopped gatekeeper restarts and shows Online in dashboards
+
+**UI and UX:**
+- [ ] Dashboard shows warning if agent has not sent data for > 1 hour
+- [ ] Recovery kit re-download accessible from dashboard after wizard
+- [ ] Navigating dashboard with no data causes no crashes or blank pages
+
+---
+
+#### I. Close-out
+
+- Update `1.18.20-state.md` section log with final statuses.
+- Commit issues file: `git commit chore(test): 1.18.20 issues file — N issues logged`
+- Add kludde block below summarising results (same format as 1.18.1 kludde).
+- Mark all three tasks 1.18.20–1.18.22 as `[x]` in TODO.md.
+- Final commit: `git commit chore(test): mark 1.18.20-1.18.22 done — second sim complete`
+
+---
+
+#### Done when (Part 3 / full simulation):
+
+- All restore checksums match originals exactly ✓
+- Folder restore tested ✓
+- Resilience test passed (restore succeeds with one node down) ✓
+- Full manual checklist completed with all items PASS or documented ✓
+- `tests/integration/1.18.20-issues.md` committed with all findings ✓
+- `tests/integration/1.18.20-state.md` committed with final statuses ✓
+- Kludde block added below with overall result, what passed, what failed ✓
+- Tasks 1.18.20–1.18.22 marked `[x]` ✓
+
+---
+
+> **Kludde — test run (date TBD)**
+>
+> *(Fill in after run is complete — same format as 1.18.1 kludde above.)*
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
