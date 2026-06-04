@@ -416,7 +416,7 @@ def test_cast_vote_grace_extension_auto_applies():
     db.insert_member(_LOCAL_NODE_ID, "Local", "100.64.0.1", now)
     # Alice is in grace status with 7 days remaining
     db.insert_member(_OTHER_NODE_ID, "Alice", "100.64.0.2", now, status="grace")
-    vid = db.insert_vote("grace_extension", _OTHER_NODE_ID, _OTHER_NODE_ID,
+    vid = db.insert_vote("grace_extension", _OTHER_NODE_ID, _LOCAL_NODE_ID,
                          now, now + 172800, grace_extension_days=14)
     app = _make_app(cluster_db=db)
     r = _ts(app).post(f"/api/buddies/vote/{vid}/cast", json={"choice": True})
