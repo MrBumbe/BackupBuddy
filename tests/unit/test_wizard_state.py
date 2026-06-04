@@ -34,7 +34,7 @@ def test_load_state_no_file_returns_defaults(tmp: Path) -> None:
     assert state.node_name == ""
     assert state.storage_paths == []
     assert state.storage_quota_gb == 500
-    assert state.profile == "balanced"
+    assert state.profile == "adaptive"
     assert state.recovery_key_confirmed is False
     assert state.completed is False
 
@@ -126,7 +126,7 @@ def test_load_state_partially_valid_json_returns_known_fields(tmp: Path) -> None
     state = load_state(tmp)
     assert state.role == "new"
     assert state.node_name == "partial-node"
-    assert state.profile == "balanced"  # default preserved
+    assert state.profile == "adaptive"  # default set by task 1.18.4
 
 
 def test_load_state_ignores_unknown_keys(tmp: Path) -> None:
