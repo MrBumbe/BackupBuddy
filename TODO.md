@@ -4150,75 +4150,6 @@ authoritative default profile value.
 
 ---
 
-### [x] 1.18.14 — Installer: narrow venv integrity check to exclude legitimate 0-byte files
-
-> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-004
-> **Reads:** `install/gatekeeper.sh`
-
-The 1.18.5 venv integrity check (`find … -name "*.py" -size 0`) flagged all 0-byte `.py`
-files, including legitimate ones:
-
-- Empty `__init__.py` namespace-package initializers (fastapi, pyparsing, typing_inspection,
-  werkzeug, uvicorn) — empty by design; Python namespace packages use empty init files
-- `stevedore/tests/extension_unimportable.py` — intentionally empty test fixture (stevedore
-  tests that an unimportable extension is handled gracefully)
-
-On every fresh install the check reported false positives and exited non-zero before starting
-the service. All three gatekeepers in the 1.18.20 test failed to start due to this.
-
-**Requirements:**
-- Exclude `__init__.py` from the 0-byte check — empty init files are valid by design
-- Exclude `tests/` and `test/` subdirectories — test fixtures may be intentionally empty
-- Real stub files (non-init, non-test `.py` files that are 0 bytes due to LVM thin-pool
-  corruption) are still caught
-**Done when:**
-- Installer completes on fresh Ubuntu 24.04 without false positive errors ✓
-- `__init__.py` files of any size do not trigger the check ✓
-- A genuinely 0-byte non-init `.py` outside test dirs still triggers the check ✓
-
-> **Kludde — 2026-06-04**
->
-> Two commits to `install/gatekeeper.sh` `setup_venv()`:
-> - `43310fee4`: added `-not -name "__init__.py"` to the find command.
-> - `31b304a5a`: added `-not -path "*/tests/*" -not -path "*/test/*"` to also exclude
->   `stevedore/tests/extension_unimportable.py` (false positive found in second attempt).
-> Final find: `-name "*.py" -not -name "__init__.py" -not -path "*/tests/*" -not -path "*/test/*" -size 0`
-> Verified in 1.18.20: all three gatekeepers passed the venv check and started correctly.
-
----
-
-### [x] 1.18.15 — Onboarding: store Tailscale IP as tailscale_hostname when joining cluster
-
-> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-007
-> **Reads:** `gatekeeper/gui/routes/onboarding.py`, `gatekeeper/cluster/sync.py`
-
-When a node joins a cluster via `_cascade_join()`, `NodeInfo.tailscale_hostname` was set to
-`state.node_name` (e.g. `"bjorn-home"`) — a user-defined string, not a DNS-resolvable
-hostname. The 1.18.8 member-sync code uses this field to construct HTTP URLs. All sync
-pushes and reconciliation polls failed with `[Errno -3] Temporary failure in name resolution`,
-meaning 1.18.8's fix did not work in practice despite all unit tests passing.
-
-**Requirements:**
-- In `_cascade_join()`, set `NodeInfo.tailscale_hostname` to the actual Tailscale IP via
-  `get_tailscale_ip()` (already imported in `onboarding.py`)
-- Fall back to `state.node_name` if Tailscale is not running (should not happen — setup mode
-  already asserts Tailscale is up before showing the wizard)
-
-**Done when:**
-- After a new node joins, the member-sync push reaches existing peers without DNS errors ✓
-- `cluster.db` on all nodes stores Tailscale IPs (not node names) as `tailscale_hostname` ✓
-
-> **Kludde — 2026-06-04**
->
-> Changed `NodeInfo(tailscale_hostname=state.node_name, ...)` to
-> `NodeInfo(tailscale_hostname=get_tailscale_ip() or state.node_name, ...)` in
-> `_cascade_join()`. Commit `3f6d27ea1`. `get_tailscale_ip` was already imported.
-> Verified in 1.18.20: after patching cluster.db to use correct Tailscale IPs, manual
-> push from Anders to Björn succeeded; reconciliation loop also worked. Future joins
-> will store the correct IP automatically.
-
----
-
 ### [x] 1.18.20 — Second three-user simulation, Part 1: infrastructure + cluster formation
 
 > **Test run:** Second full end-to-end simulation verifying that all 1.18.x fixes hold
@@ -4418,7 +4349,7 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 >   from GitHub without 1.18.x fixes. Fix: committed and pushed all pending commits. All nodes
 >   rolled back again and test restarted from A1.
 > - ISSUE-004: 1.18.5 venv check flagged legitimate empty `__init__.py` namespace initializers.
->   Service wouldn't start. Fixed in two commits — see task 1.18.14.
+>   Service wouldn't start. Fixed in two commits — see task 1.18.23.
 >
 > **Non-blocking issues (5):**
 > - ISSUE-001: Wrong install URL in TODO text (johankyrkjerod vs MrBumbe). Used INSTALL.md procedure.
@@ -4430,14 +4361,14 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 >   `state.storage_paths[0]`. First Björn attempt consumed invite `crowd-eagle-5` then failed.
 >   Generated new invite `jiffy-tidal-8` and re-ran with pre-created storage dir.
 > - ISSUE-007: `tailscale_hostname` stored as node_name (`"bjorn-home"`) not Tailscale IP.
->   Member-sync push/reconciliation failed with DNS resolution error. Fixed — see task 1.18.15.
+>   Member-sync push/reconciliation failed with DNS resolution error. Fixed — see task 1.18.24.
 >
 > **1.18.x fixes verified:**
 > - 1.18.2: INSTALL.md git clone + sudo bash procedure works on fresh Ubuntu 24.04 ✓
 > - 1.18.3: Storage path auto-create works when parent is writable by service user ✓
 > - 1.18.4: Wizard defaults to adaptive profile ✓
-> - 1.18.5+1.18.14: Venv integrity check passes after false-positive fix ✓
-> - 1.18.8+1.18.15: Member-sync push/reconciliation works after tailscale_hostname fix ✓
+> - 1.18.5+1.18.23: Venv integrity check passes after false-positive fix ✓
+> - 1.18.8+1.18.24: Member-sync push/reconciliation works after tailscale_hostname fix ✓
 >
 > **Final state:** All 3 nodes in normal mode. All 3 dashboards show 3 active cluster members.
 > Anders TS: 100.105.236.56 · Björn TS: 100.104.224.41 · Carina TS: 100.87.217.128
@@ -4683,6 +4614,144 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 > **Kludde — test run (date TBD)**
 >
 > *(Fill in after run is complete — same format as 1.18.1 kludde above.)*
+
+---
+
+### [x] 1.18.23 — Installer: narrow venv integrity check to exclude legitimate 0-byte files
+
+> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-004; discovered during 1.18.20
+> **Reads:** `install/gatekeeper.sh`
+
+The 1.18.5 venv integrity check (`find … -name "*.py" -size 0`) flagged all 0-byte `.py`
+files, including legitimate ones that are empty by design:
+- Empty `__init__.py` namespace-package initializers (fastapi, pyparsing, typing_inspection,
+  werkzeug, uvicorn)
+- `stevedore/tests/extension_unimportable.py` — intentionally empty test fixture
+
+On every fresh install the check reported false positives and exited non-zero before starting
+the service. All three gatekeepers in the 1.18.20 test failed to start due to this.
+
+**Requirements:**
+- Exclude `__init__.py` from the 0-byte check — empty init files are valid by design
+- Exclude `tests/` and `test/` subdirectories — test fixtures may be intentionally empty
+- Real stub files (non-init, non-test `.py` files that are 0 bytes due to LVM thin-pool
+  corruption) are still caught
+
+**Done when:**
+- Installer completes on fresh Ubuntu 24.04 without false positive errors ✓
+- `__init__.py` files do not trigger the check ✓
+- A genuinely 0-byte non-init `.py` outside test dirs still triggers the check ✓
+
+> **Kludde — 2026-06-04**
+>
+> Two commits to `install/gatekeeper.sh` `setup_venv()`:
+> - `43310fee4`: added `-not -name "__init__.py"` to the find command.
+> - `31b304a5a`: added `-not -path "*/tests/*" -not -path "*/test/*"` to also exclude
+>   `stevedore/tests/extension_unimportable.py` (second false positive found in same run).
+> Final `find` filter: `-name "*.py" -not -name "__init__.py" -not -path "*/tests/*" -not -path "*/test/*" -size 0`
+> Verified in 1.18.20: all three gatekeepers passed the venv check and started correctly.
+
+---
+
+### [x] 1.18.24 — Onboarding: store Tailscale IP as tailscale_hostname when joining cluster
+
+> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-007; discovered during 1.18.20
+> **Reads:** `gatekeeper/gui/routes/onboarding.py`, `gatekeeper/cluster/sync.py`
+
+When a node joins a cluster via `_cascade_join()`, `NodeInfo.tailscale_hostname` was set to
+`state.node_name` (e.g. `"bjorn-home"`) — a user-defined label, not a DNS-resolvable name.
+The 1.18.8 member-sync code uses this field to construct HTTP URLs for push notifications and
+reconciliation polling. All sync attempts failed with `[Errno -3] Temporary failure in name
+resolution`, so 1.18.8's fix had no effect in practice despite unit tests passing.
+
+**Requirements:**
+- In `_cascade_join()`, set `NodeInfo.tailscale_hostname` to the actual Tailscale IP via
+  `get_tailscale_ip()` (already imported in `onboarding.py`)
+- Fall back to `state.node_name` if `get_tailscale_ip()` returns `None` (should not happen —
+  setup mode already requires Tailscale to be running before the wizard starts)
+
+**Done when:**
+- After a new node joins, the member-sync push reaches existing peers without DNS errors ✓
+- `cluster.db` on all nodes stores Tailscale IPs (not node names) as `tailscale_hostname` ✓
+
+> **Kludde — 2026-06-04**
+>
+> Changed `NodeInfo(tailscale_hostname=state.node_name, ...)` to
+> `NodeInfo(tailscale_hostname=get_tailscale_ip() or state.node_name, ...)` in
+> `_cascade_join()` in `onboarding.py`. Commit `3f6d27ea1`. `get_tailscale_ip` was
+> already imported. Verified in 1.18.20: after manually patching `cluster.db` to use
+> the correct Tailscale IPs, the member-sync push from Anders to Björn succeeded and
+> the reconciliation loop worked. Future joins will store the correct IP automatically.
+
+---
+
+### [ ] 1.18.25 — Onboarding: validate storage_paths before calling initiate_join in cascade
+
+> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-006; discovered during 1.18.20
+> **Reads:** `gatekeeper/gui/routes/onboarding.py`
+
+In `_cascade_join()`, `initiate_join()` is called before `state.storage_paths[0]` is
+accessed. If the user skipped or failed wizard step 3 (e.g. because the storage path
+creation failed), `initiate_join()` still runs, consuming the invite code and adding the
+joining node to the cluster-creator's `cluster.db`. The cascade then crashes with
+`IndexError: list index out of range` at `state.storage_paths[0]`.
+
+The result: the invite is spent and the node is half-registered. A retry requires the
+cluster creator to generate a new invite and manually remove the stale member entry —
+confusing for a real user with no access to `sqlite3`.
+
+**Requirements:**
+- At the start of `_cascade_join()`, check `if not state.storage_paths` and raise a
+  clear `RuntimeError` before calling `initiate_join()`
+- The error message must guide the user back to wizard step 3: "Storage path not set —
+  please complete step 3 before finishing setup."
+- `initiate_join()` must only be called after the storage path check passes
+
+**Done when:**
+- If step 3 was skipped, step 5 returns an error before the invite is consumed ✓
+- Invite remains valid and can be reused after fixing the storage path in step 3 ✓
+- Unit test: mock `state.storage_paths = []`, call `_cascade_join`, assert `initiate_join`
+  is never called and `RuntimeError` is raised ✓
+
+---
+
+### [ ] 1.18.26 — INSTALL.md and installer: guide user when storage path parent is root-owned
+
+> **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-005; discovered during 1.18.20
+> **Reads:** `INSTALL.md`, `install/gatekeeper.sh`, `gatekeeper/gui/routes/onboarding.py`
+
+The 1.18.3 storage-path auto-create fix (`os.makedirs` + `chown`) works only when the
+parent directory is writable by the `backupbuddy` service user (uid=999). Common choices
+like `/mnt/buddy-storage` fail silently because `/mnt` is root-owned 755, so `makedirs`
+raises `PermissionError` and the wizard returns "Could not create directory".
+
+In the 1.18.20 test, all three gatekeepers needed the directory pre-created manually:
+`mkdir -p /mnt/buddy-storage && chown backupbuddy:backupbuddy /mnt/buddy-storage`.
+INSTALL.md §4 Step 3 says "created automatically" — this is only true if the parent allows
+it (e.g. paths under `/var/lib/backup-buddy/` which are already service-owned).
+
+**Requirements:**
+
+Two complementary fixes:
+
+1. **`install/gatekeeper.sh`** — after creating `/var/lib/backup-buddy`, also create a
+   default storage directory and document it as a ready-to-use alternative:
+   ```bash
+   mkdir -p "$DATA_DIR/storage"
+   chown "${SERVICE_USER}:${SERVICE_GROUP}" "$DATA_DIR/storage"
+   ```
+
+2. **`INSTALL.md §4 Step 3`** — replace "created automatically" with clear guidance:
+   - If the user enters a path under `/mnt` or any root-owned parent, the wizard cannot
+     create it; they must pre-create it with `sudo mkdir -p <path> && sudo chown backupbuddy:backupbuddy <path>`
+   - Mention `/var/lib/backup-buddy/storage` as the zero-configuration default that always works
+
+**Done when:**
+- `install/gatekeeper.sh` creates `/var/lib/backup-buddy/storage` owned by `backupbuddy` ✓
+- `INSTALL.md §4 Step 3` explains the chown requirement for paths outside
+  `/var/lib/backup-buddy/` ✓
+- A fresh install wizard with `/mnt/buddy-storage` as input shows a clear, actionable error
+  that includes the exact `mkdir + chown` command to run ✓
 
 ---
 
