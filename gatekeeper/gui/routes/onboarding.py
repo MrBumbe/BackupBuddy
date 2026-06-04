@@ -363,7 +363,7 @@ async def _cascade_join(
         node_info = NodeInfo(
             node_id=state.node_name,
             display_name=state.node_display_name,
-            tailscale_hostname=state.node_name,
+            tailscale_hostname=get_tailscale_ip() or state.node_name,
             profile="adaptive",
         )
         result = await initiate_join(
