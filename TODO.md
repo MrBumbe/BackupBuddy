@@ -3635,6 +3635,14 @@ a gatekeeper that fails to start with a confusing Python import error.
 - Installer prints "Venv integrity check passed" when all stubs were replaced ✓
 - Manually verifiable: create a dummy 0-byte `.py` in the venv and confirm the check catches it ✓
 
+> **Kludde — 2026-06-03**
+>
+> Added a zero-byte `.py` file check at the end of `setup_venv()` in
+> `install/gatekeeper.sh`. `find` scans `$VENV_DIR/lib` for 0-byte `.py` files
+> after the force-reinstall step; if any are found, the installer prints the paths
+> and exits non-zero with "Re-run this installer to fix."
+> Prints "Venv integrity check passed." on success.
+
 ---
 
 ### [x] 1.18.6 — INSTALL.md: document non-interactive agent install for LXC / no-TTY
@@ -3666,6 +3674,14 @@ No code changes required — the env var path already exists in `agent.sh`.
 **Done when:**
 - `INSTALL.md §5` documents `BB_GATEKEEPER_IP` and `BB_AGENT_NAME` ✓
 - The note appears before any step that could fail in a no-TTY environment ✓
+
+> **Kludde — 2026-06-03**
+>
+> Added a "Running in a container or over SSH without a TTY?" callout block
+> to `INSTALL.md §5`, immediately after the standard install command. The block
+> shows the `BB_GATEKEEPER_IP=... BB_AGENT_NAME=... sudo -E bash install/agent.sh`
+> invocation and explains each variable. No code changes — the env-var path
+> already existed in `agent.sh`.
 
 ---
 
@@ -3723,6 +3739,17 @@ if the field is absent — reducing the number of required fields a user must se
 - `INSTALL.md §5a` shows a complete backup.cfg with all required fields ✓
 - A fresh manual edit following the guide starts the agent without config errors ✓
 
+> **Kludde — 2026-06-03**
+>
+> Replaced the partial backup.cfg snippet in `INSTALL.md §5a` with a complete
+> example covering all seven sections (`[schedule]`, `[backup]`, `[exclude]`,
+> `[node]`, `[gatekeeper]`, `[lifeboat_server]`). Added inline annotations for
+> `token` (where to find it) and `name` (must be unique).
+>
+> Also made `[gatekeeper] name` optional in `agent/config.py`: falls back to
+> `socket.gethostname()` when absent, reducing the number of fields a user
+> must set manually.
+
 ---
 
 ### [x] 1.18.8 — Cluster: push updated member list to all peers when a new node joins
@@ -3766,6 +3793,24 @@ ensures eventual consistency even if a push is lost.
 - Unit test: mock a 3-node cluster, simulate a join, assert all nodes receive the
   updated list ✓
 
+> **Kludde — 2026-06-03**
+>
+> Added `MemberEntry` / `MemberListPushMessage` Pydantic models in
+> `gatekeeper/cluster/sync.py`, plus `push_member_list_to_peers()` (fire-and-forget,
+> excludes new joiner and self) and `fetch_member_list_from_peer()` (returns None
+> on any failure).
+>
+> New routes in `gatekeeper/main.py`:
+> - `POST /api/cluster/sync/members` — receive and upsert a pushed member list
+> - `GET  /api/cluster/sync/members` — serve local member list for polling
+>
+> `_member_reconciliation_loop()` runs every 300 s per node, polls a random active
+> peer, and upserts differences. Upsert never overwrites status, grace, or
+> joined_at — those remain locally authoritative.
+>
+> 15 unit tests in `tests/unit/test_cluster_sync_members.py`.
+> Integration test (Proxmox) still required.
+
 ---
 
 ### [x] 1.18.9 — Restore: handle directory dest_path; surface actionable error messages
@@ -3807,6 +3852,22 @@ populated with the specific cause.
   API response `error` field ✓
 - Unit tests cover: dest_path is a file path, dest_path is a directory,
   dest_path is unwritable ✓
+
+> **Kludde — 2026-06-03**
+>
+> `restore.py → _safe_move()`: if dest is an existing directory, the file is
+> written inside it using the original filename (cp-like semantics); returns the
+> resolved path so `RestoreFileResult.dest_path` reflects where the file actually
+> landed. `PermissionError` is caught and re-raised as `RestoreError` with a
+> human-readable message.
+>
+> `routes/restore.py`: catches `RestoreError` in both file and folder `_run()`
+> closures and populates `job["error"]` with the specific message rather than
+> the generic fallback. Also fixes whitespace-only `recovery_key` being accepted
+> as valid (strip before truthiness check).
+>
+> 3 new unit test scenarios in `tests/unit/test_restore.py` and
+> `tests/unit/test_gui_restore.py`.
 
 ---
 
@@ -3853,6 +3914,29 @@ server FURLs (which are already semi-public within the cluster).
 - The warning message appears in the gatekeeper log when operating from cache ✓
 - Integration test on Proxmox: stop Anders (introducer), trigger restore on Björn,
   verify restore succeeds using cached server addresses ✓
+
+> **Kludde — 2026-06-04**
+>
+> Two-layer fix:
+>
+> 1. **Tahoe fork** (`src/allmydata/storage_client.py`): `StorageFarmBroker` now
+>    calls `_save_servers_yaml()` each time `_got_announcement()` processes a server
+>    announcement. Writes `anonymous-storage-FURL` and `permutation-seed-base32` for
+>    each known server to `private/servers.yaml` in the Tahoe basedir. The existing
+>    `load_static_servers()` in `client.py` reads this file on startup, so cached
+>    servers are available immediately if the introducer is unreachable.
+>    Only string-safe fields are stored; Python sets (NURLs) are skipped to avoid
+>    `yaml.safe_dump()` errors.
+>
+> 2. **BackupBuddy** (`gatekeeper/tahoe/storage_node.py`): `start()` checks TCP
+>    reachability of the introducer (10 s timeout) before launching the Tahoe
+>    subprocess. If unreachable, logs a visible warning — with cached server count
+>    if `private/servers.yaml` exists, without count if no cache yet.
+>    Added `_parse_furl_locations()` (handles HOST:PORT, tcp:HOST:PORT, multi-hint,
+>    IPv6) and `_count_cached_servers()`.
+>
+> 20 unit tests in `tests/unit/test_server_cache.py`.
+> Integration test on Proxmox (stop Anders, restore on Björn) still required.
 
 ---
 
