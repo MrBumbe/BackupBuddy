@@ -3930,6 +3930,91 @@ No code changes required — this is a test procedure update only.
 
 ---
 
+### [ ] 1.18.13 — Fix 5 pre-existing unit test failures
+
+> **Source:** Discovered during task 1.18.10 implementation (2026-06-04)
+> **Reads:** `tests/unit/test_storage_node.py`, `tests/unit/test_gui_buddies.py`,
+>            `tests/unit/test_queue_worker.py`, `tests/unit/test_wizard_state.py`
+
+Five unit tests fail independently of changes made in 1.18.10.
+All failures were confirmed pre-existing via `git stash` + re-run.
+
+---
+
+**Failure 1 — `test_start_raises_if_tub_location_is_localhost`**
+File: `tests/unit/test_storage_node.py`
+
+The test expects `StorageNode.start()` to raise `RuntimeError` when `tub.location`
+is `127.0.0.1`. The current code instead auto-patches it to the real LAN IP
+(via `get_lan_ip()`). On the dev machine (192.168.1.246) `get_lan_ip()` returns
+a value, so no error is raised and the test fails.
+
+Root cause: the test documents behavior that was intentionally changed when the
+auto-patch logic was added. The test must be updated to reflect the new behavior:
+either mock `get_lan_ip()` to return `None` (to test the error path) or split into
+two tests — one for successful auto-patch, one for the `None` → error path.
+
+Fix: Update the test to mock `get_lan_ip` returning `None` to exercise the
+`RuntimeError` path, and add a second test asserting that a valid `get_lan_ip()`
+result patches `tub.location` and does not raise.
+
+---
+
+**Failure 2 — `test_cast_vote_grace_extension_auto_applies`**
+File: `tests/unit/test_gui_buddies.py`
+
+The test expects HTTP 200 when casting a vote for a grace extension, but the
+endpoint returns HTTP 503 with "Network error reaching proposer". The forward-ballot
+logic is attempting a real HTTP call to a peer proposer rather than using the mock.
+
+Root cause: the test likely does not mock the outbound HTTP client used to forward
+the ballot to the proposer node. The implementation tries to call a real URL.
+
+Fix: Inspect `gatekeeper/gui/routes/buddies.py` (or equivalent) to find the
+forward-ballot call. Add or fix the mock so the outbound HTTP request is
+intercepted and returns a 200.
+
+---
+
+**Failure 3 — `test_non_fragmentation_error_kills_worker_task[asyncio]`**
+File: `tests/unit/test_queue_worker.py`
+
+After an `OSError` is raised during a fragmentation job, the test asserts
+`all(t.done() for t in worker._tasks)` — that all worker tasks are marked done.
+The assertion fails; at least one task is not yet done.
+
+Root cause: the worker's error handling for non-fragmentation errors (e.g. `OSError`)
+may not cancel/await all tracked asyncio tasks before returning. The cancellation
+or cleanup path is incomplete.
+
+Fix: Audit `gatekeeper/watcher/queue_worker.py` (or equivalent) error handling for
+non-`FragmentationError` exceptions. Ensure all tasks in `worker._tasks` are
+cancelled and awaited in the exception handler so the assertion holds.
+
+---
+
+**Failures 4 & 5 — `test_load_state_no_file_returns_defaults` and**
+**`test_load_state_partially_valid_json_returns_known_fields`**
+File: `tests/unit/test_wizard_state.py`
+
+Both tests expect the default backup profile to be `'balanced'`.
+The actual default is `'adaptive'`.
+
+Root cause: the default profile value was changed in the implementation
+(from `'balanced'` to `'adaptive'`) without updating the tests.
+
+Fix: Decide the correct default. If `'adaptive'` is the intended default,
+update both test assertions to `'adaptive'`. If `'balanced'` is correct,
+revert the implementation default. Check `project-docs/design.md` for the
+authoritative default profile value.
+
+---
+
+**Done when:**
+- All 5 tests pass ✓
+- No other unit tests are broken by the fixes ✓
+- `git commit` with `test(...)` type for test-only changes, `fix(...)` for code changes ✓
+
 ---
 
 # Phase 2 — Maturity
