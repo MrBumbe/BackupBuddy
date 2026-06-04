@@ -3117,6 +3117,20 @@ qm status 101; qm status 102; qm status 103
 pct status 301; pct status 302; pct status 303
 ```
 
+**A1a — Clear stale SSH host keys:**
+
+After rollback, run on the operator machine:
+
+```bash
+for ip in 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33; do
+  ssh-keygen -R $ip
+done
+ssh-keyscan -H 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33 \
+  >> ~/.ssh/known_hosts
+```
+
+This avoids the "Host key verification failed" error caused by key rotation on rollback.
+
 **A2 — Node layout for this test:**
 
 | User | Role | VM/LXC ID | Hostname | LAN IP | Tailscale IP |
@@ -3940,7 +3954,7 @@ server FURLs (which are already semi-public within the cluster).
 
 ---
 
-### [ ] 1.18.11 — Test infra: retake clean-ubuntu snapshot for VM 101 with Tailscale authenticated
+### [x] 1.18.11 — Test infra: retake clean-ubuntu snapshot for VM 101 with Tailscale authenticated
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-001, ISSUE-003
 > **Reads:** `tests/integration/1.18.1-issues.md`
@@ -3977,7 +3991,7 @@ future test runs, matching the prerequisite in task 1.18.1.
 
 ---
 
-### [ ] 1.18.12 — Test procedure: add SSH known_hosts pre-cleanup to 1.18.1
+### [x] 1.18.12 — Test procedure: add SSH known_hosts pre-cleanup to 1.18.1
 
 > **Source:** `tests/integration/1.18.1-issues.md` → ISSUE-002
 > **Reads:** `TODO.md §1.18.1 — Step A1`
@@ -4014,7 +4028,7 @@ No code changes required — this is a test procedure update only.
 
 ---
 
-### [ ] 1.18.13 — Fix 5 pre-existing unit test failures
+### [x] 1.18.13 — Fix 5 pre-existing unit test failures
 
 > **Source:** Discovered during task 1.18.10 implementation (2026-06-04)
 > **Reads:** `tests/unit/test_storage_node.py`, `tests/unit/test_gui_buddies.py`,
