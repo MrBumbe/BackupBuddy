@@ -5057,6 +5057,46 @@ Two complementary fixes:
 
 ---
 
+## 1.19 — Bug investigation backlog (found during 1.18.20v2)
+
+### [ ] 1.19.10 — Investigate: first invite code not persisted to cluster.db after cascade
+
+> **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-001; discovered during 1.18.20v2
+> **Reads:** `gatekeeper/gui/routes/onboarding.py` (`_cascade_new_cluster`),
+>            `gatekeeper/db/cluster.py` (`ClusterDB.insert_invite`)
+
+After a successful `_cascade_new_cluster()` run, the first invite code (stored in
+`onboarding_state.json` as `first_invite_code`) was not present in the `invites` table
+of `cluster.db`. The `members` table had 1 correct row (`anders-home`), inserted in the
+same transaction block, confirming the DB connection and commit path work.
+
+`generate_invite()` calls `db.insert_invite()` which does `execute + commit()`. The state
+file recorded `"first_invite_code": "bolt-herbs-8"`, confirming `generate_invite()` returned
+a code, but querying the DB (as `backupbuddy` user, with WAL checkpoint) showed 0 invite rows.
+
+Workaround used: generate invite via `POST /api/buddies/invite` after wizard completion.
+
+**Investigation areas:**
+
+1. Is there a code path that deletes or rolls back the invites table after the cascade?
+   (e.g. during service restart, schema migration, or lifespan startup)
+2. Does the WAL checkpoint race with the process SIGTERM? (DB was closed at 21:39:04,
+   SIGTERM at 21:41:35 — 2 minutes gap — so unlikely but worth confirming)
+3. Is `generate_invite` skipped because `state.first_invite_code` was already set
+   from a previous wizard run that wasn't fully cleaned up during the A0 reset?
+   (Check: did the old `onboarding_state.json` survive the A0 wizard reset and contain
+   a stale `first_invite_code` value that made the `if not state.first_invite_code`
+   guard skip the `generate_invite` call?)
+4. Check git log for any recent changes to `_cascade_new_cluster` or `ClusterDB`
+   that could explain the regression.
+
+**Done when:**
+- Root cause identified and documented in a kludde below
+- Fix applied (or root cause ruled out as a test environment artefact)
+- Regression test added if it's a real code bug
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
