@@ -4378,7 +4378,7 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 
 ---
 
-### [ ] 1.18.20v2 — Second three-user simulation, Part 1 re-run: post-fix verification
+### [x] 1.18.20v2 — Second three-user simulation, Part 1 re-run: post-fix verification
 
 > **Test run:** Clean re-run of Part 1 to verify that fixes 1.18.23 (venv integrity check),
 > 1.18.24 (tailscale_hostname), 1.18.25 (storage_paths validation before join), and 1.18.26
@@ -4627,6 +4627,24 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 - State file updated with all runtime values ✓
 - Issues file updated with any problems found ✓
 - Task marked `[x]` and `git commit chore(test): 1.18.20v2 part 1 done` ✓
+
+> **Kludde — 2026-06-04**
+>
+> All six nodes rolled back and cluster of 3 formed from scratch. 1 non-blocking issue found:
+>
+> **Non-blocking issues (1):**
+> - ISSUE-001: First invite code `bolt-herbs-8` generated in cascade but not persisted to
+>   cluster.db (invites table empty after wizard). Root cause TBD. Workaround: generated
+>   new invite via /api/buddies/invite for Björn (slit-fled-9) and Carina (affix-clay-9).
+>
+> **1.18.x fixes verified:**
+> - 1.18.23: Venv integrity check passed on all 3 nodes ✓
+> - 1.18.24: tailscale_hostname stored correctly as Tailscale IP in cluster.db ✓
+> - 1.18.25: storage_paths validated before initiate_join (no invite consumed on error) ✓
+> - 1.18.26: /var/lib/backup-buddy/storage auto-created by installer on all 3 nodes ✓
+>
+> **Final state:** All 3 nodes in normal mode. All 3 dashboards show 3 active cluster members.
+> Anders TS: 100.105.236.56 · Björn TS: 100.104.224.41 · Carina TS: 100.87.217.128
 
 > **Hand-off to 1.18.21:** Ensure `1.18.20v2-state.md` is committed before starting Part 2.
 
