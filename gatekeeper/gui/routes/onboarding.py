@@ -351,6 +351,11 @@ async def _cascade_join(
     Contacts the existing gatekeeper, obtains the introducer FURL, sets up
     the local Tahoe storage node, creates a local root_dir, then writes config.
     """
+    if not state.storage_paths:
+        raise RuntimeError(
+            "Storage path not set — please complete step 3 before finishing setup."
+        )
+
     cap_path = data_dir / "root_dir.cap"
     introducer_furl: str
     join_members: list[dict] = []

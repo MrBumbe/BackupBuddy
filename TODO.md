@@ -4685,7 +4685,7 @@ resolution`, so 1.18.8's fix had no effect in practice despite unit tests passin
 
 ---
 
-### [ ] 1.18.25 — Onboarding: validate storage_paths before calling initiate_join in cascade
+### [x] 1.18.25 — Onboarding: validate storage_paths before calling initiate_join in cascade
 
 > **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-006; discovered during 1.18.20
 > **Reads:** `gatekeeper/gui/routes/onboarding.py`
@@ -4712,6 +4712,18 @@ confusing for a real user with no access to `sqlite3`.
 - Invite remains valid and can be reused after fixing the storage path in step 3 ✓
 - Unit test: mock `state.storage_paths = []`, call `_cascade_join`, assert `initiate_join`
   is never called and `RuntimeError` is raised ✓
+
+```
+> Kludde: Three-line guard added at the top of _cascade_join() before cap_path is set.
+> Raises RuntimeError("Storage path not set — please complete step 3 before finishing
+> setup.") when state.storage_paths is empty — initiate_join() is never called.
+> The existing step5_post except-block surfaces the error via wizard_error.html,
+> so the invite code remains unconsumed and the user gets actionable guidance.
+> Note: _cascade_new_cluster has the same state.storage_paths[0] indexing but no
+> initiate_join to protect — a separate guard there is out of this task's scope.
+> New tests/unit/test_onboarding.py — 1 test (IsolatedAsyncioTestCase).
+> Full suite: 927 pass, 12 skip.
+```
 
 ---
 
