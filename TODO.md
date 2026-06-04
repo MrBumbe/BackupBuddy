@@ -4378,13 +4378,267 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 
 ---
 
+### [ ] 1.18.20v2 — Second three-user simulation, Part 1 re-run: post-fix verification
+
+> **Test run:** Clean re-run of Part 1 to verify that fixes 1.18.23 (venv integrity check),
+> 1.18.24 (tailscale_hostname), 1.18.25 (storage_paths validation before join), and 1.18.26
+> (root-owned storage path guidance) hold together in a clean environment.
+> No blocking issues from the original 1.18.20 run should recur.
+>
+> **State file:** `tests/integration/1.18.20v2-state.md` — update after each section.
+> Read this file first when resuming after a context compression or `/clear`.
+>
+> **Issues file:** `tests/integration/1.18.20v2-issues.md` — record all problems here.
+>
+> **Error policy:** All problems are recorded in the issues file. Nothing is fixed unless
+> it completely blocks progress. If a blocking fix is required: fix it, record it as
+> `BLOCKING FIX`, roll all nodes back to their clean snapshot, restart from A1.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+>
+> **Prerequisite:** None — this is Part 1.
+
+---
+
+#### A0. Re-snapshot VM 101 (one-time prep — run once before this test)
+
+> VM 101's `clean-ubuntu` snapshot was taken after a wizard run (ISSUE-002 in 1.18.20).
+> This step replaces it with a genuinely clean baseline.
+
+```bash
+# Roll back VM 101 only and check for wizard state
+qm stop 101 --skiplock 1
+sleep 5
+qm rollback 101 clean-ubuntu
+qm start 101
+sleep 15
+```
+
+Check for wizard state:
+```bash
+ssh gk-anders "test -f /etc/backup-buddy/gatekeeper.cfg && echo 'WIZARD STATE PRESENT' || echo 'Clean'"
+```
+
+If `WIZARD STATE PRESENT`, reset to factory state:
+```bash
+ssh gk-anders "sudo rm -f \
+  /etc/backup-buddy/gatekeeper.cfg \
+  /var/lib/backup-buddy/catalog.db \
+  /var/lib/backup-buddy/cluster.db \
+  /var/lib/backup-buddy/root_dir.cap \
+  /var/lib/backup-buddy/recovery_kit.enc && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+```
+
+Verify service starts in setup mode (no active config):
+```bash
+ssh gk-anders "sudo systemctl status backup-buddy-gatekeeper | head -5"
+```
+
+Take fresh snapshot:
+```bash
+qm snapshot 101 clean-ubuntu-v2 --description "Clean baseline v2 2026-06-04: BB installed, Tailscale authenticated, wizard not run"
+```
+
+> From this run onward, VM 101 uses `clean-ubuntu-v2`. VMs 102–103 and LXCs 301–303 still use `clean-ubuntu`.
+
+---
+
+#### A. Infrastructure setup
+
+**A1 — Roll back all six nodes to their clean snapshot:**
+
+```bash
+# VM 101: use clean-ubuntu-v2
+qm stop 101 --skiplock 1
+sleep 3
+qm rollback 101 clean-ubuntu-v2
+qm start 101
+
+# Gatekeepers 102, 103
+for vmid in 102 103; do
+  qm stop $vmid --skiplock 1
+  sleep 3
+  qm rollback $vmid clean-ubuntu
+  qm start $vmid
+done
+
+# Agent containers (LXC)
+for ctid in 301 302 303; do
+  pct stop $ctid
+  sleep 2
+  pct rollback $ctid clean-ubuntu
+  pct start $ctid
+done
+```
+
+Verify all six are running:
+```bash
+qm status 101; qm status 102; qm status 103
+pct status 301; pct status 302; pct status 303
+```
+
+**A1a — Clear stale SSH host keys (on operator machine):**
+
+```bash
+for ip in 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33; do
+  ssh-keygen -R $ip
+done
+ssh-keyscan -H 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33 \
+  >> ~/.ssh/known_hosts
+```
+
+**A2 — Node layout:**
+
+| User | Role | VM/LXC | Hostname | LAN IP |
+|------|------|--------|----------|--------|
+| Anders | Gatekeeper | VM 101 | gatekeeper-anders | 10.99.0.11 |
+| Björn | Gatekeeper | VM 102 | gatekeeper-bjorn | 10.99.0.12 |
+| Carina | Gatekeeper | VM 103 | gatekeeper-carina | 10.99.0.13 |
+| Anders | Agent | LXC 301 | agent-anders-pc | 10.99.0.31 |
+| Björn | Agent | LXC 303 | agent-bjorn-pc | 10.99.0.33 |
+| Carina | Agent | LXC 302 | agent-anders-nas | 10.99.0.32 |
+
+**A3 — Verify Tailscale after rollback:**
+
+```bash
+ssh gk-anders "tailscale status"
+ssh gk-bjorn  "tailscale status"
+ssh gk-carina "tailscale status"
+```
+
+Expected: each shows node as online with a 100.x.x.x address.
+If any show "Logged out": ask Johan for a reusable auth key, then
+`sudo tailscale up --auth-key=<key>` on the affected node(s).
+
+Record Tailscale IPs in state file:
+
+```bash
+ssh gk-anders "tailscale ip -4"
+ssh gk-bjorn  "tailscale ip -4"
+ssh gk-carina "tailscale ip -4"
+```
+
+> **State update:** After A3, update `1.18.20v2-state.md` → Tailscale IPs table.
+
+---
+
+#### B. Download test files
+
+Test files from the original 1.18.20 run may still be in `/tmp/testfiles/` on the Proxmox host
+(the host is not rolled back). Verify first:
+
+```bash
+ls /tmp/testfiles/
+sha256sum /tmp/testfiles/*
+```
+
+If present and intact, skip re-download and just re-push to containers.
+If missing: download fresh files (two `.jpg` ≥5 MB each, one `.zip` 50–200 MB, one `.iso` 200–700 MB, two `.docx`).
+
+Compute checksums **before any backup**:
+
+```bash
+sha256sum /tmp/testfiles/* | tee /tmp/checksums_before_v2.txt
+```
+
+Copy subsets:
+- LXC 301 (Anders): all `.jpg` + `.iso`
+- LXC 303 (Björn): all `.zip` + one `.docx`
+- LXC 302 (Carina): remaining `.docx` + one `.jpg`
+
+> **State update:** After B, paste checksum output into `1.18.20v2-state.md` → Test file checksums.
+
+---
+
+#### C. Install and configure — Anders (VM 101)
+
+**C1 — SSH to gatekeeper:**
+
+```bash
+ssh gk-anders
+```
+
+**C2 — Install BackupBuddy gatekeeper:**
+
+```bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/gatekeeper.sh
+```
+
+**C3 — Tailscale should already be connected from rollback. Verify:**
+
+```bash
+tailscale status
+```
+
+**C4 — Open wizard:** `http://10.99.0.11:8080` in browser.
+
+**C5 — Complete wizard:**
+
+- Step 1: Start a new cluster
+- Step 2: Node ID `anders-home`, display name `Anders home node`
+- Step 3: Storage path `/var/lib/backup-buddy/storage` (installer default — no pre-create needed; verifies 1.18.26 fix)
+- Step 4: Profile **Adaptive** (default)
+- Step 5: Skip notification email. Choose a passphrase, write it down.
+- Download `recovery-kit.enc`. Click "I have saved my recovery key".
+
+Record in state file: **invite code** and **Tailscale address** shown after wizard.
+
+**Verify:** Dashboard switches to Tailscale address; LAN IP is no longer accessible.
+
+---
+
+#### D. Install and configure — Björn (VM 102)
+
+Same steps as C with:
+- Node ID `bjorn-home`, display name `Björn home node`
+- Gatekeeper IP: `10.99.0.12`, agent LXC: 303
+- Storage path: `/var/lib/backup-buddy/storage`
+- In wizard: **Join an existing cluster** → enter Anders's invite code + Tailscale address
+
+Record in state file: confirm both nodes appear in each other's dashboards.
+
+---
+
+#### E. Install and configure — Carina (VM 103)
+
+Same steps as C with:
+- Node ID `carina-home`, display name `Carina home node`
+- Gatekeeper IP: `10.99.0.13`, agent LXC: 302
+- Storage path: `/var/lib/backup-buddy/storage`
+
+**Anders must generate a new invite code** from his Buddies page before Carina can join.
+Record new invite code in state file.
+
+Record in state file: confirm all three nodes appear Online in all three dashboards.
+
+---
+
+#### Done when (Part 1):
+
+- VM 101 re-snapshotted as `clean-ubuntu-v2` with verified clean wizard state ✓
+- All six nodes running on clean snapshot rollback ✓
+- Tailscale connected on all three gatekeepers ✓
+- Test files present with pre-backup checksums recorded in state file ✓
+- Anders's wizard complete; invite code and Tailscale address recorded in state file ✓
+- Björn joined cluster on first attempt; both nodes visible in each other's dashboards ✓
+- Carina joined cluster; all three nodes visible as Online in all dashboards ✓
+- State file updated with all runtime values ✓
+- Issues file updated with any problems found ✓
+- Task marked `[x]` and `git commit chore(test): 1.18.20v2 part 1 done` ✓
+
+> **Hand-off to 1.18.21:** Ensure `1.18.20v2-state.md` is committed before starting Part 2.
+
+---
+
 ### [ ] 1.18.21 — Second three-user simulation, Part 2: agent setup + backup monitoring
 
-> **Resume:** Before starting, read `tests/integration/1.18.20-state.md`.
-> All three gatekeepers must be installed and cluster formed (1.18.20 done).
+> **Resume:** Before starting, read `tests/integration/1.18.20v2-state.md`.
+> All three gatekeepers must be installed and cluster formed (1.18.20v2 done).
 >
-> **State file:** `tests/integration/1.18.20-state.md` — continue updating.
-> **Issues file:** `tests/integration/1.18.20-issues.md` — continue recording problems.
+> **State file:** `tests/integration/1.18.20v2-state.md` — continue updating.
+> **Issues file:** `tests/integration/1.18.20v2-issues.md` — continue recording problems.
 >
 > **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
 
@@ -4446,7 +4700,7 @@ Open each gatekeeper's Tailscale URL. Confirm:
 - "Last backup" shows a recent timestamp
 - "Files backed up" count is non-zero
 
-> **State update:** Update `1.18.20-state.md` section log rows F1–F3.
+> **State update:** Update `1.18.20v2-state.md` section log rows F1–F3.
 
 ---
 
@@ -4459,18 +4713,18 @@ Open each gatekeeper's Tailscale URL. Confirm:
 - Issues file updated ✓
 - Task marked `[x]` and `git commit chore(test): 1.18.21 part 2 done` ✓
 
-> **Hand-off to 1.18.22:** Ensure `1.18.20-state.md` is committed before starting Part 3.
+> **Hand-off to 1.18.22:** Ensure `1.18.20v2-state.md` is committed before starting Part 3.
 
 ---
 
 ### [ ] 1.18.22 — Second three-user simulation, Part 3: restore, checksums, and full checklist
 
-> **Resume:** Before starting, read `tests/integration/1.18.20-state.md`.
+> **Resume:** Before starting, read `tests/integration/1.18.20v2-state.md`.
 > All agents must be installed and backups confirmed successful (1.18.21 done).
 > Pre-backup checksums must be recorded in state file.
 >
-> **State file:** `tests/integration/1.18.20-state.md` — final updates here.
-> **Issues file:** `tests/integration/1.18.20-issues.md` — record all problems.
+> **State file:** `tests/integration/1.18.20v2-state.md` — final updates here.
+> **Issues file:** `tests/integration/1.18.20v2-issues.md` — record all problems.
 >
 > **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
 
@@ -4499,7 +4753,7 @@ ssh gk-bjorn   "sha256sum /tmp/restored/bjorn/*"
 ssh gk-carina  "sha256sum /tmp/restored/carina/*"
 ```
 
-Compare against pre-backup checksums in `1.18.20-state.md`. Every hash must match.
+Compare against pre-backup checksums in `1.18.20v2-state.md`. Every hash must match.
 Record PASS / FAIL in state file.
 
 **G5 — Folder restore test:**
@@ -4590,11 +4844,11 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 #### I. Close-out
 
-- Update `1.18.20-state.md` section log with final statuses.
-- Commit issues file: `git commit chore(test): 1.18.20 issues file — N issues logged`
+- Update `1.18.20v2-state.md` section log with final statuses.
+- Commit issues file: `git commit chore(test): 1.18.20v2 issues file — N issues logged`
 - Add kludde block below summarising results (same format as 1.18.1 kludde).
-- Mark all three tasks 1.18.20–1.18.22 as `[x]` in TODO.md.
-- Final commit: `git commit chore(test): mark 1.18.20-1.18.22 done — second sim complete`
+- Mark tasks 1.18.20v2–1.18.22 as `[x]` in TODO.md.
+- Final commit: `git commit chore(test): mark 1.18.20v2-1.18.22 done — second sim complete`
 
 ---
 
@@ -4604,10 +4858,10 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 - Folder restore tested ✓
 - Resilience test passed (restore succeeds with one node down) ✓
 - Full manual checklist completed with all items PASS or documented ✓
-- `tests/integration/1.18.20-issues.md` committed with all findings ✓
-- `tests/integration/1.18.20-state.md` committed with final statuses ✓
+- `tests/integration/1.18.20v2-issues.md` committed with all findings ✓
+- `tests/integration/1.18.20v2-state.md` committed with final statuses ✓
 - Kludde block added below with overall result, what passed, what failed ✓
-- Tasks 1.18.20–1.18.22 marked `[x]` ✓
+- Tasks 1.18.20v2–1.18.22 marked `[x]` ✓
 
 ---
 
