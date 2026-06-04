@@ -4727,7 +4727,7 @@ confusing for a real user with no access to `sqlite3`.
 
 ---
 
-### [ ] 1.18.26 — INSTALL.md and installer: guide user when storage path parent is root-owned
+### [x] 1.18.26 — INSTALL.md and installer: guide user when storage path parent is root-owned
 
 > **Source:** `tests/integration/1.18.20-issues.md` → ISSUE-005; discovered during 1.18.20
 > **Reads:** `INSTALL.md`, `install/gatekeeper.sh`, `gatekeeper/gui/routes/onboarding.py`
@@ -4764,6 +4764,24 @@ Two complementary fixes:
   `/var/lib/backup-buddy/` ✓
 - A fresh install wizard with `/mnt/buddy-storage` as input shows a clear, actionable error
   that includes the exact `mkdir + chown` command to run ✓
+
+```
+> Kludde — 2026-06-04
+>
+> Three changes in one commit (b5eaec64a):
+> 1. install/gatekeeper.sh create_directories() loop extended to include
+>    "$DATA_DIR/storage" — same chown+chmod 750 as the parent, so there
+>    is always a ready-to-use default at /var/lib/backup-buddy/storage.
+> 2. INSTALL.md §4 Step 3 replaces "created automatically" with explicit
+>    guidance: /var/lib/backup-buddy/storage is the recommended default;
+>    for paths under root-owned parents the user must run
+>    sudo mkdir -p <path> && sudo chown backupbuddy:backupbuddy <path>
+>    before entering the path in the wizard.
+> 3. onboarding.py _validate_storage_paths OSError branch now returns
+>    the exact sudo mkdir+chown command inline in the error string so
+>    wizard_step3.html renders it in the error-box.
+> Full suite: 927 pass, 12 skip.
+```
 
 ---
 
