@@ -118,7 +118,11 @@ setup_venv() {
     # Verify no 0-byte stub .py files remain — a partial force-reinstall
     # (network blip, disk pressure, SIGKILL) leaves stubs intact and causes
     # confusing ImportError at gatekeeper startup.
-    zero_byte_files=$(find "${INSTALL_DIR}/.venv/lib" -name "*.py" -not -name "__init__.py" -size 0 2>/dev/null)
+    zero_byte_files=$(find "${INSTALL_DIR}/.venv/lib" -name "*.py" \
+        -not -name "__init__.py" \
+        -not -path "*/tests/*" \
+        -not -path "*/test/*" \
+        -size 0 2>/dev/null)
     if [ -n "$zero_byte_files" ]; then
         warn "Venv integrity check failed — 0-byte .py files found:"
         echo "$zero_byte_files" >&2
