@@ -118,6 +118,7 @@ class UploadQueueWorker:
                     "Unexpected error in upload worker — agent=%s error=%s",
                     item.agent, type(exc).__name__, exc_info=True,
                 )
+                raise
             finally:
                 # task_done() always called after a successful get(), even on
                 # unexpected exceptions, so callers awaiting queue.join() don't hang.
