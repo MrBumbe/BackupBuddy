@@ -119,7 +119,7 @@ async def _upload_worker(
                 "agent_name": agent_name,
             }
             await client.send_fragment(data, metadata)
-            logger.info("Uploaded file (%d bytes)", len(data))
+            logger.info("SUCCESS — uploaded file (%d bytes)", len(data))
         except (OSError, IOError) as exc:
             logger.error("Failed to upload file: %s", type(exc).__name__)
         except Exception as exc:

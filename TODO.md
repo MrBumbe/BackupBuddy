@@ -5130,7 +5130,7 @@ Workaround used: generate invite via `POST /api/buddies/invite` after wizard com
 
 ---
 
-### [ ] 1.19.11 — Fix: agent reports "path does not exist" for permission-denied backup paths
+### [x] 1.19.11 — Fix: agent reports "path does not exist" for permission-denied backup paths
 
 > **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-002; discovered during 1.18.21
 > **Reads:** `agent/config.py` (path validation logic)
@@ -5169,11 +5169,18 @@ def validate_backup_path(path: str) -> str:
 
 ---
 
-> **Kludde:** *(fill in after task is complete)*
+> **Kludde:** Replaced `os.path.exists()` + `os.path.isdir()` (båda fångar PermissionError internt
+> och returnerar False) med `os.stat()` direkt i `_validate_backup_paths`. `os.stat()` kastar
+> PermissionError explicit för otillgängliga sökvägar och FileNotFoundError för obefintliga.
+> `_stat_mod.S_ISDIR()` används för dir-kontrollen efter lyckad stat. Felmeddelanden:
+> "not accessible by the backup service user" (perm denied) vs "does not exist" (saknas) vs
+> "not a directory" (fel filtyp). 2 nya tester med monkeypatch av os.stat; ena verifierar
+> "not accessible" i meddelandet, andra verifierar att "does not exist" INTE förekommer.
+> 929 pass, 12 skip (26 pass i test_agent_config.py, 2 skip POSIX-perms på Windows dev).
 
 ---
 
-### [ ] 1.19.12 — Fix: agent upload success log says "Uploaded file" — add SUCCESS keyword
+### [x] 1.19.12 — Fix: agent upload success log says "Uploaded file" — add SUCCESS keyword
 
 > **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-003; discovered during 1.18.22
 > **Reads:** `agent/main.py:122`
@@ -5196,7 +5203,9 @@ logger.info("SUCCESS — uploaded file (%d bytes)", len(data))
 
 ---
 
-> **Kludde:** *(fill in after task is complete)*
+> **Kludde:** En-radsfix i `agent/main.py:122`: `"Uploaded file (%d bytes)"` → `"SUCCESS — uploaded file (%d bytes)"`.
+> "SUCCESS" förekommer inte i någon annan INFO/WARNING/ERROR-rad — unambiguous för grep och monitoring.
+> Inga befintliga tester bröts. 929 pass, 12 skip.
 
 ---
 
