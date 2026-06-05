@@ -4733,6 +4733,13 @@ Open each gatekeeper's Tailscale URL. Confirm:
 
 > **Hand-off to 1.18.22:** Ensure `1.18.20v2-state.md` is committed before starting Part 3.
 
+> **Kludde — test run 2026-06-05**
+>
+> All 3 agents installed and registered. All 7 test files uploaded successfully (HTTP 200).
+> Dashboard file counts: anders=3, björn=2, carina=2.
+> Two non-blocking issues found: curl missing on agent LXCs (workaround: apt install),
+> /root mode 0700 blocks backupbuddy user (ISSUE-002, workaround: chmod 711).
+
 ---
 
 ### [x] 1.18.22 — Second three-user simulation, Part 3: restore, checksums, and full checklist
