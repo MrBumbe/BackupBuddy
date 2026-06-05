@@ -5126,6 +5126,10 @@ Workaround used: generate invite via `POST /api/buddies/invite` after wizard com
 
 ---
 
+> **Kludde:** *(fill in after task is complete)*
+
+---
+
 ### [ ] 1.19.11 — Fix: agent reports "path does not exist" for permission-denied backup paths
 
 > **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-002; discovered during 1.18.21
@@ -5165,6 +5169,10 @@ def validate_backup_path(path: str) -> str:
 
 ---
 
+> **Kludde:** *(fill in after task is complete)*
+
+---
+
 ### [ ] 1.19.12 — Fix: agent upload success log says "Uploaded file" — add SUCCESS keyword
 
 > **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-003; discovered during 1.18.22
@@ -5185,6 +5193,10 @@ logger.info("SUCCESS — uploaded file (%d bytes)", len(data))
 - Log line includes "SUCCESS" keyword
 - No other log levels use "SUCCESS" (keep it unambiguous for grep)
 - Checklist item in 1.18.22 H2 and any docs updated to match
+
+---
+
+> **Kludde:** *(fill in after task is complete)*
 
 ---
 
@@ -5226,6 +5238,10 @@ warning during wizard: "Save this file now — it cannot be downloaded again."
 - User can retrieve their recovery kit from settings (option A), OR
 - UI clearly communicates one-time-only policy with prominent wizard warning (option B)
 - Decision recorded in DECISIONS.md
+
+---
+
+> **Kludde:** *(fill in after task is complete)*
 
 ---
 
