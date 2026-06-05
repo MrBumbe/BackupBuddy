@@ -313,7 +313,9 @@ async def _cascade_new_cluster(
     )
 
     # -- First invite code --
-    if not state.first_invite_code:
+    # Guard checks DB, not state: stale state (e.g. surviving A0 reset) must not
+    # skip invite generation when cluster.db was wiped and the row is gone.
+    if not state.first_invite_code or not cluster_db.get_invite(state.first_invite_code):
         invite = generate_invite(cluster_db, created_by=state.node_name)
         state.first_invite_code = invite.code
         logger.info("First invite code generated")

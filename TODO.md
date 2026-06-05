@@ -5088,7 +5088,7 @@ Two complementary fixes:
 
 ## 1.19 — Bug investigation backlog (found during 1.18.20v2)
 
-### [ ] 1.19.10 — Investigate: first invite code not persisted to cluster.db after cascade
+### [x] 1.19.10 — Investigate: first invite code not persisted to cluster.db after cascade
 
 > **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-001; discovered during 1.18.20v2
 > **Reads:** `gatekeeper/gui/routes/onboarding.py` (`_cascade_new_cluster`),
@@ -5126,7 +5126,37 @@ Workaround used: generate invite via `POST /api/buddies/invite` after wizard com
 
 ---
 
-> **Kludde:** *(fill in after task is complete)*
+> **Kludde:**
+>
+> **Root cause — investigation area #3 confirmed.**
+>
+> The `clean-ubuntu` snapshot for VM 101 was taken after a previous wizard run (task 1.18.11).
+> That run stored `first_invite_code = "bolt-herbs-8"` in `/var/lib/backup-buddy/onboarding_state.json`.
+> The A0 factory reset procedure deletes `gatekeeper.cfg`, `catalog.db`, `cluster.db`,
+> `root_dir.cap`, and `recovery_kit.enc` — but does **not** delete `onboarding_state.json`.
+>
+> When the 1.18.20v2 wizard ran `_cascade_new_cluster()`:
+> 1. `load_state()` loaded stale state with `first_invite_code = "bolt-herbs-8"`.
+> 2. The guard `if not state.first_invite_code:` evaluated `False` (truthy stale value).
+> 3. `generate_invite()` was **never called** — confirming: the log line
+>    `"First invite code generated"` is absent from the 1.18.20v2 journal.
+> 4. Fresh `cluster.db` (created after the reset) had 0 invite rows.
+> 5. Wizard's first-invite page displayed the stale code "bolt-herbs-8" → Björn's join rejected.
+>
+> The `upsert_self_member` call is NOT guarded by state — it is always executed as an idempotent
+> UPSERT — which is why the `members` table had 1 correct row while `invites` had 0.
+>
+> **Fix applied:** `gatekeeper/gui/routes/onboarding.py` — invite guard now checks the DB,
+> not just state:
+> ```python
+> if not state.first_invite_code or not cluster_db.get_invite(state.first_invite_code):
+> ```
+> This makes the invite step consistent with all other cascade steps, which check on-disk
+> artifacts rather than state values. A stale code in state that is absent from the DB
+> (e.g. after an A0 reset) will trigger a fresh `generate_invite()` call.
+>
+> **Regression test added:** `tests/unit/test_onboarding.py` →
+> `TestCascadeNewClusterStaleInviteCode.test_stale_invite_code_regenerated_when_not_in_db`
 
 ---
 
