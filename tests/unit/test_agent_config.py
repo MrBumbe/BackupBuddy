@@ -2,6 +2,7 @@
 Unit tests for agent/config.py.
 """
 
+import os
 import textwrap
 import time
 from pathlib import Path
@@ -226,6 +227,43 @@ class TestBackupPathValidation:
         cfg_file = _write_cfg(tmp_path, content)
         with pytest.raises(ConfigError, match="does not exist"):
             load_config(cfg_file)
+
+    def test_permission_denied_path_gives_clear_error(self, tmp_path, monkeypatch):
+        """os.stat raises PermissionError → error must say 'not accessible', not 'does not exist'."""
+        real_stat = os.stat
+
+        def _mock_stat(path, *args, **kwargs):
+            if str(path).endswith("secret_dir"):
+                raise PermissionError(13, "Permission denied")
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "stat", _mock_stat)
+
+        secret = tmp_path / "secret_dir"
+        secret.mkdir()
+        content = f"[backup]\n{secret}\n\n{_GATEKEEPER_SECTION}"
+        cfg_file = _write_cfg(tmp_path, content)
+        with pytest.raises(ConfigError, match="not accessible"):
+            load_config(cfg_file)
+
+    def test_permission_denied_error_does_not_say_does_not_exist(self, tmp_path, monkeypatch):
+        """Confirm the old misleading 'does not exist' message is gone for permission errors."""
+        real_stat = os.stat
+
+        def _mock_stat(path, *args, **kwargs):
+            if str(path).endswith("secret_dir"):
+                raise PermissionError(13, "Permission denied")
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "stat", _mock_stat)
+
+        secret = tmp_path / "secret_dir"
+        secret.mkdir()
+        content = f"[backup]\n{secret}\n\n{_GATEKEEPER_SECTION}"
+        cfg_file = _write_cfg(tmp_path, content)
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(cfg_file)
+        assert "does not exist" not in str(exc_info.value)
 
 
 # ── Exclude pattern validation ────────────────────────────────────────────────

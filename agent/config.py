@@ -9,6 +9,7 @@ import fnmatch
 import os
 import re
 import socket
+import stat as _stat_mod
 import threading
 import time as _time
 from pathlib import Path
@@ -91,9 +92,16 @@ def _validate_backup_paths(paths: list[str]) -> None:
         if not os.path.isabs(path_str):
             raise ConfigError(f"Backup path must be absolute: {path_str!r}")
         real = os.path.realpath(path_str)
-        if not os.path.exists(real):
+        try:
+            st = os.stat(real)
+        except PermissionError:
+            raise ConfigError(
+                f"Backup path exists but is not accessible by the backup service user: {path_str!r}. "
+                "Check directory permissions."
+            )
+        except (FileNotFoundError, OSError):
             raise ConfigError(f"Backup path does not exist: {path_str!r}")
-        if not os.path.isdir(real):
+        if not _stat_mod.S_ISDIR(st.st_mode):
             raise ConfigError(f"Backup path is not a directory: {path_str!r}")
         for prefix in _CRITICAL_PATH_PREFIXES:
             if real == prefix or real.startswith(prefix + os.sep):
