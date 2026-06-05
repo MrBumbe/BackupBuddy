@@ -5119,6 +5119,109 @@ Workaround used: generate invite via `POST /api/buddies/invite` after wizard com
 
 ---
 
+### [ ] 1.19.11 — Fix: agent reports "path does not exist" for permission-denied backup paths
+
+> **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-002; discovered during 1.18.21
+> **Reads:** `agent/config.py` (path validation logic)
+
+`agent/config.py` validates backup paths using `os.path.isdir()`, which returns `False` for
+both non-existent paths and paths the process cannot access (e.g. `/root/backup-test` when
+running as `backupbuddy` with `/root` at mode 0700). The resulting `CRITICAL` log says
+"Backup path does not exist" even when the path exists but is simply not readable.
+
+Workaround used in test: `chmod 711 /root` on each LXC.
+
+**Fix:**
+Replace the bare `os.path.isdir()` check with a two-step validation that distinguishes
+between "does not exist" and "permission denied":
+
+```python
+import errno, os
+
+def validate_backup_path(path: str) -> str:
+    real = os.path.realpath(path)
+    try:
+        if not os.path.isdir(real):
+            raise ValueError(f"Backup path does not exist or is not a directory: {path!r}")
+    except PermissionError:
+        raise ValueError(
+            f"Backup path exists but is not readable by the backup service user: {path!r}. "
+            "Check directory permissions."
+        )
+    return real
+```
+
+**Done when:**
+- Config validation distinguishes "not found" from "permission denied"
+- Error message in CRITICAL log is accurate in both cases
+- Unit test covers both scenarios
+
+---
+
+### [ ] 1.19.12 — Fix: agent upload success log says "Uploaded file" — add SUCCESS keyword
+
+> **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-003; discovered during 1.18.22
+> **Reads:** `agent/main.py:122`
+
+The upload worker logs `"Uploaded file (%d bytes)"` on success. The test checklist, docs, and
+user expectations reference `SUCCESS`. The inconsistency causes confusion when grepping logs
+or writing monitoring rules.
+
+**Fix:**
+Change the success log line in `agent/main.py` to include `SUCCESS`:
+
+```python
+logger.info("SUCCESS — uploaded file (%d bytes)", len(data))
+```
+
+**Done when:**
+- Log line includes "SUCCESS" keyword
+- No other log levels use "SUCCESS" (keep it unambiguous for grep)
+- Checklist item in 1.18.22 H2 and any docs updated to match
+
+---
+
+### [ ] 1.19.13 — Fix: no recovery kit re-download after wizard completes
+
+> **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-004; discovered during 1.18.22
+> **Reads:** `gatekeeper/gui/routes/onboarding.py` (`/api/onboarding/download-key`),
+>            `gatekeeper/gui/routes/settings.py` (`has_recovery_kit` field)
+
+`/api/onboarding/download-key` returns 404 once `recovery_key_confirmed = True`. The settings
+page exposes `has_recovery_kit` (boolean) but no download link. A user who misplaces their
+recovery kit has no way to retrieve it from the dashboard.
+
+`recovery_kit.enc` is stored at `DATA_DIR/recovery_kit.enc` on the gatekeeper. The file is
+already encrypted with the user's passphrase — serving it again is safe.
+
+**Fix option A (preferred):** Add a download route in settings:
+
+```python
+@router.get("/api/settings/recovery-kit/download")
+async def download_recovery_kit(request: Request) -> Response:
+    data_dir = _get_data_dir(request)
+    kit_path = data_dir / "recovery_kit.enc"
+    if not kit_path.exists():
+        return JSONResponse({"error": "No recovery kit found on this node."}, status_code=404)
+    return Response(
+        content=kit_path.read_bytes(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="recovery-kit.enc"'},
+    )
+```
+
+Then add a download button in the settings template next to the `has_recovery_kit` indicator.
+
+**Fix option B:** Document that the kit is intentionally one-time-only and add a prominent
+warning during wizard: "Save this file now — it cannot be downloaded again."
+
+**Done when:**
+- User can retrieve their recovery kit from settings (option A), OR
+- UI clearly communicates one-time-only policy with prominent wizard warning (option B)
+- Decision recorded in DECISIONS.md
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
