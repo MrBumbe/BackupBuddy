@@ -721,5 +721,44 @@ sender's Tailscale IP matched against `tailscale_hostname` in the members table
 
 ---
 
+## ADR-022 — Recovery kit is re-downloadable from the settings page
+
+**Status:** Accepted
+
+**Context:** The onboarding wizard serves the encrypted recovery kit once via
+`GET /api/onboarding/download-key`.  Once the user confirms receipt
+(`recovery_key_confirmed = True`), that route returns 404.  A user who loses
+their local copy has no way to retrieve it — see TODO 1.19.13 / ISSUE-004.
+
+**Decision:** Add `GET /api/settings/recovery-kit/download` in
+`gatekeeper/gui/routes/settings.py`.  The route serves `DATA_DIR/recovery_kit.enc`
+as an octet-stream download with no confirmation gate.  A download button is
+added to the Lifeboat section of the settings page, visible whenever the file
+exists.
+
+**Why re-serving is safe:**
+
+- The kit is encrypted with AES-256-GCM + Argon2id (SECURITY.md §7).  Without
+  the passphrase it is useless ciphertext.
+- The passphrase is never stored (SECURITY.md rule 9) — re-downloading the kit
+  does not leak it.
+- The settings router is Tailscale-bound (ADR-002).  This is *stricter* than
+  the onboarding route, which serves the same file over the LAN interface
+  (ADR-019) before Tailscale is active.
+
+**Rejected alternative — Option B (one-time-only with prominent wizard warning):**
+Rejected because users who already completed the wizard would still be stuck.
+The file is always on disk; refusing to serve it again provides no security
+benefit and only increases recovery risk.
+
+**Consequences:**
+
+- Users can retrieve their recovery kit from Settings → Lifeboat at any time.
+- The Lifeboat section shows a download link whenever `recovery_kit.enc` exists.
+- If the file is absent (disaster scenario), the route returns 404 with a plain
+  error message — no Tahoe internals exposed.
+
+---
+
 _BackupBuddy DECISIONS.md_
 _Read relevant ADRs before implementing any related feature._

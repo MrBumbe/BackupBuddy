@@ -198,6 +198,9 @@
             {% endif %}
         </p>
         {% if data.has_recovery_kit %}
+        <div style="margin-bottom:0.75rem">
+            <a href="/api/settings/recovery-kit/download" download="recovery-kit.enc" class="btn btn-sm">Download recovery kit</a>
+        </div>
         <div class="form-row">
             <label for="kit-passphrase">Passphrase</label>
             <input type="password" id="kit-passphrase" class="form-input" placeholder="Your recovery passphrase" autocomplete="new-password" required>

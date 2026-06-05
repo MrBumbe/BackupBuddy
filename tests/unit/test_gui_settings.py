@@ -12,6 +12,7 @@ Covers:
   - POST /api/settings/webhook/test       — calls test_webhook, returns result
   - POST /api/settings/lifeboat/test-bundle  — ok, key not found, integrity error, file not found
   - POST /api/settings/lifeboat/test-kit     — ok, wrong passphrase, no kit file
+  - GET  /api/settings/recovery-kit/download — kit present, kit missing, no data_dir
 """
 from __future__ import annotations
 
@@ -490,3 +491,27 @@ class TestLifeboatKitTest:
         app = _make_app(data_dir=tmp_path)
         resp = _ts(app).post("/api/settings/lifeboat/test-kit", json={"passphrase": ""})
         assert resp.status_code == 400
+
+
+# ── GET /api/settings/recovery-kit/download ───────────────────────────────────
+
+class TestRecoveryKitDownload:
+    def test_returns_kit_bytes(self, tmp_path):
+        kit = tmp_path / "recovery_kit.enc"
+        kit.write_bytes(b"\xde\xad\xbe\xef" * 12)
+        app = _make_app(data_dir=tmp_path)
+        resp = _ts(app).get("/api/settings/recovery-kit/download")
+        assert resp.status_code == 200
+        assert resp.content == b"\xde\xad\xbe\xef" * 12
+        assert resp.headers["content-type"] == "application/octet-stream"
+        assert 'filename="recovery-kit.enc"' in resp.headers["content-disposition"]
+
+    def test_returns_404_when_kit_missing(self, tmp_path):
+        app = _make_app(data_dir=tmp_path)
+        resp = _ts(app).get("/api/settings/recovery-kit/download")
+        assert resp.status_code == 404
+
+    def test_returns_503_without_data_dir(self):
+        app = _make_app(data_dir=None)
+        resp = _ts(app).get("/api/settings/recovery-kit/download")
+        assert resp.status_code == 503

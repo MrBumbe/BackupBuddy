@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -552,5 +552,32 @@ def create_settings_router() -> APIRouter:
             "ok": True,
             "message": "Recovery kit decrypted successfully. Your passphrase is correct.",
         })
+
+    # ── Recovery kit — download ────────────────────────────────────────────────
+
+    @router.get("/api/settings/recovery-kit/download")
+    async def download_recovery_kit(request: Request) -> Response:
+        """Serve the encrypted recovery kit as a downloadable file.
+
+        The kit is encrypted with the user's passphrase (AES-256-GCM + Argon2id)
+        and is safe to re-serve: useless without the passphrase.  This route is
+        Tailscale-bound (ADR-002), which is stricter than the onboarding download
+        served over LAN — see ADR-022.
+        """
+        data_dir = _get_data_dir(request)
+        if data_dir is None:
+            return JSONResponse({"error": "Data directory not available."}, status_code=503)
+
+        kit_path = data_dir / "recovery_kit.enc"
+        if not kit_path.exists():
+            return JSONResponse({"error": "No recovery kit found on this node."}, status_code=404)
+
+        content = kit_path.read_bytes()
+        logger.info("Recovery kit downloaded from settings page")
+        return Response(
+            content=content,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="recovery-kit.enc"'},
+        )
 
     return router

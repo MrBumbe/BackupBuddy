@@ -5209,7 +5209,7 @@ logger.info("SUCCESS — uploaded file (%d bytes)", len(data))
 
 ---
 
-### [ ] 1.19.13 — Fix: no recovery kit re-download after wizard completes
+### [x] 1.19.13 — Fix: no recovery kit re-download after wizard completes
 
 > **Source:** `tests/integration/1.18.20v2-issues.md` → ISSUE-004; discovered during 1.18.22
 > **Reads:** `gatekeeper/gui/routes/onboarding.py` (`/api/onboarding/download-key`),
@@ -5250,7 +5250,10 @@ warning during wizard: "Save this file now — it cannot be downloaded again."
 
 ---
 
-> **Kludde:** *(fill in after task is complete)*
+> **Kludde:** Option A implemented. Added `GET /api/settings/recovery-kit/download` in `settings.py`
+> (imports `Response`, guards `data_dir is None → 503`, missing file → 404). Download button added
+> to Lifeboat section of `settings.html` as a plain `<a download>` anchor — avoids JSON-parsing
+> the binary response. Decision recorded as ADR-022. 3 new unit tests, 40 pass total.
 
 ---
 
