@@ -4735,7 +4735,7 @@ Open each gatekeeper's Tailscale URL. Confirm:
 
 ---
 
-### [ ] 1.18.22 — Second three-user simulation, Part 3: restore, checksums, and full checklist
+### [x] 1.18.22 — Second three-user simulation, Part 3: restore, checksums, and full checklist
 
 > **Resume:** Before starting, read `tests/integration/1.18.20v2-state.md`.
 > All agents must be installed and backups confirmed successful (1.18.21 done).
@@ -4809,54 +4809,54 @@ Record PASS / FAIL in state file and issues file.
 Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 **Installation:**
-- [ ] Installer completes without errors on fresh Ubuntu 24.04
-- [ ] `backup-buddy-gatekeeper` service is `active (running)` after install
-- [ ] Wizard is reachable at `http://<LAN-IP>:8080`
-- [ ] `sudo tailscale up` connects without new browser auth (rollback preserved state)
-- [ ] Wizard completes all five steps without error
-- [ ] `recovery-kit.enc` download works and produces a non-empty file
-- [ ] Invite code generated and displayed after wizard completes
-- [ ] Dashboard switches to Tailscale address after wizard completes
-- [ ] Dashboard is **not** reachable on LAN IP after Tailscale binds (security check)
+- [x] Installer completes without errors on fresh Ubuntu 24.04 — PASS (gatekeeper.sh all 3; agent.sh all 3 with curl pre-install)
+- [x] `backup-buddy-gatekeeper` service is `active (running)` after install — PASS
+- [x] Wizard is reachable at `http://<LAN-IP>:8080` — PASS
+- [x] `sudo tailscale up` connects without new browser auth (rollback preserved state) — PASS
+- [x] Wizard completes all five steps without error — PASS (all 3 nodes)
+- [x] `recovery-kit.enc` download works and produces a non-empty file — PASS (downloaded during wizard)
+- [x] Invite code generated and displayed after wizard completes — PASS
+- [x] Dashboard switches to Tailscale address after wizard completes — PASS
+- [x] Dashboard is **not** reachable on LAN IP after Tailscale binds (security check) — PASS (connection refused on 10.99.0.x:8080)
 
 **Cluster formation:**
-- [ ] Björn can join using Anders's invite code and Tailscale address
-- [ ] Carina can join using a freshly generated second invite code
-- [ ] All three nodes appear as **Online** in Anders's dashboard
-- [ ] All three nodes appear as **Online** in Björn's dashboard
-- [ ] All three nodes appear as **Online** in Carina's dashboard
-- [ ] Reusing an expired invite code produces an error, not a silent failure
+- [x] Björn can join using Anders's invite code and Tailscale address — PASS (2nd invite; see ISSUE-001)
+- [x] Carina can join using a freshly generated second invite code — PASS
+- [x] All three nodes appear as **Online** in Anders's dashboard — PASS
+- [x] All three nodes appear as **Online** in Björn's dashboard — PASS
+- [x] All three nodes appear as **Online** in Carina's dashboard — PASS
+- [x] Reusing an expired invite code produces an error, not a silent failure — PASS ("Invalid, expired, or already-used invite code")
 
 **Agent:**
-- [ ] Agent installer works; `backup-buddy-agent` service starts
-- [ ] Agent appears in gatekeeper's dashboard after token is copied
-- [ ] Editing `backup.cfg` + restarting agent picks up new folders
-- [ ] Agent log shows `SUCCESS` for each backed-up file
+- [x] Agent installer works; `backup-buddy-agent` service starts — PASS (required curl pre-install + chmod 711 /root; see ISSUE-002)
+- [x] Agent appears in gatekeeper's dashboard after token is copied — PASS
+- [N/A] Editing `backup.cfg` + restarting agent picks up new folders — not tested this run
+- [x] Agent log shows `SUCCESS` for each backed-up file — PASS (log says "Uploaded file (X bytes)" — no literal SUCCESS keyword, see ISSUE-003)
 
 **Backup integrity:**
-- [ ] All `.jpg` test files backed up successfully
-- [ ] All `.zip` test files backed up successfully
-- [ ] All `.iso` test files backed up successfully
-- [ ] All `.docx` test files backed up successfully
-- [ ] No `FAILED` entries in any agent log for the test files
+- [x] All `.jpg` test files backed up successfully — PASS (3 files)
+- [x] All `.zip` test files backed up successfully — PASS
+- [x] All `.iso` test files backed up successfully — PASS
+- [x] All `.docx` test files backed up successfully — PASS (2 files)
+- [x] No `FAILED` entries in any agent log for the test files — PASS
 
 **Restore and checksums:**
-- [ ] Single-file restore completes without error
-- [ ] Restored `.jpg` SHA-256 matches original
-- [ ] Restored `.zip` SHA-256 matches original
-- [ ] Restored `.iso` SHA-256 matches original
-- [ ] Restored `.docx` SHA-256 matches original
-- [ ] Folder restore completes without error
-- [ ] Restored files land in the correct destination folder
+- [x] Single-file restore completes without error — PASS (7/7)
+- [x] Restored `.jpg` SHA-256 matches original — PASS (all 3)
+- [x] Restored `.zip` SHA-256 matches original — PASS
+- [x] Restored `.iso` SHA-256 matches original — PASS
+- [x] Restored `.docx` SHA-256 matches original — PASS (both)
+- [x] Folder restore completes without error — PASS (3/3 files)
+- [x] Restored files land in the correct destination folder — PASS
 
 **Resilience:**
-- [ ] Stopping one gatekeeper; restore from the other two still succeeds
-- [ ] Stopped gatekeeper restarts and shows Online in dashboards
+- [x] Stopping one gatekeeper; restore from the other two still succeeds — PASS (VM 101 stopped; Björn + Carina both restored)
+- [x] Stopped gatekeeper restarts and shows Online in dashboards — PASS (3/3 online after restart)
 
 **UI and UX:**
-- [ ] Dashboard shows warning if agent has not sent data for > 1 hour
-- [ ] Recovery kit re-download accessible from dashboard after wizard
-- [ ] Navigating dashboard with no data causes no crashes or blank pages
+- [N/A] Dashboard shows warning if agent has not sent data for > 1 hour — not tested (agents online during test)
+- [FAIL] Recovery kit re-download accessible from dashboard after wizard — FAIL (/api/onboarding/download-key returns 404 post-wizard; no re-download in settings)
+- [N/A] Navigating dashboard with no data causes no crashes or blank pages — not tested this run
 
 ---
 
@@ -4883,9 +4883,31 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
-> **Kludde — test run (date TBD)**
+> **Kludde — test run 2026-06-04/05**
 >
-> *(Fill in after run is complete — same format as 1.18.1 kludde above.)*
+> Second three-user simulation. Clean re-run after fixes 1.18.23–1.18.26.
+> All blocking issues from 1.18.20 resolved; 4 new non-blocking issues found.
+>
+> **Result: PASS** — backup, restore, checksums, and resilience all green.
+>
+> **What passed:**
+> - All three gatekeepers installed and wizard completed on fresh Ubuntu 24.04
+> - Cluster formation worked (Björn 2nd attempt due to ISSUE-001; Carina 1st attempt)
+> - All 3 dashboards show 3 active members
+> - All 3 agents installed, registered, and uploaded all 7 test files
+> - All 7 SHA-256 checksums match originals exactly after restore
+> - Folder restore (3 files) passed with correct hashes
+> - Resilience: restore succeeded from 2 nodes while 1 was down; node rejoined cleanly
+> - Expired invite returns clear error (not silent failure)
+> - LAN IP not reachable after Tailscale binds (security check passed)
+>
+> **Issues found (all non-blocking):**
+> - ISSUE-001: First wizard-generated invite not persisted to cluster.db (root cause unknown)
+> - ISSUE-002: agent/config.py reports "path does not exist" for permission-denied paths
+> - ISSUE-003: Agent logs "Uploaded file" not "SUCCESS" — inconsistent with checklist
+> - ISSUE-004: No recovery kit re-download endpoint in settings after wizard
+>
+> **Fixes verified (from 1.18.23–1.18.26):** All four confirmed — venv check, tailscale_hostname, storage_paths pre-join, /var/lib/backup-buddy/storage auto-create.
 
 ---
 
