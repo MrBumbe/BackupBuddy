@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import httpx
 from pydantic import BaseModel, field_validator
 
-from gatekeeper.cluster.invites import consume_invite
+from gatekeeper.cluster.invites import validate_invite
 
 logger = logging.getLogger(__name__)
 
@@ -119,20 +119,44 @@ def accept_join(
 ) -> JoinAcceptResponse:
     """Validate and consume the invite, register the new member, return cluster state.
 
-    Raises ValueError (propagated from consume_invite) if the code is invalid,
-    expired, revoked, or already used.
-    """
-    # consume_invite validates and atomically marks the code as used.
-    # If insert_member subsequently fails the code is gone; the admin generates
-    # a new invite.  Acceptable for Phase 1 single-gatekeeper deployments.
-    consume_invite(db, invite_code)
+    Idempotent for cascade retries: if the invite is already used AND this
+    node_id is already a member, the join completed on the leader side before
+    the joiner crashed — return cluster state so the cascade can continue.
 
-    db.insert_member(
+    Raises ValueError if the code is invalid, expired, revoked, or used by a
+    different node; or if node_id conflicts with an existing member record.
+    """
+    # Fix (C): idempotent retry — invite is used but this node is already a member.
+    # This handles a cascade interrupted after the leader committed but before the
+    # joiner persisted root_dir.cap locally.  On retry the joiner sends the same
+    # invite code; we return success instead of 400.
+    raw_invite = db.get_invite(invite_code)
+    if raw_invite is not None and raw_invite["used"]:
+        existing_member = db.get_member(node_info.node_id)
+        if existing_member is not None:
+            members = db.list_members(status="active")
+            logger.info(
+                "Node '%s' (%s) retried join — already a member, returning cluster state",
+                node_info.display_name,
+                node_info.node_id,
+            )
+            return JoinAcceptResponse(introducer_furl=introducer_furl, members=members)
+
+    # Validate the invite.  Returns None if invalid, expired, revoked, or used
+    # by a node that is NOT yet in the members table (genuine split state).
+    if validate_invite(db, invite_code) is None:
+        raise ValueError("Invalid, expired, or already-used invite code")
+
+    # Fix (B): insert member and mark invite used in one atomic transaction.
+    # If insert raises IntegrityError (duplicate node_id) the invite is NOT
+    # consumed — the admin does not need to generate a new code.
+    db.accept_new_member(
         node_id=node_info.node_id,
         display_name=node_info.display_name,
         tailscale_hostname=node_info.tailscale_hostname,
         joined_at=time.time(),
         profile=node_info.profile,
+        invite_code=invite_code,
     )
 
     members = db.list_members(status="active")

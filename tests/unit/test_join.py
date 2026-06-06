@@ -166,6 +166,55 @@ class TestAcceptJoinFailures:
 
 
 # ---------------------------------------------------------------------------
+# accept_join — Fix (B): atomic insert + consume
+# ---------------------------------------------------------------------------
+
+class TestAcceptJoinAtomicity:
+    def test_duplicate_node_id_does_not_consume_invite(self, db, invite, node_info):
+        """Duplicate node_id IntegrityError must leave the invite unconsumed."""
+        db.insert_member(
+            node_id=node_info.node_id,
+            display_name="Pre-existing node",
+            tailscale_hostname="pre-existing",
+            joined_at=time.time(),
+        )
+
+        with pytest.raises(ValueError):
+            accept_join(db, invite.code, node_info, _FURL)
+
+        row = db.get_invite(invite.code)
+        assert row["used"] == 0, "invite must remain unused after IntegrityError"
+
+    def test_successful_join_marks_invite_used(self, db, invite, node_info):
+        accept_join(db, invite.code, node_info, _FURL)
+        row = db.get_invite(invite.code)
+        assert row["used"] == 1
+
+
+# ---------------------------------------------------------------------------
+# accept_join — Fix (C): idempotent cascade retry
+# ---------------------------------------------------------------------------
+
+class TestAcceptJoinIdempotency:
+    def test_retry_after_completed_join_returns_cluster_state(self, db, invite, node_info):
+        """Cascade interrupted after leader committed: retry returns success."""
+        accept_join(db, invite.code, node_info, _FURL)
+
+        retry = accept_join(db, invite.code, node_info, _FURL)
+
+        assert isinstance(retry, JoinAcceptResponse)
+        assert retry.introducer_furl == _FURL
+        assert any(m["node_id"] == node_info.node_id for m in retry.members)
+
+    def test_used_invite_unknown_node_raises(self, db, invite, node_info):
+        """Invite used but node not in members (split state) must raise, not silently succeed."""
+        db.update_invite(invite.code, used=1)
+
+        with pytest.raises(ValueError):
+            accept_join(db, invite.code, node_info, _FURL)
+
+
+# ---------------------------------------------------------------------------
 # initiate_join — success
 # ---------------------------------------------------------------------------
 

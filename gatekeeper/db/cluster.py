@@ -119,6 +119,43 @@ class ClusterDB:
         )
         self._conn.commit()
 
+    def accept_new_member(
+        self,
+        node_id: str,
+        display_name: str,
+        tailscale_hostname: str,
+        joined_at: float,
+        profile: str,
+        invite_code: str,
+    ) -> None:
+        """Insert a new member and mark the invite used in one atomic transaction.
+
+        Fix (B) for task 1.21.4: insert_member runs before consume_invite so that
+        a duplicate node_id IntegrityError never consumes the invite code.
+
+        Raises ValueError (not IntegrityError) when node_id already exists, so the
+        route handler's `except ValueError → 400` still fires cleanly.
+        """
+        try:
+            self._conn.execute(
+                "INSERT INTO members "
+                "(node_id, display_name, tailscale_hostname, joined_at, "
+                "contribution_bytes, usage_bytes, profile, status) "
+                "VALUES (?, ?, ?, ?, 0, 0, ?, 'active')",
+                (node_id, display_name, tailscale_hostname, joined_at, profile),
+            )
+            self._conn.execute(
+                "UPDATE invites SET used = 1 WHERE code = ?",
+                (invite_code,),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError as exc:
+            self._conn.rollback()
+            raise ValueError(f"Node '{node_id}' is already a cluster member") from exc
+        except Exception:
+            self._conn.rollback()
+            raise
+
     def upsert_self_member(
         self,
         node_id: str,

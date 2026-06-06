@@ -5977,7 +5977,7 @@ restarts or introducer outages.
 
 ---
 
-### [ ] 1.21.4 — Fix join-cascade idempotency (interrupted cascade leaves cluster in split state)
+### [x] 1.21.4 — Fix join-cascade idempotency (interrupted cascade leaves cluster in split state)
 
 > **Source:** 1.20.1 ISSUE-001
 
