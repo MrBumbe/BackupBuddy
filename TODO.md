@@ -5668,7 +5668,7 @@ journalctl -u backup-buddy-agent | grep -i "backup path"
 
 ---
 
-### [ ] 1.20.3 — Third three-user simulation, Part 3: restore, checksums, and full checklist
+### [x] 1.20.3 — Third three-user simulation, Part 3: restore, checksums, and full checklist
 
 > **Resume:** Before starting, read `tests/integration/1.20.1-state.md`.
 > All agents must be installed and backups confirmed successful (1.20.2 done).
@@ -5836,7 +5836,16 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
-> **Kludde:**
+> **Kludde:** Third three-user simulation (1.20.1–1.20.3) COMPLETE — 2026-06-06.
+> All 7 test files backed up (3 jpg, 1 iso, 1 zip, 2 docx). All 7 SHA-256 checksums
+> verified after restore. Folder restore passed (9 results, all checksums match).
+> Resilience test passed (restore from Björn+Carina with Anders stopped; Anders
+> restarted and rejoined). All H2 manual checklist items PASS or N/A.
+> Fixes verified: 1.19.10 (first invite in cluster.db), 1.19.11 (permission-denied
+> error message), 1.19.12 (SUCCESS keyword in agent log), 1.19.13 (recovery kit
+> re-download from settings). One issue logged: ISSUE-001 (Carina join cascade,
+> root-owned Tahoe files, resolved with workaround). One note: NOTE-001 (/root
+> does not trigger permission error — used locked-parent path instead).
 
 ---
 
