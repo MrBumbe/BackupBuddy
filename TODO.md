@@ -5561,7 +5561,7 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 
 ---
 
-### [ ] 1.20.2 — Third three-user simulation, Part 2: agent setup + backup monitoring
+### [x] 1.20.2 — Third three-user simulation, Part 2: agent setup + backup monitoring
 
 > **Resume:** Before starting, read `tests/integration/1.20.1-state.md`.
 > All three gatekeepers must be installed and cluster formed (1.20.1 done).
