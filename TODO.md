@@ -5636,13 +5636,17 @@ Open each gatekeeper's Tailscale URL. Confirm:
 
 **F6 — Verify 1.19.11 fix (agent permission-denied error message):**
 
-On any agent LXC, temporarily add a permission-denied path to backup.cfg and verify the error:
+On any agent LXC, temporarily add a locked-parent path to backup.cfg and verify the error.
+Note: `/root` does NOT work here — `os.stat("/root")` succeeds even as backupbuddy because
+only execute permission on the parent `/` is needed. Use a locked-parent path instead:
 ```bash
-# Add /root under [backup] in backup.cfg (backupbuddy user cannot access mode-0700 /root)
+# Create a path the backupbuddy user cannot traverse into
+mkdir -p /tmp/locked_parent/backup-test && chmod 700 /tmp/locked_parent
+# Add /tmp/locked_parent/backup-test under [backup] in backup.cfg
 sudo systemctl restart backup-buddy-agent
 journalctl -u backup-buddy-agent | grep -i "backup path"
 # Expected: "not accessible by the backup service user" — NOT "does not exist"
-# Remove /root from backup.cfg and restart agent
+# Remove /tmp/locked_parent/backup-test from backup.cfg and restart agent
 ```
 
 > **State update:** Update `1.20.1-state.md` section log rows F1–F3.
@@ -5846,6 +5850,147 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 > re-download from settings). One issue logged: ISSUE-001 (Carina join cascade,
 > root-owned Tahoe files, resolved with workaround). One note: NOTE-001 (/root
 > does not trigger permission error — used locked-parent path instead).
+
+---
+
+## 1.21 — Post-simulation bugfixes (issues surfaced in 1.18–1.20 runs)
+
+> These tasks address every open issue from the three simulation runs that was not
+> already fixed inline or as part of 1.18.x / 1.19.x. Each task references the
+> originating issue ID so the history is traceable.
+
+---
+
+### [ ] 1.21.1 — Fix storage-path wizard guidance for root-owned parent directories
+
+> **Source:** 1.18.1 ISSUE-006, ISSUE-007; 1.18.20 ISSUE-005
+
+**Problem:** Wizard step 3 correctly auto-creates the storage path when the parent
+directory is writable by the `backupbuddy` user. But when the parent is root-owned
+(e.g. `/mnt` at 755), `os.makedirs` fails and the user sees "Could not create
+directory — the parent is not writable". INSTALL.md §4 Step 3 currently says
+"This folder will be created for you if it does not exist" — this is only true if
+the parent is already service-user-owned, which is not the case for `/mnt/buddy-storage`.
+
+**Fix options (pick one):**
+- (A) Change the wizard default suggested path from `/mnt/buddy-storage` to
+  `/var/lib/backup-buddy/storage` (parent already owned by `backupbuddy`).
+- (B) In the auto-create error path, also try `sudo`-equivalent (setuid helper) to
+  create and chown the directory if the parent is root-owned. Complex, not worth it.
+- (C) Keep current behaviour but update INSTALL.md §4 Step 3 to say:
+  "Create the folder yourself first and set the right ownership:
+   `sudo mkdir -p /mnt/buddy-storage && sudo chown backupbuddy:backupbuddy /mnt/buddy-storage`"
+
+**Recommendation:** Option A (change default suggested path to a service-owned location).
+Also update INSTALL.md to show Option C as the manual alternative.
+
+**Done when:**
+- Wizard step 3 placeholder/default path does not require a separate chown
+- INSTALL.md §4 Step 3 accurately describes what the user must do
+- `[ ]` committed
+
+---
+
+### [ ] 1.21.2 — Fix agent installer in restricted environments (no TTY, LXC)
+
+> **Source:** 1.18.1 ISSUE-010, ISSUE-011
+
+**Problem A (ISSUE-010):** `sudo bash install/agent.sh` inside an LXC container (or any
+SSH session without a real TTY) fails at line ~146 with
+`/dev/tty: No such device or address` — the installer tries `exec 3</dev/tty` to read
+interactive input. The non-interactive mode exists (env vars `BB_GATEKEEPER_IP` and
+`BB_AGENT_NAME`) but is undocumented in INSTALL.md.
+
+**Problem B (ISSUE-011):** INSTALL.md §5a only tells the user to add backup paths under
+`[backup]`. It does not mention that `[gatekeeper]` also requires `name` and
+`lifeboat_path` fields (only set by the installer). If a user re-creates backup.cfg
+from the template, the agent crashes with `CRITICAL — Configuration error: [gatekeeper]
+'token' is required` / `'name' is required`.
+
+**Fixes:**
+- Detect TTY absence in agent.sh and fall back to non-interactive mode automatically
+  (`[ -t 0 ]` check before `exec 3</dev/tty`).
+- Add INSTALL.md §5 note: "In restricted environments (LXC, SSH without TTY, CI),
+  run: `BB_GATEKEEPER_IP=<ip> BB_AGENT_NAME=<name> sudo -E bash install/agent.sh`"
+- Update INSTALL.md §5a to show the full required `[gatekeeper]` section including
+  `name` and `lifeboat_path`, not just the backup paths.
+
+**Done when:**
+- `install/agent.sh` does not error on `/dev/tty` when run inside an LXC without TTY
+- INSTALL.md documents the `BB_GATEKEEPER_IP` / `BB_AGENT_NAME` env-var escape hatch
+- INSTALL.md §5a shows all required `[gatekeeper]` fields
+- `[ ]` committed
+
+---
+
+### [ ] 1.21.3 — Harden against Tahoe introducer outage (storage-server FURL cache)
+
+> **Source:** 1.18.1 ISSUE-013
+
+**Problem:** When the Tahoe introducer VM (VM 104) goes down, ALL gatekeeper nodes
+lose grid connectivity immediately. Tahoe clients discover storage servers only via
+the introducer — there is no persistent server cache. Even with k=1 of 3 shares
+needed, a download returns HTTP 410 (Gone) because the client cannot locate any
+storage node. Losing the introducer makes restore impossible cluster-wide.
+
+**Root cause:** The Tahoe client uses the introducer to maintain its server list in
+memory. On introducer loss the list is never refreshed. No FURL cache persists across
+restarts or introducer outages.
+
+**Fix (Phase 1 scope):** Implement a local storage-server FURL cache on each gatekeeper:
+- After a successful cluster join or member sync, write all known peer storage-node
+  FURLs to a local file (e.g. `storage_servers.json` in `data_dir`).
+- Pass these FURLs to the Tahoe client config (`[client] introducer.furl` +
+  static server entries) so the client can reach storage nodes without the introducer.
+- Verify on startup: if the introducer is unreachable but cached FURLs are present,
+  log a warning and continue in degraded mode.
+
+**Note:** A full gossip-based solution (replacing the introducer entirely) is Phase 2
+(ADR 2.3). This task is the Phase 1 minimal mitigation.
+
+**Done when:**
+- Stopping VM 104 (introducer) does not immediately break restores when ≥ 2 storage
+  nodes are reachable and FURLs were cached from a prior successful connection
+- Appropriate warning logged when introducer is unreachable
+- `[ ]` committed and integration test step H updated to test this scenario
+
+---
+
+### [ ] 1.21.4 — Fix join-cascade idempotency (interrupted cascade leaves cluster in split state)
+
+> **Source:** 1.20.1 ISSUE-001
+
+**Problem:** The join cascade on the joining gatekeeper contacts the cluster leader,
+which calls `consume_invite` then `insert_member`. If the cascade is then interrupted
+(SIGTERM, crash, network loss) after the leader's `insert_member` succeeds but before
+the joiner writes `root_dir.cap` locally, the cluster is left in a split state:
+- The leader has the joiner in its `members` table and the invite is consumed.
+- The joiner has no `root_dir.cap`, so it cannot use the idempotency shortcut.
+- On retry the joiner calls `initiate_join` again → leader returns 400 "invite used".
+
+A separate but related issue: `consume_invite` is called before `insert_member` with
+no rollback. If `insert_member` raises `IntegrityError` (duplicate `node_id`), the
+invite is gone and no member was added. The admin must generate a new invite.
+
+**Fixes:**
+- (A) Add a `GET /api/cluster/member/{node_id}` endpoint on the leader. On cascade
+  retry, before calling `initiate_join`, check if self is already a member; if yes,
+  fetch the leader's `root_dir.cap` (or request it via a new endpoint) and continue.
+- (B) Swap the order: call `insert_member` inside a transaction, then
+  `consume_invite` only on success. This prevents the lost-invite case.
+- (C) Make `initiate_join` idempotent: if the invite is already used but the calling
+  `node_id` is already a member, return success with the cluster state rather than 400.
+
+**Recommendation:** Fix (C) is the smallest safe change — detect the "invite used but
+caller is already a member" case in `accept_join` and return the cluster state.
+Fix (B) is a one-transaction swap and eliminates the lost-invite case cleanly.
+Both should be implemented.
+
+**Done when:**
+- A cascade interrupted mid-way can be retried without manual DB surgery
+- A duplicate `node_id` insert does not consume the invite
+- Unit tests cover both retry scenarios
+- `[ ]` committed
 
 ---
 
