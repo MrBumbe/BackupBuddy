@@ -143,6 +143,13 @@ ask_questions() {
         return 0
     fi
 
+    # Abort with a clear error if no terminal is available rather than crashing
+    # on /dev/tty open (happens in LXC containers and SSH sessions without a PTY).
+    if [ ! -t 0 ]; then
+        die "No interactive terminal detected. To install non-interactively, use:
+  BB_GATEKEEPER_IP=<gatekeeper-ip> BB_AGENT_NAME=<name> sudo -E bash $0"
+    fi
+
     exec 3</dev/tty
 
     printf '\n'

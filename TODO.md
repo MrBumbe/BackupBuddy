@@ -5891,7 +5891,7 @@ Also update INSTALL.md to show Option C as the manual alternative.
 
 ---
 
-### [ ] 1.21.2 — Fix agent installer in restricted environments (no TTY, LXC)
+### [x] 1.21.2 — Fix agent installer in restricted environments (no TTY, LXC)
 
 > **Source:** 1.18.1 ISSUE-010, ISSUE-011
 
