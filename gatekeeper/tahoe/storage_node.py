@@ -240,23 +240,32 @@ class StorageNode:
         cfg = configparser.ConfigParser()
         cfg.read(str(self.basedir / "tahoe.cfg"))
         tub_location = cfg.get("node", "tub.location", fallback="")
-        if "127.0.0.1" in tub_location:
-            from gatekeeper.tailscale import get_lan_ip as _get_lan_ip
-            lan_ip = _get_lan_ip()
-            if lan_ip:
-                patched = tub_location.replace("127.0.0.1", lan_ip)
-                cfg.set("node", "tub.location", patched)
-                with open(str(self.basedir / "tahoe.cfg"), "w") as _f:
-                    cfg.write(_f)
-                logger.warning(
-                    "Storage node tub.location was 127.0.0.1 — auto-patched to %s",
-                    lan_ip,
-                )
-            else:
+
+        from gatekeeper.tailscale import get_tailscale_ip as _get_tailscale_ip
+        ts_ip = _get_tailscale_ip()
+        # Always rebuild tub.location with the current Tailscale IP.
+        # Peers on other home networks can only reach this node via Tailscale
+        # (ADR-002).  Using the LAN IP here would make the published FURL
+        # unreachable cross-VLAN, so Foolscap Reconnectors on peer nodes would
+        # never connect and restores would fail the moment the introducer dies.
+        try:
+            existing_port_str = tub_location.rsplit(":", 1)[1]
+            int(existing_port_str)  # validate it parses as a port number
+            if ts_ip is None:
                 raise RuntimeError(
-                    f"Storage node tub.location is '{tub_location}' and no LAN IP "
-                    "is available to fix it. Check network interfaces."
+                    "Tailscale is not running — cannot set storage node tub.location. "
+                    "Ensure Tailscale is active before starting."
                 )
+            patched = f"tcp:{ts_ip}:{existing_port_str}"
+        except (ValueError, IndexError):
+            patched = tub_location  # empty or unparseable — leave unchanged
+        if patched != tub_location:
+            cfg.set("node", "tub.location", patched)
+            with open(str(self.basedir / "tahoe.cfg"), "w") as _f:
+                cfg.write(_f)
+            logger.info(
+                "Storage node tub.location set to Tailscale IP %s", ts_ip
+            )
 
         if not await self._check_introducer_reachable(cfg):
             cached_count = self._count_cached_servers()

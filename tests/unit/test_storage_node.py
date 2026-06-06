@@ -236,21 +236,21 @@ class TestStorageNodeStartStop(unittest.IsolatedAsyncioTestCase):
             await node.start()
 
     @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
-    async def test_start_raises_if_tub_location_is_localhost(self, _mock_find):
-        """start() must raise RuntimeError when tub.location is 127.0.0.1 and no LAN IP is available."""
+    async def test_start_raises_if_tailscale_not_running(self, _mock_find):
+        """start() must raise RuntimeError when tub.location is set but Tailscale is not running."""
         from gatekeeper.tahoe.storage_node import StorageNode
         cfg_path = self.basedir / "tahoe.cfg"
         existing = cfg_path.read_text()
         cfg_path.write_text(existing + "\ntub.location = tcp:127.0.0.1:19283\n")
 
         node = StorageNode(str(self.basedir), str(self.storage_dir))
-        with patch("gatekeeper.tailscale.get_lan_ip", return_value=None):
-            with self.assertRaises(RuntimeError, msg="should raise when LAN IP unavailable"):
+        with patch("gatekeeper.tailscale.get_tailscale_ip", return_value=None):
+            with self.assertRaises(RuntimeError, msg="should raise when Tailscale IP unavailable"):
                 await node.start()
 
     @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
-    async def test_start_autopatches_tub_location_when_lan_ip_available(self, _mock_find):
-        """start() must auto-patch tub.location from 127.0.0.1 to the real LAN IP."""
+    async def test_start_patches_tub_location_to_tailscale_ip(self, _mock_find):
+        """start() must set tub.location to the Tailscale IP so cross-VLAN peers can connect."""
         from gatekeeper.tahoe.storage_node import StorageNode
         cfg_path = self.basedir / "tahoe.cfg"
         existing = cfg_path.read_text()
@@ -266,18 +266,48 @@ class TestStorageNodeStartStop(unittest.IsolatedAsyncioTestCase):
         fake_writer.wait_closed = AsyncMock()
 
         node = StorageNode(str(self.basedir), str(self.storage_dir))
-        with patch("gatekeeper.tailscale.get_lan_ip", return_value="192.168.1.10"), \
+        with patch("gatekeeper.tailscale.get_tailscale_ip", return_value="100.64.1.10"), \
              patch("asyncio.create_subprocess_exec", return_value=fake_process), \
              patch("asyncio.open_connection", return_value=(AsyncMock(), fake_writer)):
             await node.start()
 
-        # tub.location in tahoe.cfg must now use the real LAN IP, not 127.0.0.1
+        # tub.location must now carry the Tailscale IP so peers on other VLANs can connect
         import configparser
         cfg = configparser.ConfigParser()
         cfg.read(str(cfg_path))
         tub_location = cfg.get("node", "tub.location", fallback="")
-        self.assertIn("192.168.1.10", tub_location)
+        self.assertIn("100.64.1.10", tub_location)
         self.assertNotIn("127.0.0.1", tub_location)
+
+    @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
+    async def test_start_patches_lan_ip_to_tailscale_ip(self, _mock_find):
+        """start() must replace any existing LAN IP with the Tailscale IP on each restart."""
+        from gatekeeper.tahoe.storage_node import StorageNode
+        cfg_path = self.basedir / "tahoe.cfg"
+        existing = cfg_path.read_text()
+        # Simulate an existing deployment where tub.location was set to a LAN IP
+        cfg_path.write_text(existing + "\ntub.location = tcp:10.99.0.11:19283\n")
+
+        fake_process = MagicMock()
+        fake_process.returncode = None
+        fake_process.wait = AsyncMock()
+        fake_process.terminate = MagicMock()
+
+        fake_writer = MagicMock()
+        fake_writer.close = MagicMock()
+        fake_writer.wait_closed = AsyncMock()
+
+        node = StorageNode(str(self.basedir), str(self.storage_dir))
+        with patch("gatekeeper.tailscale.get_tailscale_ip", return_value="100.64.1.10"), \
+             patch("asyncio.create_subprocess_exec", return_value=fake_process), \
+             patch("asyncio.open_connection", return_value=(AsyncMock(), fake_writer)):
+            await node.start()
+
+        import configparser
+        cfg = configparser.ConfigParser()
+        cfg.read(str(cfg_path))
+        tub_location = cfg.get("node", "tub.location", fallback="")
+        self.assertEqual(tub_location, "tcp:100.64.1.10:19283")
 
     @patch("gatekeeper.tahoe.storage_node._find_tahoe", return_value="/fake/tahoe")
     async def test_start_is_idempotent_when_already_running(self, _mock_find):

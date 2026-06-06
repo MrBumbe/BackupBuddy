@@ -540,6 +540,92 @@ include the file whose fragment was corrupted.
 
 ---
 
+### Scenario 8 — Introducer outage resilience
+
+**Goal**: confirm that restores continue to work when the Tahoe introducer
+VM goes down, as long as ≥ 2 storage nodes are reachable and peer FURLs
+were cached from a prior successful connection.
+
+This tests the fix from task 1.21.3: storage nodes now advertise their
+Tailscale IP in `tub.location` so Foolscap Reconnectors on peer nodes can
+maintain live connections independently of the introducer.
+
+**Pre-conditions**:
+- All three gatekeepers and the introducer are running
+- At least one file has been backed up successfully (so shares exist
+  on ≥ 2 storage nodes and peer FURLs are cached in `private/servers.yaml`)
+
+**Steps**:
+1. Back up a known test file and record its SHA-256:
+   ```bash
+   # On agent-anders-pc
+   cp /etc/os-release /home/testuser/documents/scenario8.txt
+   sha256sum /home/testuser/documents/scenario8.txt
+   ```
+2. Wait for backup to complete (1 min stability window in test config);
+   confirm it appears in gatekeeper-anders GUI
+3. Verify the storage node tub.location on each gatekeeper uses the
+   Tailscale IP (100.x.x.x range), not a LAN IP:
+   ```bash
+   grep tub.location ~/.backupbuddy/tahoe/storage_node/tahoe.cfg
+   # Expected: tub.location = tcp:100.x.x.x:PORT
+   ```
+4. Stop the introducer VM:
+   ```bash
+   ssh proxmox "qm stop 104"
+   ```
+5. Confirm the gatekeeper log shows the introducer warning:
+   ```bash
+   journalctl -u backup-buddy-gatekeeper -n 20 | grep -i introducer
+   # On the NEXT restart, expect:
+   # "Introducer unreachable — operating from cached server list (N servers)"
+   ```
+6. Without restarting any gatekeeper, attempt a restore via Björn's
+   GUI: Restore → find `scenario8.txt` → restore
+7. Verify the restored file:
+   ```bash
+   sha256sum /restored/scenario8.txt
+   ```
+8. Attempt a second restore via Carina's GUI to confirm both peers work
+9. Restart one gatekeeper (e.g., Björn) while the introducer is still down:
+   ```bash
+   systemctl restart backup-buddy-gatekeeper
+   ```
+   Wait for it to come back online, then attempt a restore — confirms
+   the `private/servers.yaml` cache is used correctly on cold start
+10. Bring the introducer back:
+    ```bash
+    ssh proxmox "qm start 104"
+    ```
+
+**Expected result**:
+- Step 6: restore succeeds (HTTP 200) even with the introducer down,
+  because the Tahoe client's Foolscap Reconnectors maintain live
+  connections to peer storage nodes via Tailscale IPs
+- Step 7: SHA-256 of restored file matches original from step 1
+- Step 8: Carina's restore also succeeds
+- Step 9: After restart, Björn uses the `private/servers.yaml` cache
+  and the warning "Introducer unreachable — operating from cached server
+  list (N servers)" appears in its log
+- No gatekeeper reports HTTP 410 as long as ≥ k shares are on reachable
+  storage nodes
+
+**What to check if it fails**:
+1. Verify `tub.location` in tahoe.cfg contains Tailscale IP (step 3).
+   If it shows a LAN IP, the `start()` patch did not fire — check that
+   Tailscale is active (`tailscale status`) when gatekeeper starts.
+2. Check that Tailscale connectivity between gatekeepers is up:
+   ```bash
+   tailscale ping <peer-tailscale-hostname>
+   ```
+3. Check gatekeeper log for Foolscap connection errors — if the
+   Reconnector cannot reach the peer's Tailscale IP, there may be a
+   Tailscale ACL blocking Tahoe's port.
+4. Confirm the Tahoe TUB port is the same as in `tub.location` (check
+   `tub.port` in `tahoe.cfg`) and that nothing is firewalled.
+
+---
+
 ## Proxmox API access from Claude Code
 
 Claude Code can control Proxmox programmatically using the REST API.
@@ -603,13 +689,16 @@ Run in this order. Each scenario builds on confidence from the previous.
 4. Scenario 7  — Nightly verification
                  (confirms monitoring catches real problems)
 
-5. Scenario 2  — Node offline during backup
+5. Scenario 8  — Introducer outage resilience
+                 (confirms restores survive introducer loss)
+
+6. Scenario 2  — Node offline during backup
                  (confirms resilience during transfer)
 
-6. Scenario 5  — Hit and run node
+7. Scenario 5  — Hit and run node
                  (confirms hysteresis works)
 
-7. Scenario 6  — Orphan cleanup
+8. Scenario 6  — Orphan cleanup
                  (confirms storage is reclaimed correctly)
 ```
 

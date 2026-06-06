@@ -5923,7 +5923,7 @@ from the template, the agent crashes with `CRITICAL — Configuration error: [ga
 
 ---
 
-### [ ] 1.21.3 — Harden against Tahoe introducer outage (storage-server FURL cache)
+### [x] 1.21.3 — Harden against Tahoe introducer outage (storage-server FURL cache)
 
 > **Source:** 1.18.1 ISSUE-013
 
@@ -5952,7 +5952,28 @@ restarts or introducer outages.
 - Stopping VM 104 (introducer) does not immediately break restores when ≥ 2 storage
   nodes are reachable and FURLs were cached from a prior successful connection
 - Appropriate warning logged when introducer is unreachable
-- `[ ]` committed and integration test step H updated to test this scenario
+- `[x]` committed and integration test step H updated to test this scenario
+
+> **Kludde — 2026-06-06**
+>
+> Root cause confirmed: `storage_node.py::start()` was patching `tub.location`
+> from 127.0.0.1 to the LAN IP (via `get_lan_ip()`). Cross-VLAN peers cannot reach
+> LAN IPs — Foolscap Reconnectors failed to connect, so `get_connected_servers()`
+> returned empty. When the introducer died there were no live connections to fall back
+> on → HTTP 410.
+>
+> Fix: `start()` now ALWAYS rebuilds `tub.location` with the current Tailscale IP
+> (via `get_tailscale_ip()`). Tailscale IPs are routable between all gatekeepers
+> (ADR-002). Reconnectors connect successfully; connections survive introducer death.
+> The existing `private/servers.yaml` cache (1.18.10) provides the cold-start path.
+>
+> The TODO prescribed explicit FURL collection via a cluster-sync endpoint; that is
+> redundant because Tahoe's own `_save_servers_yaml()` already caches FURLs after
+> each introducer announcement — the only gap was the IPs being wrong.
+>
+> 3 new unit tests added to `tests/unit/test_storage_node.py`.
+> Integration test added as Scenario 8 in `project-docs/testing.md`.
+> Integration test on Proxmox still required.
 
 ---
 
