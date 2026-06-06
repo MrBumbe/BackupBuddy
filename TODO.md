@@ -5297,7 +5297,7 @@ warning during wizard: "Save this file now — it cannot be downloaded again."
 
 ---
 
-### [ ] 1.20.1 — Third three-user simulation, Part 1: infrastructure + cluster formation
+### [x] 1.20.1 — Third three-user simulation, Part 1: infrastructure + cluster formation
 
 > **Test run:** Third full end-to-end simulation. Verifies that 1.19.10 (stale invite fix),
 > 1.19.11 (permission-denied path error), 1.19.12 (SUCCESS log keyword), and 1.19.13
@@ -5550,7 +5550,13 @@ Record in state file: confirm all three nodes appear Online in all three dashboa
 - Task marked `[x]` and `git commit chore(test): 1.20.1 part 1 done` ✓
 
 ```
-> Kludde:
+> Kludde: ISSUE-001 — Carina join cascade: PermissionError on api_auth_token (root-owned files
+> from diagnostic manual `tahoe run`). Resolution: chown -R backupbuddy, manually created
+> root_dir.cap via Tahoe HTTP, re-ran step 5 (skipped join via cap_path shortcut), then
+> pushed member list from Anders to Carina via sync endpoint.
+> Notes: Carina's tailscale_hostname in own DB set to "carina-home" (not Tailscale IP) —
+> corrected by sync push with IP 100.87.217.128. Björn joined first attempt. Anders invite
+> verified in cluster.db (1.19.10 fix confirmed). All 3 dashboards show 3 active members.
 ```
 
 ---
