@@ -13,11 +13,15 @@
             Storage path(s)
         </label>
         <textarea id="storage_paths" name="storage_paths" class="form-textarea"
-                  rows="4" placeholder="/mnt/storage&#10;/data/backup-pool"
+                  rows="4" placeholder="/var/lib/backup-buddy/storage"
                   required>{{ state.storage_paths | join('\n') }}</textarea>
         <p class="text-muted" style="font-size:0.8rem; margin-top:0.25rem">
-            One absolute path per line. Each path must exist and be writable.
-            These paths are excluded from backup automatically.
+            One absolute path per line. The installer creates
+            <code>/var/lib/backup-buddy/storage</code> with the correct ownership —
+            no extra steps needed. For a path on a separate disk (e.g.
+            <code>/mnt/buddy-storage</code>), create it first:
+            <code>sudo mkdir -p /mnt/buddy-storage &amp;&amp; sudo chown backupbuddy:backupbuddy /mnt/buddy-storage</code>.
+            Storage paths are excluded from your own backups automatically.
         </p>
     </div>
 

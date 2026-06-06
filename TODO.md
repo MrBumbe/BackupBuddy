@@ -5861,7 +5861,7 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
-### [ ] 1.21.1 — Fix storage-path wizard guidance for root-owned parent directories
+### [x] 1.21.1 — Fix storage-path wizard guidance for root-owned parent directories
 
 > **Source:** 1.18.1 ISSUE-006, ISSUE-007; 1.18.20 ISSUE-005
 
