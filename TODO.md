@@ -6373,7 +6373,7 @@ Confirm all 3 dashboards still show all 3 nodes as Online.
 
 ---
 
-### [ ] 1.22.2 — Fourth three-user simulation, Part 2: agent setup + backup monitoring
+### [x] 1.22.2 — Fourth three-user simulation, Part 2: agent setup + backup monitoring
 
 > **Verifies:** 1.21.2A (no-TTY installer exits cleanly), 1.21.2B (env-var install path).
 > Also follows INSTALL.md §5 step by step.
@@ -6557,7 +6557,9 @@ ssh agent-anders-pc "journalctl -u backup-buddy-agent | grep -i 'backup path'"
 > **Hand-off to 1.22.3:** Ensure `1.22.1-state.md` is committed before starting Part 3.
 
 ```
-> Kludde:
+> Kludde: ISSUE-001 (LXC 302 OOM → 2048MB), ISSUE-002 (VM 103 OOM → 4096MB), ISSUE-003 (httpx timeout fixed).
+> LARGER FIX-001: streaming upload needed for files >500MB.
+> Carina file_count=10 due to repeated uploads during crash-restart loop (not a bug, cosmetic).
 ```
 
 ---
