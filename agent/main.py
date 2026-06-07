@@ -113,13 +113,14 @@ async def _upload_worker(
     while True:
         file_path: str = await queue.get()
         try:
-            data = Path(file_path).read_bytes()
+            path = Path(file_path)
+            file_size = path.stat().st_size
             metadata = {
                 "original_path": file_path,
                 "agent_name": agent_name,
             }
-            await client.send_fragment(data, metadata)
-            logger.info("SUCCESS — uploaded file (%d bytes)", len(data))
+            await client.send_fragment(path, metadata)
+            logger.info("SUCCESS — uploaded file (%d bytes)", file_size)
         except (OSError, IOError) as exc:
             logger.error("Failed to upload file: %s", type(exc).__name__)
         except Exception as exc:

@@ -12,6 +12,7 @@ for that direction is implemented in task 1.8.3 — see the note there.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -76,8 +77,8 @@ class GatekeeperClient:
                 f"Cannot reach gatekeeper at {self._url}: {type(exc).__name__}"
             ) from exc
 
-    async def send_fragment(self, fragment_data: bytes, metadata: dict) -> None:
-        """Send a file fragment and its metadata to the gatekeeper for upload.
+    async def send_fragment(self, file_path: Path, metadata: dict) -> None:
+        """Stream a file to the gatekeeper for upload without loading it into memory.
 
         Metadata is passed as a JSON-encoded header so the body can be a raw
         byte stream.  Raises IOError on transport or HTTP failure.
@@ -85,7 +86,7 @@ class GatekeeperClient:
         try:
             resp = await self._client.post(
                 f"{self._url}/api/agents/fragments",
-                content=fragment_data,
+                content=self._iter_file(file_path),
                 headers={"X-Fragment-Metadata": json.dumps(metadata)},
             )
             resp.raise_for_status()
@@ -93,6 +94,17 @@ class GatekeeperClient:
             raise IOError(
                 f"Failed to send fragment to gatekeeper: {type(exc).__name__}"
             ) from exc
+
+    @staticmethod
+    async def _iter_file(path: Path, chunk_size: int = 65536):
+        """Yield file content in chunks without loading the whole file into memory."""
+        loop = asyncio.get_running_loop()
+        with open(path, "rb") as f:
+            while True:
+                chunk = await loop.run_in_executor(None, f.read, chunk_size)
+                if not chunk:
+                    break
+                yield chunk
 
     # ── Local file operations (gatekeeper → agent lifeboat store) ─────────────
 

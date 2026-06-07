@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import aiofiles
 import uvicorn
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -845,14 +846,29 @@ def _create_agent_api_app(cfg: GatekeeperConfig, data_dir: Path) -> FastAPI:
                 {"error": "Invalid X-Fragment-Metadata"}, status_code=400
             )
 
-        content = await request.body()
-        if not content:
-            return JSONResponse({"error": "Empty body"}, status_code=400)
-
         upload_tmp_dir: Path = _state.get("upload_tmp_dir", data_dir / "upload_tmp")
         upload_tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = upload_tmp_dir / f"{uuid.uuid4().hex}.tmp"
-        tmp_path.write_bytes(content)
+
+        bytes_received = 0
+        try:
+            async with aiofiles.open(tmp_path, "wb") as f:
+                async for chunk in request.stream():
+                    await f.write(chunk)
+                    bytes_received += len(chunk)
+        except Exception as exc:
+            tmp_path.unlink(missing_ok=True)
+            logger.error(
+                "Error streaming upload from agent '%s': %s",
+                meta.agent_name,
+                type(exc).__name__,
+            )
+            return JSONResponse({"error": "Upload failed"}, status_code=500)
+
+        if bytes_received == 0:
+            tmp_path.unlink(missing_ok=True)
+            return JSONResponse({"error": "Empty body"}, status_code=400)
+
         try:
             os.chmod(tmp_path, 0o600)
         except OSError:
@@ -874,7 +890,7 @@ def _create_agent_api_app(cfg: GatekeeperConfig, data_dir: Path) -> FastAPI:
         logger.info(
             "Received file from agent '%s' (%d bytes) — queued for upload",
             meta.agent_name,
-            len(content),
+            bytes_received,
         )
         return JSONResponse({"status": "queued"})
 

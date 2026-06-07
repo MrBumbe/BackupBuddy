@@ -101,18 +101,28 @@ class TestRegister:
 # ── send_fragment() ───────────────────────────────────────────────────────────
 
 class TestSendFragment:
-    def test_success_posts_to_fragments_endpoint(self, client: GatekeeperClient) -> None:
+    def test_success_posts_to_fragments_endpoint(
+        self, client: GatekeeperClient, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "fragment.bin"
+        test_file.write_bytes(b"fragment-data")
+
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_post = AsyncMock(return_value=mock_resp)
 
         with patch.object(client._client, "post", mock_post):
-            asyncio.run(client.send_fragment(b"fragment-data", {"file_id": "abc123"}))
+            asyncio.run(client.send_fragment(test_file, {"file_id": "abc123"}))
 
         call_url = mock_post.call_args[0][0]
         assert call_url == "http://192.168.1.50:8081/api/agents/fragments"
 
-    def test_http_error_raises_ioerror(self, client: GatekeeperClient) -> None:
+    def test_http_error_raises_ioerror(
+        self, client: GatekeeperClient, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "fragment.bin"
+        test_file.write_bytes(b"data")
+
         mock_resp = MagicMock()
         mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
             "500", request=MagicMock(), response=MagicMock(status_code=500)
@@ -121,7 +131,7 @@ class TestSendFragment:
 
         with patch.object(client._client, "post", mock_post):
             with pytest.raises(IOError):
-                asyncio.run(client.send_fragment(b"data", {}))
+                asyncio.run(client.send_fragment(test_file, {}))
 
 
 # ── store_lifeboat() ──────────────────────────────────────────────────────────
