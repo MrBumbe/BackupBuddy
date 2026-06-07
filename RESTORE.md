@@ -23,6 +23,7 @@ Use this when your gatekeeper is running and you just need to get a file back.
 3. Type part of the file name or path in the search box.
 4. Click the file you want to restore.
 5. Enter a destination folder on the gatekeeper, for example `/home/yourname/restored-files`.
+   This can be any absolute path on the gatekeeper — you are not limited to the original location.
 6. Click **Restore file**.
 
 BackupBuddy downloads and reassembles the file from your buddies' nodes. When done, the
@@ -39,7 +40,8 @@ file appears in the folder you chose.
 1. Open your gatekeeper dashboard → **Restore**.
 2. Leave the search box empty and click **Restore folder**.
 3. Enter the original folder path as it was on the agent machine (e.g. `/home/yourname/documents`).
-4. Enter a destination folder on the gatekeeper.
+4. Enter a destination folder on the gatekeeper. You can use any path — the original
+   subfolder structure will be recreated inside the destination you choose.
 5. Click **Restore folder**.
 
 BackupBuddy restores all files in that folder, recreating the original directory structure

@@ -381,6 +381,7 @@ Open your gatekeeper dashboard and click **"Restore"** in the navigation menu.
 1. Type part of the file name or path in the search box.
 2. Click the file you want to restore.
 3. Enter a destination folder on the gatekeeper (e.g. `/home/yourname/restored-files`).
+   You can use any folder on the gatekeeper — it does not have to match the original location.
 4. Click **"Restore file"**.
 
 BackupBuddy will download and reassemble the file from your buddies' nodes. When the
