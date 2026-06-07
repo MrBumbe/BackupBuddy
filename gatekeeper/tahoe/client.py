@@ -21,7 +21,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 65536
-_DEFAULT_TIMEOUT = 300  # seconds — large files may take a while
+_TIMEOUT = httpx.Timeout(connect=30.0, read=3600.0, write=3600.0, pool=30.0)
 
 
 async def _iter_file(path: Path) -> ...:
@@ -49,9 +49,9 @@ class TahoeClient:
     Raises TahoeError on any Tahoe-side failure.
     """
 
-    def __init__(self, node_url: str, timeout: float = _DEFAULT_TIMEOUT) -> None:
+    def __init__(self, node_url: str) -> None:
         self._node_url = node_url.rstrip("/")
-        self._http = httpx.AsyncClient(timeout=timeout)
+        self._http = httpx.AsyncClient(timeout=_TIMEOUT)
 
     async def aclose(self) -> None:
         await self._http.aclose()
