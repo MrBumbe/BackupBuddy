@@ -6898,7 +6898,7 @@ the venv is used for other purposes between test runs.
 
 ---
 
-### [ ] 1.22.5 — Implement LARGER FIX-001: Streaming upload for large files (> ~500 MB)
+### [x] 1.22.5 — Implement LARGER FIX-001: Streaming upload for large files (> ~500 MB)
 
 > **Source:** 1.22.1-issues.md LARGER FIX-001, ISSUE-001, ISSUE-002
 
@@ -6959,19 +6959,31 @@ are the affected case.
 
 > **Kludde — 2026-06-07**
 >
-> Code implemented in commit 9276e063f. Four files changed:
-> - `agent/gatekeeper_client.py`: `send_fragment` now accepts `Path` instead of `bytes`.
->   Added `_iter_file` async generator (run_in_executor chunks, 64 KB) as `content=` to httpx.
-> - `agent/main.py`: `_upload_worker` uses `path.stat().st_size` for logging; passes `Path` to
->   `send_fragment` instead of reading the whole file first.
-> - `gatekeeper/main.py`: `receive_file` uses `aiofiles.open` + `request.stream()` loop instead
->   of `await request.body()`. Tracks `bytes_received`; cleans up tmp file on error or empty body.
-> - `tests/unit/test_gatekeeper_client.py`: `TestSendFragment` updated to pass `Path` (temp file)
->   instead of bytes. All 938 unit tests pass.
+> Three commits implement the full streaming pipeline:
 >
-> **Integration verification deferred:** The "Done when" OOM checks (512 MB LXC, 2 GB VM) require
-> the Proxmox environment. Roll back LXC 302 → 512 MB and VM 103 → 2 GB before the next simulation
-> run to confirm. SHA-256 end-to-end is covered by the fragmenter's existing verify step.
+> **9276e063f** — Agent + GK HTTP layer:
+> - `agent/gatekeeper_client.py`: `send_fragment` takes `Path` instead of `bytes`. Added
+>   `_iter_file` async generator (run_in_executor, 64 KB chunks) passed as `content=` to httpx.
+> - `agent/main.py`: `_upload_worker` uses `path.stat().st_size` for logging, no read_bytes().
+> - `gatekeeper/main.py`: `receive_file` uses `aiofiles.open` + `request.stream()` instead of
+>   `await request.body()`. Tracks `bytes_received`; cleans up tmp file on error or empty body.
+> - `tests/unit/test_gatekeeper_client.py`: `TestSendFragment` updated to pass Path (temp file).
+>
+> **6e42ee4cb** — Tahoe client:
+> - `gatekeeper/tahoe/client.py`: `TahoeClient.upload()` uses module-level `_iter_file` async
+>   generator instead of `asyncio.to_thread(path.read_bytes)`. Tahoe PUT /uri now receives the
+>   file in 64 KB chunks rather than a single full-file buffer.
+>   This was the second OOM source — the HTTP receive fix alone was not sufficient.
+>
+> **Proxmox verification — 2026-06-07:**
+> - LXC 302 set to 512 MB, VM 103 set to 2048 MB.
+> - New 1 GiB test file (stream-test-1g-v2.bin, random data) created in agent backup path.
+> - Agent log: `SUCCESS — uploaded file (1073741824 bytes)` at 20:27:33. No OOM on LXC 302.
+> - GK dmesg: no new OOM entries after GK restart with streaming TahoeClient (PID 1535+).
+>   Old OOM at [220s] was PID 687 (pre-fix TahoeClient, read_bytes during Tahoe upload).
+> - Catalog SHA-256: entry at 20:29:58 shows `c70a17b4202b...` — exact match with
+>   `sha256sum` output taken before upload. End-to-end integrity confirmed.
+> - All 938 unit tests pass. All 22 TahoeClient tests pass.
 
 ---
 
