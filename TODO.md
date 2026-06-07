@@ -7088,6 +7088,928 @@ Tahoe data, logs, and BackupBuddy itself, ~10–12 GB is typically free. Edge ca
 
 ---
 
+## 1.23 — Fifth three-user simulation (streaming validation + extended restore + final Phase 1 audit)
+
+> **Goal:** Verify that the streaming upload changes (1.22.5), timeout fix (1.22.6), and disk space guard
+> (1.22.7) work end-to-end in a fresh run without the OOM workarounds from 1.22. The 1.22 simulation
+> required expanding LXC 302 to 2048 MB and VM 103 to 4096 MB. This test verifies those workarounds
+> are no longer needed.
+>
+> Additional goals:
+> - Extended test file set (file with spaces in name, nested folder structure)
+> - Restore to alternate folder — explicitly tested, not covered in 1.22
+> - Restore a file that was deleted from the agent after backup
+> - Nested folder restore with subdirectory structure preserved
+> - Disk space guard test (HTTP 507 via tmpfs mount)
+> - Expired invite code behavior (was TBD in 1.22 H2 checklist)
+> - All-three-dashboards-Online explicitly verified (was TBD in 1.22)
+> - Final INSTALL.md and RESTORE.md audit
+>
+> **Known environment state going in:**
+> - VM 103 (gk-carina) was left at 4096 MB after 1.22 — must be reset to 2048 MB before rollback
+> - LXC 302 (agent-anders-nas) was left at 2048 MB after 1.22 — must be reset to 512 MB before rollback
+>
+> **Error policy:** Environment and snapshot issues (old files, Tailscale auth, stale SSH keys)
+> are fixed inline during setup and never logged as ISSUE. ISSUE/LARGER FIX are reserved for
+> code defects only.
+
+---
+
+### [ ] 1.23.1 — Fifth simulation, Part 1: infrastructure + cluster formation
+
+> **Verifies:** Memory reset to nominal sizes; expired invite code; all 3 dashboards Online.
+>
+> **State file:** `tests/integration/1.23.1-state.md` — create fresh, update after each section.
+> **Issues file:** `tests/integration/1.23.1-issues.md` — code defects only.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+
+---
+
+#### A. Infrastructure setup
+
+**A1 — Reset VM/LXC memory to nominal sizes (must happen before snapshot rollback):**
+
+Memory settings survive rollback; snapshot rollback only restores disk state.
+
+```bash
+# VM 103 was set to 4096 MB during 1.22 — reset to 2048 MB
+qm set 103 --memory 2048
+# LXC 302 was set to 2048 MB during 1.22 — reset to 512 MB
+pct set 302 --memory 512
+echo "Memory: VM 103 → 2048 MB, LXC 302 → 512 MB"
+```
+
+**A2 — Roll back all six nodes to clean snapshots:**
+
+```bash
+qm stop 101 --skiplock 1; sleep 3; qm rollback 101 clean-ubuntu-v2; qm start 101
+
+for vmid in 102 103; do
+  qm stop $vmid --skiplock 1; sleep 3; qm rollback $vmid clean-ubuntu; qm start $vmid
+done
+
+for ctid in 301 302 303; do
+  pct stop $ctid; sleep 2; pct rollback $ctid clean-ubuntu; pct start $ctid
+done
+```
+
+Verify all six running:
+```bash
+qm status 101; qm status 102; qm status 103
+pct status 301; pct status 302; pct status 303
+```
+
+**A3 — Clear stale SSH known_hosts:**
+
+```bash
+for ip in 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33; do
+  ssh-keygen -R $ip
+done
+ssh-keyscan -H 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33 \
+  >> ~/.ssh/known_hosts
+```
+
+**A4 — Verify Tailscale after rollback:**
+
+```bash
+ssh gk-anders "tailscale status"
+ssh gk-bjorn  "tailscale status"
+ssh gk-carina "tailscale status"
+```
+
+Expected: each node online with 100.x.x.x address. If any show "Logged out": `sudo tailscale up --auth-key=<key>`.
+
+Record Tailscale IPs:
+```bash
+ssh gk-anders "tailscale ip -4"
+ssh gk-bjorn  "tailscale ip -4"
+ssh gk-carina "tailscale ip -4"
+```
+
+> **State update:** Update `1.23.1-state.md` → Tailscale IPs.
+
+---
+
+#### B. Prepare extended test file set
+
+Check existing test files from prior simulations (not rolled back):
+```bash
+ls /tmp/testfiles/
+sha256sum /tmp/testfiles/*
+```
+
+If present and intact, skip re-download of the 16 base files.
+If missing: re-download same set as 1.22 (alpine-3.19.iso, earth-from-space.jpg, etc.).
+
+**Generate new test files for 1.23:**
+
+```bash
+# File with spaces in name (50 MB random binary — tests filename path handling)
+dd if=/dev/urandom bs=1M count=50 of="/tmp/testfiles/my document 2026.bin"
+
+# Nested folder structure (tests subdirectory-preserving folder restore)
+mkdir -p /tmp/testfiles/nested/subdir-a /tmp/testfiles/nested/subdir-b
+dd if=/dev/urandom bs=1M count=10 of=/tmp/testfiles/nested/subdir-a/nested-photo.bin
+dd if=/dev/urandom bs=1M count=8  of=/tmp/testfiles/nested/subdir-a/nested-video.bin
+dd if=/dev/urandom bs=1M count=5  of=/tmp/testfiles/nested/subdir-b/nested-doc.bin
+```
+
+Compute checksums for all files **before any backup**:
+```bash
+sha256sum /tmp/testfiles/* \
+  /tmp/testfiles/nested/subdir-a/* \
+  /tmp/testfiles/nested/subdir-b/* \
+  | tee /tmp/checksums_before_v5.txt
+```
+
+Distribution plan:
+- LXC 301 (Anders): test-photo-1/2/3.jpg + test-disk.iso + "my document 2026.bin"
+- LXC 303 (Björn): test-archive.zip + test-document-1.docx + nested/ folder structure
+- LXC 302 (Carina): test-document-2.docx + earth-from-space.jpg + test-archive-large.tar.gz (1 GB)
+
+> **State update:** Paste checksum output into `1.23.1-state.md` → Test file checksums.
+
+---
+
+#### C. A0 factory reset + install Anders (INSTALL.md §3 and §4)
+
+**C0 — Factory reset VM 101 (includes onboarding_state.json — fixes NOTE-001 from 1.22):**
+
+```bash
+ssh gk-anders "sudo rm -f \
+  /etc/backup-buddy/gatekeeper.cfg \
+  /var/lib/backup-buddy/catalog.db \
+  /var/lib/backup-buddy/cluster.db \
+  /var/lib/backup-buddy/root_dir.cap \
+  /var/lib/backup-buddy/recovery_kit.enc \
+  /var/lib/backup-buddy/onboarding_state.json && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+ssh gk-anders "sudo systemctl status backup-buddy-gatekeeper | head -5"
+```
+
+Including `onboarding_state.json` ensures `recovery_key_confirmed` is reset so the
+recovery-kit download step runs normally during the wizard (NOTE-001 fix).
+
+**C1–C5 — Install and configure Anders following INSTALL.md §3 and §4:**
+
+- Step 1: **Start a new cluster**
+- Step 2: Node ID `anders-home`, display name `Anders home node`
+- Step 3: Storage path `/var/lib/backup-buddy/storage`, quota 50 GB
+- Step 4: Profile **Adaptive**
+- Step 5: Passphrase `TestSimulation2026!`; download `recovery-kit.enc`; click "I have saved my recovery key"
+
+Verify first invite code in cluster.db:
+```bash
+ssh gk-anders "sudo -u backupbuddy sqlite3 /var/lib/backup-buddy/cluster.db \
+  \"SELECT code, used, expires_at FROM invites ORDER BY created_at DESC LIMIT 3;\""
+```
+
+Expected: at least 1 row with `used=0`. Record invite code in state file.
+
+---
+
+#### D. Install Björn (INSTALL.md §6)
+
+Same flow as 1.22.1 section D:
+- Node ID `bjorn-home`, display name `Björn home node`
+- Wizard Step 1: **Join an existing cluster** → enter Anders's invite code + Tailscale address
+
+Record: both nodes appear in each other's dashboards.
+
+---
+
+#### E. Install Carina (INSTALL.md §6) + idempotency test
+
+**E1–E5 — Normal join:**
+- Node ID `carina-home`, display name `Carina home node`
+- Anders generates a new invite code from the Buddies page
+
+Watch cascade log on Carina:
+```bash
+ssh gk-carina "sudo journalctl -u backup-buddy-gatekeeper -f"
+```
+
+Expected: cascade completes on first attempt.
+
+**E6 — 1.21.4 idempotency test (procedure corrected from NOTE-002):**
+
+```bash
+# Remove root_dir.cap, onboarding_state.json, AND gatekeeper.cfg (NOTE-002 fix)
+# Without removing gatekeeper.cfg the service starts in post-config mode,
+# not wizard mode — the wizard is only available when gatekeeper.cfg is absent.
+ssh gk-carina "sudo rm -f \
+  /var/lib/backup-buddy/root_dir.cap \
+  /var/lib/backup-buddy/onboarding_state.json \
+  /etc/backup-buddy/gatekeeper.cfg && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+sleep 5
+```
+
+Open wizard at `http://10.99.0.13:8080`:
+- Step 1: **Join an existing cluster**
+- Join screen: enter **same invite code as before** (already used) + Anders's Tailscale address
+
+Expected: wizard completes. If HTTP 400 "invite already used": ISSUE (1.21.4 regression).
+
+Verify:
+```bash
+ssh gk-carina "test -f /var/lib/backup-buddy/root_dir.cap && echo 'root_dir.cap EXISTS' || echo 'MISSING'"
+ssh gk-carina "sudo journalctl -u backup-buddy-gatekeeper | grep -i 'retried join\|already a member'"
+```
+
+---
+
+#### F. Expired invite code test (was TBD in 1.22)
+
+After all three nodes are joined, generate a new invite code and immediately expire it:
+
+```bash
+# Generate a fresh invite on Anders's dashboard (Buddies page)
+ANDERS_TS=$(ssh gk-anders "tailscale ip -4")
+NEW_CODE=$(curl -sf -X POST "http://${ANDERS_TS}:8080/api/cluster/invite" \
+  -H "Content-Type: application/json" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',''))")
+echo "Created invite code: ${NEW_CODE}"
+
+# Expire it by setting expires_at to 1 hour ago
+ssh gk-anders "sudo -u backupbuddy sqlite3 /var/lib/backup-buddy/cluster.db \
+  \"UPDATE invites SET expires_at = strftime('%s','now','-1 hour') WHERE code = '${NEW_CODE}';\""
+
+# Confirm expiry in DB
+ssh gk-anders "sudo -u backupbuddy sqlite3 /var/lib/backup-buddy/cluster.db \
+  \"SELECT code, used, datetime(expires_at,'unixepoch') FROM invites WHERE code = '${NEW_CODE}';\""
+```
+
+Try the expired code via the cluster join API:
+```bash
+curl -sf -X POST "http://${ANDERS_TS}:8080/api/cluster/join" \
+  -H "Content-Type: application/json" \
+  -d "{\"invite_code\": \"${NEW_CODE}\", \"node_info\": {
+    \"node_id\": \"test-expire\", \"display_name\": \"Test expire\",
+    \"tailscale_hostname\": \"test-expire\", \"profile\": \"adaptive\"}}" \
+  ; echo "(exit: $?)"
+```
+
+Expected: HTTP 400 / 422 with error containing "expired" or "invalid". Silent failure (HTTP 2xx with node added) would be a code defect — record as ISSUE.
+
+---
+
+#### G. All-three-dashboards-Online verification (was TBD in 1.22)
+
+Wait at least 10 minutes after Carina joins to allow member reconciliation (runs every 5 min):
+```bash
+sleep 600   # or check manually after 10 minutes
+```
+
+Query each dashboard:
+```bash
+ANDERS_TS=$(ssh gk-anders "tailscale ip -4")
+BJORN_TS=$(ssh gk-bjorn "tailscale ip -4")
+CARINA_TS=$(ssh gk-carina "tailscale ip -4")
+
+for TS in $ANDERS_TS $BJORN_TS $CARINA_TS; do
+  echo "--- Dashboard at $TS ---"
+  curl -sf "http://${TS}:8080/api/dashboard" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)['cluster']
+print(f'Online: {d[\"online_count\"]}/{d[\"total_members\"]}')
+for m in d['members']:
+    print(f'  {m[\"display_name\"]}: {m[\"status\"]}')
+"
+done
+```
+
+Expected: all three dashboards report `Online: 3/3` with all three display names present.
+Record PASS / FAIL (including which dashboard(s) show fewer than 3 if FAIL).
+
+> **State update:** Record F and G results in `1.23.1-state.md`.
+
+---
+
+#### Done when (Part 1):
+
+- VM 103 at 2048 MB, LXC 302 at 512 MB confirmed before rollback ✓
+- All six nodes running on clean snapshot rollback ✓
+- Tailscale connected on all three gatekeepers ✓
+- Extended test files prepared (file with spaces + nested folder structure) ✓
+- Checksums computed before backup ✓
+- `onboarding_state.json` included in factory reset (NOTE-001 fix) — recovery-kit download runs ✓
+- All three gatekeepers installed and cluster formed following INSTALL.md ✓
+- E6 procedure corrected (remove gatekeeper.cfg too — NOTE-002 fix) ✓
+- Expired invite test: code returns error, not silent success ✓
+- All three dashboards show all three nodes Online ✓
+- State and issues files created and updated ✓
+- Committed: `chore(test): 1.23.1 part 1 done`
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.23.2 — Fifth simulation, Part 2: agent setup + streaming upload validation
+
+> **Key verification:** The 1 GB file must be backed up at NOMINAL hardware (512 MB LXC agent,
+> 2 GB GK VM) without OOM. In 1.22, OOM required expanding both VMs. After the streaming fix
+> (1.22.5), neither side should buffer the full file. OOM here = code regression.
+>
+> **Resume:** Read `1.23.1-state.md`. All three gatekeepers must be installed and cluster formed.
+>
+> **State file:** `tests/integration/1.23.1-state.md` — continue updating.
+> **Issues file:** `tests/integration/1.23.1-issues.md` — code defects only.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+
+---
+
+#### H. Agent setup (following INSTALL.md §5)
+
+**H1 — Install agent on LXC 301 (Anders):**
+
+```bash
+ssh agent-anders-pc
+apt-get install -y git 2>/dev/null || true
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+BB_GATEKEEPER_IP=10.99.0.11 BB_AGENT_NAME=anders-laptop \
+  sudo -E bash /opt/backup-buddy/install/agent.sh
+```
+
+Configure backup.cfg (add path under [backup], do NOT replace whole file):
+```bash
+sudo nano /etc/backup-buddy/backup.cfg
+# Add under [backup]: /home/testuser/backup-test
+# Also set: stability_minutes = 1   (under [watcher] section, for test speed)
+```
+
+Copy test files to Anders's agent:
+```bash
+# From Proxmox host:
+pct exec 301 -- mkdir -p /home/testuser/backup-test
+for f in "test-photo-1.jpg" "test-photo-2.jpg" "test-photo-3.jpg" "test-disk.iso"; do
+  pct push 301 "/tmp/testfiles/${f}" "/home/testuser/backup-test/${f}"
+done
+pct push 301 "/tmp/testfiles/my document 2026.bin" "/home/testuser/backup-test/my document 2026.bin"
+```
+
+Connect token to gatekeeper and start agent:
+```bash
+TOKEN=$(ssh agent-anders-pc "sudo grep '^token' /etc/backup-buddy/backup.cfg | head -1 | awk '{print \$3}'")
+ssh gk-anders "sudo sed -i \"s/^token = .*/token = ${TOKEN}/\" /etc/backup-buddy/gatekeeper.cfg && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+ssh agent-anders-pc "sudo systemctl start backup-buddy-agent"
+```
+
+**H2 — Install agent on LXC 303 (Björn) — nested folder:**
+
+```bash
+ssh agent-bjorn-pc
+apt-get install -y git 2>/dev/null || true
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+BB_GATEKEEPER_IP=10.99.0.12 BB_AGENT_NAME=bjorn-laptop \
+  sudo -E bash /opt/backup-buddy/install/agent.sh
+```
+
+Configure backup.cfg with two backup paths:
+```bash
+sudo nano /etc/backup-buddy/backup.cfg
+# Under [backup] add:
+# /home/testuser/backup-test
+# /home/testuser/nested-test
+# Under [watcher]: stability_minutes = 1
+```
+
+Copy test files:
+```bash
+# From Proxmox host:
+pct exec 303 -- mkdir -p /home/testuser/backup-test
+pct push 303 /tmp/testfiles/test-archive.zip     /home/testuser/backup-test/test-archive.zip
+pct push 303 /tmp/testfiles/test-document-1.docx /home/testuser/backup-test/test-document-1.docx
+
+# Nested folder structure
+pct exec 303 -- mkdir -p /home/testuser/nested-test/subdir-a /home/testuser/nested-test/subdir-b
+pct push 303 /tmp/testfiles/nested/subdir-a/nested-photo.bin \
+  /home/testuser/nested-test/subdir-a/nested-photo.bin
+pct push 303 /tmp/testfiles/nested/subdir-a/nested-video.bin \
+  /home/testuser/nested-test/subdir-a/nested-video.bin
+pct push 303 /tmp/testfiles/nested/subdir-b/nested-doc.bin \
+  /home/testuser/nested-test/subdir-b/nested-doc.bin
+```
+
+Connect token and start:
+```bash
+TOKEN=$(ssh agent-bjorn-pc "sudo grep '^token' /etc/backup-buddy/backup.cfg | head -1 | awk '{print \$3}'")
+ssh gk-bjorn "sudo sed -i \"s/^token = .*/token = ${TOKEN}/\" /etc/backup-buddy/gatekeeper.cfg && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+ssh agent-bjorn-pc "sudo systemctl start backup-buddy-agent"
+```
+
+**H3 — Install agent on LXC 302 (Carina, 512 MB RAM — nominal, includes 1 GB file):**
+
+```bash
+ssh agent-anders-nas
+apt-get install -y git 2>/dev/null || true
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+BB_GATEKEEPER_IP=10.99.0.13 BB_AGENT_NAME=carina-laptop \
+  sudo -E bash /opt/backup-buddy/install/agent.sh
+```
+
+Configure backup.cfg:
+```bash
+sudo nano /etc/backup-buddy/backup.cfg
+# Under [backup]: /home/testuser/backup-test
+# Under [watcher]: stability_minutes = 1
+```
+
+Copy test files including 1 GB archive:
+```bash
+# From Proxmox host:
+pct exec 302 -- mkdir -p /home/testuser/backup-test
+pct push 302 /tmp/testfiles/test-document-2.docx  /home/testuser/backup-test/test-document-2.docx
+pct push 302 /tmp/testfiles/earth-from-space.jpg  /home/testuser/backup-test/earth-from-space.jpg
+pct push 302 /tmp/testfiles/test-archive-large.tar.gz \
+  /home/testuser/backup-test/test-archive-large.tar.gz
+```
+
+Connect token and start:
+```bash
+TOKEN=$(ssh agent-anders-nas "sudo grep '^token' /etc/backup-buddy/backup.cfg | head -1 | awk '{print \$3}'")
+ssh gk-carina "sudo sed -i \"s/^token = .*/token = ${TOKEN}/\" /etc/backup-buddy/gatekeeper.cfg && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+ssh agent-anders-nas "sudo systemctl start backup-buddy-agent"
+```
+
+---
+
+#### I. Memory monitoring during 1 GB upload (key streaming validation)
+
+Start memory monitors on both the agent LXC and the gatekeeper VM before the 1 GB file is uploaded:
+
+```bash
+# Monitor LXC 302 agent memory (run in background from Proxmox)
+pct exec 302 -- bash -c "
+  while true; do
+    MEM=\$(grep MemAvailable /proc/meminfo | awk '{print \$2}')
+    echo \"\$(date +%H:%M:%S) LXC302 MemAvailable: \${MEM} kB\"
+    sleep 5
+  done" &
+AGENT_MONITOR_PID=$!
+
+# Monitor VM 103 gatekeeper memory
+ssh gk-carina "bash -c '
+  while true; do
+    MEM=\$(grep MemAvailable /proc/meminfo | awk \"{print \\\$2}\")
+    echo \"\$(date +%H:%M:%S) VM103 MemAvailable: \${MEM} kB\"
+    sleep 5
+  done' &"
+```
+
+Watch agent log on Carina (wait for SUCCESS on test-archive-large.tar.gz):
+```bash
+ssh agent-anders-nas "journalctl -u backup-buddy-agent -f"
+```
+
+Watch gatekeeper log on Carina for any OOM or error:
+```bash
+ssh gk-carina "journalctl -u backup-buddy-gatekeeper -f"
+```
+
+Expected:
+- Agent LXC 302 MemAvailable stays above 0 kB throughout (no OOM kill)
+- GK VM 103 MemAvailable stays above 200 MB throughout
+- Agent log shows `SUCCESS — uploaded file ... bytes` for test-archive-large.tar.gz
+- No `OOM` in `dmesg` on either VM
+
+Record min MemAvailable observed on each, and `dmesg | grep -i oom` result.
+
+If OOM on LXC 302 or VM 103: record as ISSUE (code defect in streaming implementation).
+
+Stop monitors after upload completes:
+```bash
+kill $AGENT_MONITOR_PID 2>/dev/null || true
+ssh gk-carina "pkill -f 'while true.*MemAvailable' || true"
+```
+
+---
+
+#### J. Backup monitoring and catalog verification
+
+**J1 — Watch all agent logs until SUCCESS:**
+```bash
+ssh agent-anders-pc  "journalctl -u backup-buddy-agent -f"
+ssh agent-bjorn-pc   "journalctl -u backup-buddy-agent -f"
+ssh agent-anders-nas "journalctl -u backup-buddy-agent -f"
+```
+
+Wait for `SUCCESS — uploaded file` on all test files, including:
+- Anders: file with spaces "my document 2026.bin"
+- Björn: nested folder files (nested-photo.bin, nested-video.bin, nested-doc.bin)
+- Carina: test-archive-large.tar.gz (1 GB)
+
+**J2 — Verify file with spaces appears in catalog:**
+```bash
+ANDERS_TS=$(ssh gk-anders "tailscale ip -4")
+curl -sf "http://${ANDERS_TS}:8080/api/restore/catalog?q=2026" | python3 -m json.tool
+```
+
+Expected: "my document 2026.bin" appears in results. Record PASS / FAIL.
+
+**J3 — Verify nested folder files appear in catalog:**
+```bash
+BJORN_TS=$(ssh gk-bjorn "tailscale ip -4")
+curl -sf "http://${BJORN_TS}:8080/api/restore/catalog?q=nested" | python3 -m json.tool
+```
+
+Expected: nested-photo.bin, nested-video.bin, nested-doc.bin all present. Record PASS / FAIL.
+
+**J4 — Gatekeeper dashboard counts:**
+```bash
+curl -sf "http://${ANDERS_TS}:8080/api/dashboard" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print('Anders files:', d.get('files_backed_up',0))"
+curl -sf "http://${BJORN_TS}:8080/api/dashboard"  | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print('Björn files:', d.get('files_backed_up',0))"
+```
+
+Expected: non-zero file counts on all three dashboards.
+
+**J5 — Nightly verify scheduler check:**
+
+```bash
+ssh gk-anders "sudo journalctl -u backup-buddy-gatekeeper | grep -iE 'verify|nightly|scheduler'"
+```
+
+Expected output includes one of:
+- `Nightly verification started` — NightlyVerifier is wired in to the scheduler ✓
+- `Verify scheduler: pending implementation` — still a stub
+
+> **If stub is found:** Record in issues file as ISSUE-NNN (code gap, not a VM issue):
+> "NightlyVerifier in gatekeeper/verify/nightly.py is fully implemented but not wired
+> into the scheduler in gatekeeper/main.py — `_verify_stub()` is called instead. Must
+> be wired before Phase 1 is declared complete."
+
+---
+
+#### Done when (Part 2):
+
+- All three agents installed following INSTALL.md §5 ✓
+- File with spaces ("my document 2026.bin") backed up and in catalog ✓
+- Nested folder structure backed up (all 3 files) and in catalog ✓
+- **Carina 1 GB file backed up on 512 MB LXC without OOM — streaming fix confirmed** ✓
+- **GK carina processed 1 GB upload on 2 GB VM without OOM — streaming fix confirmed** ✓
+- Memory monitor data recorded in state file ✓
+- All agents show SUCCESS for all test files ✓
+- Nightly verify scheduler status recorded (wired or stub) ✓
+- State and issues files updated ✓
+- Committed: `chore(test): 1.23.2 part 2 done`
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.23.3 — Fifth simulation, Part 3: extended restore + disk guard + final docs audit
+
+> **Resume:** Read `1.23.1-state.md`. All agents must show SUCCESS for all test files.
+> Pre-backup checksums must be in state file.
+>
+> **State file:** `tests/integration/1.23.1-state.md` — final updates.
+> **Issues file:** `tests/integration/1.23.1-issues.md` — record code defects.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+
+---
+
+#### K. Extended restore scenarios
+
+**K1 — Restore to original-equivalent folder (baseline):**
+
+Restore each node's test files to a per-node folder:
+```bash
+for gk in gk-anders gk-bjorn gk-carina; do
+  ssh $gk "sudo mkdir -p /tmp/restored-v5 && sudo chown backupbuddy:backupbuddy /tmp/restored-v5"
+done
+```
+
+Restore via each gatekeeper's dashboard → Restore. Verify SHA-256 checksums match pre-backup values.
+
+**K2 — Restore to alternate folder (new in 1.23):**
+
+> **Verifies:** dest_path accepts any absolute path, not just the original location.
+> RESTORE.md §1.1 now explicitly documents this capability.
+
+Restore one of Björn's files to `/tmp/alternate-restore/` (completely different from original):
+```bash
+BJORN_TS=$(ssh gk-bjorn "tailscale ip -4")
+ssh gk-bjorn "sudo mkdir -p /tmp/alternate-restore && sudo chown backupbuddy:backupbuddy /tmp/alternate-restore"
+
+# Get a file from catalog
+ORIG_PATH=$(curl -sf "http://${BJORN_TS}:8080/api/restore/catalog" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['results'][0]['original_path'])")
+AGENT=$(curl -sf "http://${BJORN_TS}:8080/api/restore/catalog" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['results'][0]['agent'])")
+FILENAME=$(basename "${ORIG_PATH}")
+
+JOB=$(curl -sf -X POST "http://${BJORN_TS}:8080/api/restore/start/file" \
+  -H "Content-Type: application/json" \
+  -d "{\"original_path\": \"${ORIG_PATH}\", \"agent\": \"${AGENT}\", \"dest_path\": \"/tmp/alternate-restore\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+
+until [ "$(curl -sf "http://${BJORN_TS}:8080/api/restore/jobs/${JOB}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")" != "running" ]; do
+  sleep 2
+done
+curl -sf "http://${BJORN_TS}:8080/api/restore/jobs/${JOB}" | python3 -m json.tool
+```
+
+Verify:
+```bash
+ssh gk-bjorn "ls -la /tmp/alternate-restore/ && sha256sum /tmp/alternate-restore/*"
+```
+
+Expected: file present in `/tmp/alternate-restore/` (not in the original path). SHA-256 matches pre-backup checksum. Record PASS / FAIL.
+
+**K3 — Restore after file deleted from agent (new in 1.23):**
+
+> **Verifies:** Backups are accessible even after the source file is gone. This simulates
+> the most common restore scenario: user deleted a file and wants it back.
+
+Delete a test file from Anders's agent and confirm it is gone:
+```bash
+DELETED_FILE="/home/testuser/backup-test/test-photo-1.jpg"
+ssh agent-anders-pc "sudo rm -f ${DELETED_FILE}"
+ssh agent-anders-pc "test -f ${DELETED_FILE} && echo 'STILL EXISTS — ERROR' || echo 'DELETED OK'"
+```
+
+Restore the deleted file to a different destination:
+```bash
+ANDERS_TS=$(ssh gk-anders "tailscale ip -4")
+ssh gk-anders "sudo mkdir -p /tmp/deleted-restore && sudo chown backupbuddy:backupbuddy /tmp/deleted-restore"
+
+JOB=$(curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/file" \
+  -H "Content-Type: application/json" \
+  -d "{\"original_path\": \"${DELETED_FILE}\", \"agent\": \"anders-laptop\", \"dest_path\": \"/tmp/deleted-restore\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+
+until [ "$(curl -sf "http://${ANDERS_TS}:8080/api/restore/jobs/${JOB}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")" != "running" ]; do
+  sleep 2
+done
+curl -sf "http://${ANDERS_TS}:8080/api/restore/jobs/${JOB}" | python3 -m json.tool
+```
+
+Verify:
+```bash
+ssh gk-anders "sha256sum /tmp/deleted-restore/test-photo-1.jpg"
+```
+
+Expected: restore succeeds, SHA-256 matches pre-backup checksum. Record PASS / FAIL.
+
+**K4 — Nested folder restore with subdirectory structure preserved (new in 1.23):**
+
+> **Verifies:** RESTORE.md §1.2 — subfolder structure recreated inside dest_path.
+
+```bash
+BJORN_TS=$(ssh gk-bjorn "tailscale ip -4")
+ssh gk-bjorn "sudo mkdir -p /tmp/nested-restore && sudo chown backupbuddy:backupbuddy /tmp/nested-restore"
+
+JOB=$(curl -sf -X POST "http://${BJORN_TS}:8080/api/restore/start/folder" \
+  -H "Content-Type: application/json" \
+  -d "{\"folder_path\": \"/home/testuser/nested-test\", \"agent\": \"bjorn-laptop\", \"dest_path\": \"/tmp/nested-restore\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+
+until [ "$(curl -sf "http://${BJORN_TS}:8080/api/restore/jobs/${JOB}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")" != "running" ]; do
+  sleep 2
+done
+curl -sf "http://${BJORN_TS}:8080/api/restore/jobs/${JOB}" | python3 -m json.tool
+```
+
+Verify structure and checksums:
+```bash
+ssh gk-bjorn "find /tmp/nested-restore -type f | sort"
+# Expected:
+# /tmp/nested-restore/subdir-a/nested-photo.bin
+# /tmp/nested-restore/subdir-a/nested-video.bin
+# /tmp/nested-restore/subdir-b/nested-doc.bin
+
+ssh gk-bjorn "sha256sum \$(find /tmp/nested-restore -type f)"
+```
+
+Expected: all three files present with correct SHA-256 checksums. Subdirectory structure preserved. Record PASS / FAIL.
+
+**K5 — File with spaces in name — restore and checksum (new in 1.23):**
+
+```bash
+ANDERS_TS=$(ssh gk-anders "tailscale ip -4")
+ssh gk-anders "sudo mkdir -p /tmp/spaces-restore && sudo chown backupbuddy:backupbuddy /tmp/spaces-restore"
+
+JOB=$(curl -sf -X POST "http://${ANDERS_TS}:8080/api/restore/start/file" \
+  -H "Content-Type: application/json" \
+  -d '{"original_path": "/home/testuser/backup-test/my document 2026.bin", "agent": "anders-laptop", "dest_path": "/tmp/spaces-restore"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+
+until [ "$(curl -sf "http://${ANDERS_TS}:8080/api/restore/jobs/${JOB}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")" != "running" ]; do
+  sleep 2
+done
+curl -sf "http://${ANDERS_TS}:8080/api/restore/jobs/${JOB}" | python3 -m json.tool
+```
+
+Verify:
+```bash
+ssh gk-anders "sha256sum '/tmp/spaces-restore/my document 2026.bin'"
+```
+
+Expected: restore succeeds, checksum matches. Record PASS / FAIL.
+
+**K6 — Carina's large .tar.gz restore and checksum:**
+
+```bash
+CARINA_TS=$(ssh gk-carina "tailscale ip -4")
+ssh gk-carina "sudo mkdir -p /tmp/restored-v5/carina && sudo chown backupbuddy:backupbuddy /tmp/restored-v5/carina"
+```
+
+Restore test-archive-large.tar.gz via dashboard or API. Verify checksum matches pre-backup value.
+
+---
+
+#### L. Disk space guard test (HTTP 507)
+
+> **Verifies:** The guard implemented in 1.22.7 rejects uploads before streaming when
+> disk space is insufficient. Method: mount a 100 MB tmpfs over upload_tmp/ so
+> `shutil.disk_usage()` returns only 100 MB free, then try to upload a 200 MB file.
+
+**L1 — Mount tmpfs over upload_tmp/:**
+```bash
+ssh gk-anders "sudo mkdir -p /var/lib/backup-buddy/upload_tmp && \
+  sudo mount -t tmpfs -o size=100m tmpfs /var/lib/backup-buddy/upload_tmp"
+
+# Verify: only 100 MB reported free
+ssh gk-anders "df -h /var/lib/backup-buddy/upload_tmp"
+```
+
+**L2 — Create a 200 MB file on Anders's agent to trigger upload:**
+```bash
+ssh agent-anders-pc "sudo dd if=/dev/urandom bs=1M count=200 \
+  of=/home/testuser/backup-test/disk-guard-test.bin"
+# Wait for watcher stability period (stability_minutes = 1) and scan cycle (up to 2 min)
+sleep 150
+```
+
+**L3 — Verify HTTP 507 rejection in GK log:**
+```bash
+ssh gk-anders "sudo journalctl -u backup-buddy-gatekeeper | grep -iE 'Insufficient|507|disk space'"
+```
+
+Expected log line: `Upload rejected — insufficient disk space in upload_tmp/: need ... bytes, ... bytes free (agent='anders-laptop')`
+
+Check agent log shows upload failure (not a crash or hang):
+```bash
+ssh agent-anders-pc "journalctl -u backup-buddy-agent | grep disk-guard-test"
+```
+
+Expected: `Failed to upload file: ...` (IOError/HTTPStatusError). Agent continues running. Record PASS / FAIL.
+
+**L4 — Unmount tmpfs and verify successful upload:**
+```bash
+ssh gk-anders "sudo umount /var/lib/backup-buddy/upload_tmp"
+
+# Wait for next watcher cycle to retry the upload
+sleep 150
+ssh agent-anders-pc "journalctl -u backup-buddy-agent | grep disk-guard-test | tail -5"
+```
+
+Expected: `SUCCESS — uploaded file` for disk-guard-test.bin. Record PASS / FAIL.
+
+---
+
+#### M. Resilience test
+
+Same as 1.22.3 section H — abbreviated:
+```bash
+qm stop 101   # Stop Anders's gatekeeper
+```
+
+Restore from Björn's dashboard. Expected: succeeds.
+Restore from Carina's dashboard. Expected: succeeds.
+
+```bash
+qm start 101
+sleep 15
+```
+
+Confirm all three nodes show Online in all dashboards. Record PASS / FAIL.
+
+---
+
+#### N. Final INSTALL.md and RESTORE.md audit
+
+> Verify that the documentation changes made before this test run accurately describe
+> actual system behavior as observed during 1.23.
+
+**N1 — INSTALL.md:**
+- [ ] §2 hardware requirements — disk space note (20 GB system disk, ~10–12 GB free, plan for 2× largest file) matches observed behavior
+- [ ] §3 installer output matches guide; no unexpected warnings
+- [ ] §4 wizard flow matches guide (all 5 steps); recovery-kit download runs correctly (onboarding_state.json reset)
+- [ ] §5 agent install matches guide; §5a "add paths only, do not replace file" instruction is correct
+- [ ] §6 buddy join flow matches guide
+- [ ] §7 verify backup matches guide (SUCCESS lines in journalctl)
+- [ ] §8 restore — alternate-folder note ("does not have to match the original location") is accurate
+- [ ] §9 troubleshooting — recovery kit re-download via Settings → Lifeboat is accurate
+
+**N2 — RESTORE.md:**
+- [ ] §1.1 step 5 — "any absolute path" clarification is accurate
+- [ ] §1.2 step 4 — subfolder structure note is accurate
+- [ ] §1.3 error messages — observed error texts match documented messages
+- [ ] §2 disaster recovery — procedure matches current implementation
+- [ ] Quick reference table is accurate
+
+Record any discrepancy as ENRADSFIX and fix inline.
+
+---
+
+#### O. Manual checklist
+
+Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
+
+**Streaming upload validation (key new checks):**
+- [ ] 1 GB file backed up on 512 MB agent LXC without OOM (1.22.5 streaming fix verified)
+- [ ] 1 GB file received by 2 GB gatekeeper VM without OOM (1.22.5 streaming fix verified)
+- [ ] LXC 302 MemAvailable stayed above 0 kB throughout 1 GB upload
+- [ ] VM 103 MemAvailable stayed above 200 MB throughout 1 GB upload
+
+**Extended test files:**
+- [ ] File with spaces in name backed up successfully
+- [ ] File with spaces in name restored with correct checksum
+- [ ] Nested folder (3 files, 2 subdirs) backed up successfully
+- [ ] Nested folder restore: subdirectory structure preserved in dest_path
+
+**Extended restore scenarios:**
+- [ ] Alternate-folder restore: file lands in `/tmp/alternate-restore/` (not original path)
+- [ ] Alternate-folder restore: checksum matches pre-backup
+- [ ] Deleted-file restore: file restored after deletion from agent
+- [ ] Deleted-file restore: checksum matches pre-backup
+- [ ] Nested folder restore: all 3 files present with correct checksums
+- [ ] File-with-spaces restore: "my document 2026.bin" restored with correct checksum
+- [ ] Large .tar.gz (1 GB, Carina): restored with correct checksum
+
+**Disk space guard:**
+- [ ] HTTP 507 returned when upload_tmp has insufficient space
+- [ ] GK log shows "Upload rejected — insufficient disk space" with byte counts
+- [ ] Agent logs upload failure; agent continues running (no crash or hang)
+- [ ] After tmpfs unmounted: file uploads successfully on next watcher cycle
+
+**Cluster:**
+- [ ] Expired invite code returns error (not silent success)
+- [ ] All 3 dashboards show all 3 nodes Online (after 10-minute reconciliation wait)
+
+**Resilience:**
+- [ ] Stopping one gatekeeper: restore from other two succeeds
+- [ ] Stopped gatekeeper restarts and reconnects; all 3 Online confirmed
+
+**Nightly verify:**
+- [ ] Nightly verify scheduler confirmed: wired (NightlyVerifier) or stub (ISSUE flagged)
+
+**INSTALL.md and RESTORE.md:**
+- [ ] §8 alternate-folder restore note is accurate
+- [ ] RESTORE.md §1.1 "any absolute path" note is accurate
+- [ ] RESTORE.md §1.2 subfolder structure note is accurate
+- [ ] All other INSTALL.md sections produced correct results
+
+---
+
+#### P. Close-out
+
+- Update `1.23.1-state.md` with final statuses
+- Commit any INSTALL.md/RESTORE.md corrections: `fix(docs): INSTALL.md and RESTORE.md corrections from 1.23 test run`
+- Commit issues file: `chore(test): 1.23.1 issues file — N issues logged`
+- Add Kludde block with overall result
+- Mark 1.23.1–1.23.3 as `[x]` in TODO.md
+- Final commit: `chore(test): mark 1.23.1-1.23.3 done — fifth sim complete`
+
+---
+
+#### Done when (Part 3 / full simulation):
+
+- All extended restore scenarios PASS: alternate folder, deleted file, nested folder, spaces in name ✓
+- Carina's 1 GB tar.gz restored with correct checksum ✓
+- Disk space guard (HTTP 507) verified via tmpfs test ✓
+- Successful upload confirmed after tmpfs unmount ✓
+- Resilience test PASS (restore survives one node down) ✓
+- Nightly verify scheduler status recorded ✓
+- Final INSTALL.md and RESTORE.md audit complete — all sections accurate ✓
+- All ENRADSFIX items committed ✓
+- `tests/integration/1.23.1-issues.md` committed ✓
+- `tests/integration/1.23.1-state.md` committed with final statuses ✓
+- Tasks 1.23.1–1.23.3 marked `[x]` ✓
+
+---
+
+> **Kludde:**
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
