@@ -6015,6 +6015,823 @@ Both should be implemented.
 
 ---
 
+## 1.22 — Fourth three-user simulation (post-1.21.x fixes + INSTALL.md audit)
+
+> **Goal:** Confirm that all four 1.21.x fixes work correctly in a fresh end-to-end run.
+> Follow **INSTALL.md as the primary reference** — every section of the guide that applies
+> is followed step by step exactly as a new user would. Deviations from expectations
+> are recorded and categorised:
+>
+> - **ENRADSFIX:** A small inconsistency or missing step in INSTALL.md (or a one-liner code
+>   fix). Record in issues file **and fix immediately** with a commit.
+> - **ISSUE:** A functional problem that requires investigation. Fix if blocking; otherwise
+>   record and continue.
+> - **LARGER FIX:** A problem that would affect earlier test steps or require a non-trivial
+>   code change. Record in issues file **and add to TODO.md**; continue with workaround.
+
+---
+
+### [ ] 1.22.1 — Fourth three-user simulation, Part 1: infrastructure + cluster formation
+
+> **Verifies:** 1.21.1 (wizard step 3 default path), 1.21.4 (join cascade idempotency).
+>
+> **State file:** `tests/integration/1.22.1-state.md` — update after each section.
+> Read this file first when resuming after a context compression or `/clear`.
+>
+> **Issues file:** `tests/integration/1.22.1-issues.md` — record all problems here.
+>
+> **Error policy:** All problems are recorded in the issues file. Nothing is fixed unless it
+> completely blocks progress (exception: ENRADSFIX items are fixed immediately and committed
+> inline). If a blocking non-trivial fix is required: fix, roll all nodes back to clean
+> snapshot, restart from A1.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+>
+> **Prerequisite:** None — this is Part 1.
+
+---
+
+#### A0. Verify VM 101 wizard state (run once before A1 if VM 101 is not clean)
+
+```bash
+ssh gk-anders "test -f /etc/backup-buddy/gatekeeper.cfg && echo 'WIZARD STATE PRESENT' || echo 'Clean'"
+```
+
+If `WIZARD STATE PRESENT`, factory-reset (includes all state files):
+```bash
+ssh gk-anders "sudo rm -f \
+  /etc/backup-buddy/gatekeeper.cfg \
+  /var/lib/backup-buddy/catalog.db \
+  /var/lib/backup-buddy/cluster.db \
+  /var/lib/backup-buddy/root_dir.cap \
+  /var/lib/backup-buddy/recovery_kit.enc \
+  /var/lib/backup-buddy/onboarding_state.json && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+ssh gk-anders "sudo systemctl status backup-buddy-gatekeeper | head -5"
+```
+
+---
+
+#### A. Infrastructure setup
+
+**A1 — Roll back all six nodes to their clean snapshot:**
+
+```bash
+qm stop 101 --skiplock 1
+sleep 3
+qm rollback 101 clean-ubuntu-v2
+qm start 101
+
+for vmid in 102 103; do
+  qm stop $vmid --skiplock 1
+  sleep 3
+  qm rollback $vmid clean-ubuntu
+  qm start $vmid
+done
+
+for ctid in 301 302 303; do
+  pct stop $ctid
+  sleep 2
+  pct rollback $ctid clean-ubuntu
+  pct start $ctid
+done
+```
+
+Verify all six are running:
+```bash
+qm status 101; qm status 102; qm status 103
+pct status 301; pct status 302; pct status 303
+```
+
+**A1a — Clear stale SSH host keys (on operator machine):**
+
+```bash
+for ip in 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33; do
+  ssh-keygen -R $ip
+done
+ssh-keyscan -H 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.31 10.99.0.32 10.99.0.33 \
+  >> ~/.ssh/known_hosts
+```
+
+**A2 — Node layout:**
+
+| User | Role | VM/LXC | Hostname | LAN IP |
+|------|------|--------|----------|--------|
+| Anders | Gatekeeper | VM 101 | gatekeeper-anders | 10.99.0.11 |
+| Björn | Gatekeeper | VM 102 | gatekeeper-bjorn | 10.99.0.12 |
+| Carina | Gatekeeper | VM 103 | gatekeeper-carina | 10.99.0.13 |
+| Anders | Agent | LXC 301 | agent-anders-pc | 10.99.0.31 |
+| Björn | Agent | LXC 303 | agent-bjorn-pc | 10.99.0.33 |
+| Carina | Agent | LXC 302 | agent-anders-nas | 10.99.0.32 |
+
+**A3 — Verify Tailscale after rollback:**
+
+```bash
+ssh gk-anders "tailscale status"
+ssh gk-bjorn  "tailscale status"
+ssh gk-carina "tailscale status"
+```
+
+Expected: each shows node as online with a 100.x.x.x address.
+If any show "Logged out": ask Johan for a reusable auth key, then
+`sudo tailscale up --auth-key=<key>` on the affected node(s).
+
+Record Tailscale IPs:
+```bash
+ssh gk-anders "tailscale ip -4"
+ssh gk-bjorn  "tailscale ip -4"
+ssh gk-carina "tailscale ip -4"
+```
+
+> **State update:** After A3, update `1.22.1-state.md` → Tailscale IPs table.
+
+---
+
+#### B. Download test files
+
+Check if previous test files are still present on the Proxmox host (not rolled back):
+```bash
+ls /tmp/testfiles/
+sha256sum /tmp/testfiles/*
+```
+
+If present and intact, skip re-download.
+If missing: download fresh files (same set as 1.20 + one extra large file):
+- 3 × `.jpg` (≥ 5 MB each)
+- 1 × `.iso` (200–700 MB)
+- 1 × `.zip` (50–200 MB)
+- 2 × `.docx` (1–2 MB each)
+- **NEW:** 1 × `.tar.gz` (≥ 1 GB) — generates locally if no suitable file available:
+  ```bash
+  dd if=/dev/urandom bs=1M count=1024 | gzip > /tmp/testfiles/test-archive-large.tar.gz
+  ```
+
+Compute checksums **before any backup**:
+```bash
+sha256sum /tmp/testfiles/* | tee /tmp/checksums_before_v4.txt
+```
+
+Distribute test files:
+- LXC 301 (Anders): 3 jpg + 1 iso
+- LXC 303 (Björn): 1 zip + 1 docx
+- LXC 302 (Carina): 1 docx + 1 jpg + 1 tar.gz (the large file)
+
+> **State update:** After B, paste checksum output into `1.22.1-state.md` → Test file checksums.
+
+---
+
+#### C. Install and configure — Anders (VM 101) — following INSTALL.md §3 and §4
+
+**C1 — SSH to gatekeeper:**
+
+```bash
+ssh gk-anders
+```
+
+**C2 — Install BackupBuddy gatekeeper (INSTALL.md §3):**
+
+> Following INSTALL.md §3 exactly. Note if installer output does NOT match the guide's
+> expected output block. Record any discrepancy as ENRADSFIX or ISSUE.
+
+```bash
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+sudo bash /opt/backup-buddy/install/gatekeeper.sh
+```
+
+Expected output (per INSTALL.md §3):
+```
+  [✓] Service backup-buddy-gatekeeper is running
+  Next steps:
+  1. Authenticate Tailscale...
+  2. Open the setup wizard...
+```
+Record actual output in state file. Flag if different → ENRADSFIX.
+
+**C3 — Tailscale (INSTALL.md §3a):**
+
+> In the test environment, Tailscale was already authenticated before rollback.
+> `sudo tailscale up` will NOT print a browser URL — it will reconnect silently.
+> This is expected test-environment behaviour; not an INSTALL.md bug.
+
+```bash
+tailscale status
+tailscale ip -4
+```
+
+Verify Tailscale is connected (100.x.x.x shown). If not connected: `sudo tailscale up`.
+
+**C4 — Open wizard (INSTALL.md §3b):**
+
+Open `http://10.99.0.11:8080` in browser.
+Verify wizard loads. Note if URL format differs from INSTALL.md.
+
+**C5 — Complete wizard (INSTALL.md §4):**
+
+- Step 1: **Start a new cluster** (INSTALL.md §4 Step 1)
+- Step 2: Node ID `anders-home`, display name `Anders home node` (§4 Step 2)
+- Step 3: **Storage path `/var/lib/backup-buddy/storage`** (§4 Step 3)
+  > **1.21.1 verification:** The guide says this is the "simplest choice" and requires no
+  > extra steps. Verify the wizard accepts this path and creates the directory automatically
+  > — no chown command needed. If any error appears, record as ISSUE.
+  > Quota: 50 GB.
+- Step 4: Profile **Adaptive** (§4 Step 4)
+- Step 5: Skip notification email. Choose a passphrase, write it down. (§4 Step 5)
+  Download `recovery-kit.enc`. Click "I have saved my recovery key".
+
+Record in state file: **invite code** and **Tailscale address** shown after wizard.
+
+**C5a — Verify first invite code is in cluster.db (regression from 1.19.10):**
+
+```bash
+ssh gk-anders "sudo -u backupbuddy /opt/backup-buddy/.venv/bin/python3 -c \
+  \"import sys; sys.path.insert(0,'/opt/backup-buddy'); \
+  from gatekeeper.db.cluster import ClusterDB; \
+  db=ClusterDB('/var/lib/backup-buddy/cluster.db'); \
+  rows=db.list_invites(); print('Invites:', len(rows), rows[0].code if rows else 'NONE')\""
+```
+
+Expected: at least 1 invite row. If 0: record ISSUE, regenerate via dashboard.
+
+**C6 — Verify dashboard switched to Tailscale address:**
+
+```bash
+ANDERS_TS=$(ssh gk-anders "tailscale ip -4")
+curl -sf "http://${ANDERS_TS}:8080/" | head -5    # expected: 200 OK
+curl -sf "http://10.99.0.11:8080/" || echo "LAN IP correctly rejected"
+```
+
+---
+
+#### D. Install and configure — Björn (VM 102) — following INSTALL.md §6
+
+Same steps as C with:
+- Node ID `bjorn-home`, display name `Björn home node`
+- In wizard Step 1: **Join an existing cluster** → enter Anders's invite code and Tailscale address
+- Storage path: `/var/lib/backup-buddy/storage`
+- Agent LXC: 303
+
+Follow INSTALL.md §6 exactly. Note any step that doesn't match the guide.
+
+Record in state file: confirm both nodes appear in each other's dashboards.
+
+---
+
+#### E. Install and configure — Carina (VM 103) — following INSTALL.md §6
+
+**E1–E5 — Normal join (INSTALL.md §6):**
+
+Same steps as D with:
+- Node ID `carina-home`, display name `Carina home node`
+- Agent LXC: 302
+- **Anders must generate a new invite code** from Buddies page before Carina can join.
+
+> **1.21.4 regression test:** In simulation 1.20, Carina's cascade failed (ISSUE-001)
+> because root-owned Tahoe files from a diagnostic `tahoe run` blocked the process.
+> 1.21.4 makes the cascade idempotent — but more importantly, 1.21.3 (Tailscale tub.location)
+> means storage node startup is more reliable. Verify Carina's cascade completes on the
+> **first attempt** without any workaround.
+
+Watch the cascade log on Carina while joining:
+```bash
+ssh gk-carina "sudo journalctl -u backup-buddy-gatekeeper -f"
+```
+
+Expected: cascade completes, root_dir.cap written, gatekeeper.cfg created, service running.
+If it fails on first attempt: record as ISSUE. Do NOT manually intervene until cascade has
+been attempted at least twice automatically.
+
+Record in state file: confirm all three nodes appear Online in all three dashboards.
+
+**E6 — 1.21.4 idempotency test:**
+
+> **Background:** 1.21.4 fixes a split-state scenario: if the cascade on the JOINER side
+> crashes after the LEADER has already committed (invite marked used + member added), a
+> retry with the same invite code previously returned HTTP 400 "invite used". Now the
+> leader recognises "this node_id is already a member → cascade completed on leader side
+> before joiner crashed → return cluster state instead of 400".
+>
+> **Test:** Simulate the "joiner crashed before writing root_dir.cap" scenario by manually
+> removing Carina's root_dir.cap and wizard state, then retrying the wizard with the same
+> (already-used) invite code. Expected: cascade completes successfully.
+
+Only run this if E1–E5 completed successfully and Carina's cluster.db shows she is a member.
+
+```bash
+# On the operator machine, record Carina's invite code from state file.
+# Then simulate the split state:
+ssh gk-carina "sudo rm -f /var/lib/backup-buddy/root_dir.cap"
+ssh gk-carina "sudo rm -f /var/lib/backup-buddy/onboarding_state.json"
+ssh gk-carina "sudo systemctl restart backup-buddy-gatekeeper"
+sleep 5
+ssh gk-carina "sudo systemctl status backup-buddy-gatekeeper | head -5"
+```
+
+Open `http://10.99.0.13:8080` in browser. The wizard should appear in setup mode.
+
+- Step 1: **Join an existing cluster**
+- Join screen: enter the **same invite code as before** (already used) + Anders's Tailscale address
+- Complete remaining wizard steps
+
+Expected: wizard completes. A 400 "invite already used" error means the 1.21.4 fix is not working — record as ISSUE.
+
+Verify after wizard:
+```bash
+ssh gk-carina "test -f /var/lib/backup-buddy/root_dir.cap && echo 'root_dir.cap EXISTS' || echo 'MISSING'"
+ssh gk-carina "sudo journalctl -u backup-buddy-gatekeeper | grep -i 'retried join\|already a member\|idempotent'"
+```
+
+Confirm all 3 dashboards still show all 3 nodes as Online.
+
+> **State update:** Record E6 result (PASS/FAIL + relevant log lines) in `1.22.1-state.md`.
+
+---
+
+#### Done when (Part 1):
+
+- A0 factory reset includes `onboarding_state.json` deletion ✓
+- All six nodes running on clean snapshot rollback ✓
+- Tailscale connected on all three gatekeepers ✓
+- Test files present (8 total) with pre-backup checksums in state file ✓
+- INSTALL.md §3 installer output matches guide — all ENRADSFIX items committed ✓
+- Anders wizard step 3 accepted `/var/lib/backup-buddy/storage` without chown (1.21.1) ✓
+- Anders wizard complete; first invite code in cluster.db (1.19.10 regression) ✓
+- Björn joined cluster following INSTALL.md §6; both nodes visible in dashboards ✓
+- Carina joined cluster on FIRST attempt (no ISSUE-001 workaround) ✓
+- Carina 1.21.4 idempotency test: used invite code accepted on retry → wizard completes ✓
+- All deviations from INSTALL.md recorded and acted on ✓
+- State file updated ✓
+- Issues file updated ✓
+- Task marked `[ ]` and `git commit chore(test): 1.22.1 part 1 done` ✓
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.22.2 — Fourth three-user simulation, Part 2: agent setup + backup monitoring
+
+> **Verifies:** 1.21.2A (no-TTY installer exits cleanly), 1.21.2B (env-var install path).
+> Also follows INSTALL.md §5 step by step.
+>
+> **Resume:** Before starting, read `tests/integration/1.22.1-state.md`.
+> All three gatekeepers must be installed and cluster formed (1.22.1 done).
+>
+> **State file:** `tests/integration/1.22.1-state.md` — continue updating.
+> **Issues file:** `tests/integration/1.22.1-issues.md` — continue recording problems.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+
+---
+
+#### F0. TTY detection test (1.21.2A) — before any agent install
+
+> LXC containers (without SSH pseudo-TTY) have no interactive terminal. Before the fix,
+> `agent.sh` would crash with `/dev/tty: No such device or address`. After the fix it
+> exits with a clear actionable message. This is the verification.
+>
+> INSTALL.md §5 now documents the env-var escape hatch — verify the message in the guide
+> matches what the installer actually prints.
+
+```bash
+# Run installer on LXC 301 WITHOUT env vars and WITHOUT a PTY (no -t flag):
+ssh agent-anders-pc "sudo bash /opt/backup-buddy/install/agent.sh"
+```
+
+Expected output contains: `No interactive terminal detected. To install non-interactively, use:`
+FAIL condition: output contains `/dev/tty: No such device or address` — record ISSUE.
+
+Note: the `ssh` call without `-t` already simulates no-TTY. If the test machine's ssh adds
+a PTY by default, force non-interactive explicitly:
+```bash
+ssh -T agent-anders-pc "sudo bash /opt/backup-buddy/install/agent.sh" 2>&1
+```
+
+---
+
+#### F. Agent setup and backup monitoring — following INSTALL.md §5
+
+> Following INSTALL.md §5 and the env-var path documented in the callout box.
+> Note any discrepancy between the guide and actual behaviour as ENRADSFIX or ISSUE.
+>
+> **Note:** LXC containers may not have `git` or `curl` installed. If missing, install first.
+
+**F1 — Install agent on LXC 301 (Anders):**
+
+```bash
+ssh agent-anders-pc
+apt-get install -y git 2>/dev/null || true
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+BB_GATEKEEPER_IP=10.99.0.11 BB_AGENT_NAME=anders-laptop \
+  sudo -E bash /opt/backup-buddy/install/agent.sh
+```
+
+> **1.21.2B verification:** This uses the env-var path documented in INSTALL.md §5 callout.
+> Verify the installer completes without any interactive prompts and that the token is
+> printed at the end as the guide describes.
+
+Read installer output. Check that installer output includes:
+```
+  2. Add this token to your gatekeeper's gatekeeper.cfg:
+       [agent_api]
+       token = ...
+```
+
+> **INSTALL.md §5a check:** The guide says to "Replace the file contents with the complete
+> example below". The installer already writes a correct [gatekeeper] section including
+> the token. Replacing the whole file would lose the installer-generated token. Verify
+> whether adding backup paths under [backup] is sufficient, and record any discrepancy
+> between the guide and the correct procedure as ENRADSFIX.
+
+Edit backup paths (add, do NOT replace whole file):
+```bash
+sudo nano /etc/backup-buddy/backup.cfg
+# Add under [backup] section: /home/testuser/backup-test
+```
+
+Verify [gatekeeper] section is intact after edit:
+```bash
+sudo grep -A5 '\[gatekeeper\]' /etc/backup-buddy/backup.cfg
+```
+
+Copy agent token to Anders's gatekeeper:
+```bash
+TOKEN=$(sudo grep '^token' /etc/backup-buddy/backup.cfg | head -1 | awk '{print $3}')
+echo "Token: ${TOKEN}"
+# On Anders's gatekeeper, update [agent_api] token:
+ssh gk-anders "sudo sed -i \"s/^token = .*/token = ${TOKEN}/\" /etc/backup-buddy/gatekeeper.cfg && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+sudo systemctl start backup-buddy-agent
+```
+
+> **State update:** Record token (first 8 chars) in `1.22.1-state.md` → Agent tokens.
+
+**F2 — Install agent on LXC 303 (Björn):**
+
+```bash
+ssh agent-bjorn-pc
+apt-get install -y git 2>/dev/null || true
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+BB_GATEKEEPER_IP=10.99.0.12 BB_AGENT_NAME=bjorn-laptop \
+  sudo -E bash /opt/backup-buddy/install/agent.sh
+sudo nano /etc/backup-buddy/backup.cfg   # add /home/testuser/backup-test under [backup]
+TOKEN=$(sudo grep '^token' /etc/backup-buddy/backup.cfg | head -1 | awk '{print $3}')
+ssh gk-bjorn "sudo sed -i \"s/^token = .*/token = ${TOKEN}/\" /etc/backup-buddy/gatekeeper.cfg && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+sudo systemctl start backup-buddy-agent
+```
+
+**F3 — Install agent on LXC 302 (Carina, large .tar.gz file):**
+
+```bash
+ssh agent-anders-nas
+apt-get install -y git 2>/dev/null || true
+git clone https://github.com/MrBumbe/BackupBuddy.git /opt/backup-buddy
+BB_GATEKEEPER_IP=10.99.0.13 BB_AGENT_NAME=carina-laptop \
+  sudo -E bash /opt/backup-buddy/install/agent.sh
+sudo nano /etc/backup-buddy/backup.cfg   # add /home/testuser/backup-test under [backup]
+TOKEN=$(sudo grep '^token' /etc/backup-buddy/backup.cfg | head -1 | awk '{print $3}')
+ssh gk-carina "sudo sed -i \"s/^token = .*/token = ${TOKEN}/\" /etc/backup-buddy/gatekeeper.cfg && \
+  sudo systemctl restart backup-buddy-gatekeeper"
+sudo systemctl start backup-buddy-agent
+```
+
+> **Note on large file:** Carina's backup-test directory contains the ~1 GB tar.gz.
+> Agent logs will show this file being uploaded — expect it to take longer than other files.
+> Set `stability_minutes = 1` in backup.cfg if not already set (for test speed).
+
+**F4 — Watch agent logs until SUCCESS (INSTALL.md §7):**
+
+Following INSTALL.md §7: "You can also check the agent log on your agent machine."
+
+```bash
+ssh agent-anders-pc  "journalctl -u backup-buddy-agent -f"
+ssh agent-bjorn-pc   "journalctl -u backup-buddy-agent -f"
+ssh agent-anders-nas "journalctl -u backup-buddy-agent -f"
+```
+
+Wait until each agent shows `SUCCESS — uploaded file` for all its test files.
+For Carina's LXC: also wait for the large .tar.gz to show SUCCESS.
+Note any `FAILED` entries in the issues file.
+
+**F5 — Confirm on gatekeeper dashboards (INSTALL.md §7):**
+
+Open each gatekeeper's Tailscale URL. Confirm:
+- "Last backup" shows a recent timestamp
+- "Files backed up" count is non-zero
+
+**F6 — Verify 1.19.11 fix (permission-denied error message, regression):**
+
+```bash
+# Create a path the backupbuddy user cannot traverse into
+ssh agent-anders-pc "mkdir -p /tmp/locked_parent/backup-test && chmod 700 /tmp/locked_parent"
+# Add /tmp/locked_parent/backup-test under [backup] in backup.cfg, then:
+ssh agent-anders-pc "sudo systemctl restart backup-buddy-agent"
+ssh agent-anders-pc "journalctl -u backup-buddy-agent | grep -i 'backup path'"
+# Expected: "not accessible by the backup service user" — NOT "does not exist"
+# Remove /tmp/locked_parent/backup-test from backup.cfg, restart agent
+```
+
+> **State update:** Update `1.22.1-state.md` section log rows F1–F3.
+
+---
+
+#### Done when (Part 2):
+
+- F0 TTY test: installer exits with clear actionable message (1.21.2A) ✓
+- Agent installer with BB_GATEKEEPER_IP env var completes successfully (1.21.2B) ✓
+- INSTALL.md §5a discrepancy (if any) recorded and ENRADSFIX committed ✓
+- All three agents installed and backup tokens configured on their gatekeepers ✓
+- Large .tar.gz file backed up successfully on Carina's agent ✓
+- All agents show `SUCCESS — uploaded file` in journalctl ✓
+- All gatekeeper dashboards show non-zero "Files backed up" ✓
+- 1.19.11 fix verified: permission-denied path shows "not accessible by the backup service user" ✓
+- State file updated ✓
+- Issues file updated ✓
+- Task marked `[ ]` and `git commit chore(test): 1.22.2 part 2 done` ✓
+
+> **Hand-off to 1.22.3:** Ensure `1.22.1-state.md` is committed before starting Part 3.
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.22.3 — Fourth three-user simulation, Part 3: restore, checksums, resilience, and introducer test
+
+> **Verifies:** 1.21.3 (introducer outage — restore still works via servers.yaml cache).
+> Also follows INSTALL.md §8 for restore flow.
+>
+> **Resume:** Before starting, read `tests/integration/1.22.1-state.md`.
+> All agents must be installed and backups confirmed (1.22.2 done).
+> Pre-backup checksums must be in state file.
+>
+> **State file:** `tests/integration/1.22.1-state.md` — final updates here.
+> **Issues file:** `tests/integration/1.22.1-issues.md` — record all problems.
+>
+> **Proxmox access:** SSH to 192.168.1.60 as `root` using `~/.ssh/id_ed25519`.
+
+---
+
+#### G. Restore and checksum verification — following INSTALL.md §8
+
+> Following INSTALL.md §8 for restore flow. Note any discrepancy from the guide.
+
+**G1 — Restore from Anders's dashboard (INSTALL.md §8):**
+
+Open `http://<anders-tailscale-ip>:8080` → Restore.
+Restore each of Anders's test files to `/tmp/restored/anders/` on the gatekeeper.
+
+```bash
+ssh gk-anders "sudo mkdir -p /tmp/restored/anders && sudo chown backupbuddy:backupbuddy /tmp/restored/anders"
+```
+
+**G2 — Restore from Björn's dashboard:**
+
+Restore Björn's test files to `/tmp/restored/bjorn/`.
+
+```bash
+ssh gk-bjorn "sudo mkdir -p /tmp/restored/bjorn && sudo chown backupbuddy:backupbuddy /tmp/restored/bjorn"
+```
+
+**G3 — Restore from Carina's dashboard (includes large .tar.gz):**
+
+Restore Carina's test files (including the large .tar.gz) to `/tmp/restored/carina/`.
+
+```bash
+ssh gk-carina "sudo mkdir -p /tmp/restored/carina && sudo chown backupbuddy:backupbuddy /tmp/restored/carina"
+```
+
+> **Note:** Restoring the large .tar.gz will take longer than other files. Wait for the
+> restore to complete before computing checksums. Monitor progress in the dashboard.
+
+**G4 — Compute checksums after restore:**
+
+```bash
+ssh gk-anders  "sha256sum /tmp/restored/anders/*"
+ssh gk-bjorn   "sha256sum /tmp/restored/bjorn/*"
+ssh gk-carina  "sha256sum /tmp/restored/carina/*"
+```
+
+Compare against pre-backup checksums in `1.22.1-state.md`. Every hash must match including
+the large .tar.gz file. Record PASS / FAIL.
+
+**G5 — Folder restore test:**
+
+Restore an entire folder via the dashboard to confirm the folder restore path works.
+Record PASS / FAIL.
+
+**G6 — Verify recovery kit re-download from Settings → Lifeboat (regression from 1.19.13):**
+
+```bash
+ANDERS_TS=$(ssh gk-anders "tailscale ip -4")
+curl -sf "http://${ANDERS_TS}:8080/api/settings/recovery-kit/download" \
+  -o /tmp/recovery_kit_redownload.enc
+ls -la /tmp/recovery_kit_redownload.enc
+# Expected: non-empty file (> 0 bytes)
+```
+
+> **INSTALL.md §9 check:** The guide's troubleshooting section "I lost my recovery key
+> file" says "contact the BackupBuddy project for guidance". Since 1.19.13 added a
+> re-download button in Settings → Lifeboat, this is outdated. Record as ENRADSFIX and
+> update INSTALL.md §9 inline.
+
+---
+
+#### H. Resilience test — one gatekeeper down
+
+Stop one gatekeeper (simulate node failure):
+```bash
+qm stop 101   # Stop Anders's gatekeeper
+```
+
+From Björn's dashboard: attempt a restore. Should succeed even without Anders.
+From Carina's dashboard: attempt a restore. Should succeed.
+
+Bring Anders back:
+```bash
+qm start 101
+sleep 15
+```
+
+Confirm Anders's dashboard reconnects and shows all three nodes as Online.
+Record PASS / FAIL.
+
+---
+
+#### H-intro. Introducer outage test (1.21.3)
+
+> **Background:** Before 1.21.3, stopping the Tahoe introducer VM (VM 104) immediately
+> broke all restores cluster-wide — the storage node's `tub.location` was set to a LAN IP
+> unreachable across VLANs, so Foolscap Reconnectors never established live connections.
+> With 1.21.3, `tub.location` uses the Tailscale IP, so connections survive introducer death.
+> The `private/servers.yaml` cache (1.18.10) handles the cold-start path.
+>
+> Run this after H (resilience test) with all three nodes back online and all backups intact.
+
+**H-intro-1 — Stop the introducer VM:**
+
+```bash
+qm stop 104   # Stop the Tahoe-LAFS introducer
+sleep 10
+```
+
+**H-intro-2 — Attempt restores from each gatekeeper with introducer down:**
+
+```bash
+# From Björn's dashboard: restore any previously-restored file again to /tmp/restored-intro/bjorn/
+BJORN_TS=$(ssh gk-bjorn "tailscale ip -4")
+ssh gk-bjorn "sudo mkdir -p /tmp/restored-intro/bjorn && sudo chown backupbuddy:backupbuddy /tmp/restored-intro/bjorn"
+```
+
+Trigger restore via dashboard. Expected: restore completes successfully.
+FAIL: restore returns an error or hangs indefinitely.
+
+Repeat from Carina:
+```bash
+ssh gk-carina "sudo mkdir -p /tmp/restored-intro/carina && sudo chown backupbuddy:backupbuddy /tmp/restored-intro/carina"
+```
+
+**H-intro-3 — Check gatekeeper logs for introducer-unreachable warning:**
+
+```bash
+ssh gk-bjorn  "sudo journalctl -u backup-buddy-gatekeeper | grep -i 'introducer\|unreachable\|degraded'"
+ssh gk-carina "sudo journalctl -u backup-buddy-gatekeeper | grep -i 'introducer\|unreachable\|degraded'"
+```
+
+**H-intro-4 — Restart the introducer and verify reconnection:**
+
+```bash
+qm start 104
+sleep 15
+ssh gk-anders "sudo journalctl -u backup-buddy-gatekeeper | tail -20"
+ssh gk-bjorn  "sudo journalctl -u backup-buddy-gatekeeper | tail -20"
+```
+
+Verify: gatekeeper logs show reconnection to introducer. All nodes still Online.
+Record PASS / FAIL in state file.
+
+---
+
+#### H2. Manual checklist
+
+Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
+
+**Installation (INSTALL.md §3):**
+- [ ] Installer output matches the guide's expected block
+- [ ] `backup-buddy-gatekeeper` service is `active (running)` after install
+- [ ] Wizard is reachable at `http://<LAN-IP>:8080`
+- [ ] Tailscale connected without new browser auth (rollback preserved state)
+
+**Wizard step 3 — storage path (1.21.1):**
+- [ ] Default path `/var/lib/backup-buddy/storage` accepted without chown
+- [ ] Wizard auto-creates the directory with correct ownership
+- [ ] No error message in wizard or gatekeeper log during storage setup
+
+**Wizard completion:**
+- [ ] Wizard completes all five steps without error
+- [ ] `recovery-kit.enc` download works and produces a non-empty file
+- [ ] Invite code generated and displayed after wizard
+- [ ] First invite code is present in cluster.db after wizard (1.19.10 regression)
+- [ ] Dashboard switches to Tailscale address after wizard
+- [ ] Dashboard is **not** reachable on LAN IP after Tailscale binds (security check)
+
+**Cluster formation (INSTALL.md §6):**
+- [ ] Björn can join following INSTALL.md §6 — first attempt succeeds
+- [ ] Carina can join with a freshly generated second invite — first attempt succeeds (1.21.4 regression)
+- [ ] All three nodes appear as **Online** in Anders's dashboard
+- [ ] All three nodes appear as **Online** in Björn's dashboard
+- [ ] All three nodes appear as **Online** in Carina's dashboard
+- [ ] Reusing an expired invite code produces an error, not a silent failure
+
+**1.21.4 idempotency:**
+- [ ] Used invite code accepted when node is already a member → wizard completes (1.21.4)
+
+**Agent installer (INSTALL.md §5):**
+- [ ] Agent installer without TTY gives clear actionable error — not /dev/tty crash (1.21.2A)
+- [ ] Agent installer with `BB_GATEKEEPER_IP` env var completes without interactive prompts (1.21.2B)
+- [ ] Agent appears in gatekeeper dashboard after token is configured
+- [ ] Editing `backup.cfg` + restarting agent picks up new folders
+- [ ] Agent log shows `SUCCESS — uploaded file` for each backed-up file (1.19.12 regression)
+- [ ] Permission-denied backup path shows "not accessible by the backup service user" (1.19.11 regression)
+
+**Backup integrity:**
+- [ ] All `.jpg` test files backed up successfully
+- [ ] All `.zip` test files backed up successfully
+- [ ] All `.iso` test files backed up successfully
+- [ ] All `.docx` test files backed up successfully
+- [ ] Large `.tar.gz` test file backed up successfully
+- [ ] No `FAILED` entries in any agent log for the test files
+
+**Restore and checksums (INSTALL.md §8):**
+- [ ] Single-file restore completes without error
+- [ ] Restored `.jpg` SHA-256 matches original
+- [ ] Restored `.zip` SHA-256 matches original
+- [ ] Restored `.iso` SHA-256 matches original
+- [ ] Restored `.docx` SHA-256 matches original
+- [ ] Restored large `.tar.gz` SHA-256 matches original
+- [ ] Folder restore completes without error
+- [ ] Restored files land in the correct destination folder
+
+**Resilience:**
+- [ ] Stopping one gatekeeper; restore from the other two still succeeds
+- [ ] Stopped gatekeeper restarts and shows Online in dashboards
+
+**Introducer outage (1.21.3):**
+- [ ] Stopping introducer VM (104); restore from Björn and Carina still succeeds
+- [ ] Gatekeeper log shows introducer-related warning when VM 104 is down
+- [ ] Introducer VM restarted; gatekeeper reconnects and functions normally
+
+**UI and UX:**
+- [ ] Dashboard shows an obvious error or warning if an agent has not sent data for > 1 hour
+- [ ] Recovery kit re-download accessible from Settings → Lifeboat (1.19.13 regression)
+- [ ] Navigating the dashboard without any data causes no crashes or blank pages
+- [ ] All button clicks in the wizard produce visible feedback within 3 seconds
+
+**INSTALL.md audit:**
+- [ ] All INSTALL.md sections followed produced correct results (or ENRADSFIX items committed)
+- [ ] No step in INSTALL.md led to an unrecoverable error for a new user
+
+---
+
+#### I. Close-out
+
+- Update `1.22.1-state.md` with final statuses.
+- Commit all ENRADSFIX changes: `git commit fix(docs): INSTALL.md corrections from 1.22 test run`
+- Commit issues file: `git commit chore(test): 1.22.1 issues file — N issues logged`
+- Add kludde block below summarising results.
+- Mark tasks 1.22.1–1.22.3 as `[x]` in TODO.md.
+- Final commit: `git commit chore(test): mark 1.22.1-1.22.3 done — fourth sim complete`
+
+---
+
+#### Done when (Part 3 / full simulation):
+
+- All 8 restore checksums match originals (including large .tar.gz) ✓
+- Folder restore tested ✓
+- Resilience test passed (restore succeeds with one node down) ✓
+- Introducer outage test passed (restore succeeds with VM 104 down) ✓
+- Introducer-down warning present in gatekeeper logs ✓
+- 1.21.1 fix verified: wizard step 3 default path works without chown ✓
+- 1.21.2A fix verified: no-TTY installer gives clear actionable error ✓
+- 1.21.2B fix verified: env-var install path works in LXC without TTY ✓
+- 1.21.3 fix verified: restore works with introducer VM down ✓
+- 1.21.4 fix verified: cascade idempotency test passes ✓
+- All regressions from 1.19.x and 1.20.x still pass ✓
+- All ENRADSFIX items from INSTALL.md audit committed ✓
+- Full manual checklist completed with all items PASS or documented ✓
+- `tests/integration/1.22.1-issues.md` committed with all findings ✓
+- `tests/integration/1.22.1-state.md` committed with final statuses ✓
+- Kludde block added below with overall result ✓
+- Tasks 1.22.1–1.22.3 marked `[x]` ✓
+
+---
+
+> **Kludde:** (to be filled in when simulation completes)
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
