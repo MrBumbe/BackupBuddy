@@ -6987,6 +6987,90 @@ are the affected case.
 
 ---
 
+### [ ] 1.22.6 — Fix TahoeClient timeout for large file uploads
+
+> **Source:** Post-1.22.5 analysis — identified after streaming fix revealed second bottleneck.
+
+**Problem:** `TahoeClient._http` is created with a single float timeout:
+```python
+self._http = httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT)  # 300s
+```
+A plain float sets ALL httpx timeouts (connect, read, write, pool) to 300 seconds.
+The critical one is `read` — httpx waits for the server to begin its response.
+Tahoe's PUT /uri does not respond until it has received the entire file, erasure-coded
+it, and distributed shares to storage nodes. For a 4 GB file over a 25–50 Mbps
+Tailscale link this can take 10–20 minutes. The result is an `httpx.ReadTimeout`
+that kills the upload silently.
+
+The agent's httpx client already uses fine-grained timeouts (fixed in 1.22.x):
+```python
+httpx.Timeout(connect=30.0, read=600.0, write=600.0, pool=30.0)
+```
+TahoeClient needs the same treatment, with a higher `read` value to accommodate
+large files over slow WireGuard links.
+
+**Fix:** Replace the float `timeout=_DEFAULT_TIMEOUT` in `TahoeClient.__init__` with:
+```python
+httpx.Timeout(connect=30.0, read=3600.0, write=3600.0, pool=30.0)
+```
+- `connect=30`: local Tahoe gateway at 127.0.0.1, should never take more than 30s.
+- `read=3600`: Tahoe can take up to 1 hour to complete a large distributed upload.
+- `write=3600`: streaming chunks to Tahoe — each individual write is fast,
+  but the budget covers edge cases (temporary backpressure from Tahoe gateway).
+- `pool=30`: acquiring a connection from the httpx pool is always fast.
+
+Remove the now-unused `_DEFAULT_TIMEOUT` constant.
+
+**Done when:**
+- `TahoeClient.__init__` uses `httpx.Timeout(...)` instead of a plain float
+- A 4 GB upload over a slow link does not produce `ReadTimeout` in GK logs
+- `[ ]` committed
+
+---
+
+### [ ] 1.22.7 — Document and guard disk space requirement for upload_tmp/
+
+> **Source:** Post-1.22.5 analysis — upload_tmp/ must fit the largest incoming file.
+
+**Problem:** `receive_file` streams the incoming HTTP body to
+`upload_tmp/{uuid}.tmp` before queuing it for Tahoe. The temp file must fit on
+the GK's system disk. GK VMs are configured with a 20 GB system disk — after OS,
+Tahoe data, logs, and BackupBuddy itself, ~10–12 GB is typically free. Edge cases:
+
+- A single 8 GB file from one agent fills most of the free space.
+- Two agents uploading 5 GB files simultaneously can exhaust the disk.
+- If the disk fills mid-stream, `aiofiles.write` raises `OSError: No space left on
+  device`. The except block cleans up the partial temp file, and the GK returns HTTP
+  500 — but the agent retries indefinitely, burning CPU and logs with no resolution.
+
+**Required changes:**
+
+1. **Check Content-Length before streaming.** If the agent sends `Content-Length`
+   (which httpx does NOT send for async-generator content — see NOTE below), compare
+   it against available disk space and reject early with HTTP 507 Insufficient Storage.
+   NOTE: the current agent uses a streaming async generator as `content=`, so no
+   `Content-Length` header is sent. For this guard to work, the agent must be changed
+   to include `Content-Length: {file_size}` in the POST headers. File size is already
+   available from `path.stat().st_size`.
+
+2. **Document minimum disk requirement in INSTALL.md and README.** The GK system disk
+   must have free space equal to at least the size of the largest file any connected
+   agent will ever upload, plus headroom for concurrent uploads.
+
+3. **Log a warning when upload_tmp/ is on a disk with less than 2× the incoming
+   file size free.** Even without hard rejection, a warning helps operators spot
+   impending problems.
+
+**Done when:**
+- Agent sends `Content-Length` in the fragment POST header
+- GK checks Content-Length against `shutil.disk_usage(upload_tmp_dir).free` and
+  returns HTTP 507 if insufficient, before opening the temp file
+- INSTALL.md has a note about system disk sizing under §3 hardware requirements
+- Low-disk warning logged when free < 2× Content-Length
+- `[ ]` committed
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
