@@ -7036,7 +7036,7 @@ Remove the now-unused `_DEFAULT_TIMEOUT` constant.
 
 ---
 
-### [ ] 1.22.7 — Document and guard disk space requirement for upload_tmp/
+### [x] 1.22.7 — Document and guard disk space requirement for upload_tmp/
 
 > **Source:** Post-1.22.5 analysis — upload_tmp/ must fit the largest incoming file.
 
@@ -7075,7 +7075,16 @@ Tahoe data, logs, and BackupBuddy itself, ~10–12 GB is typically free. Edge ca
   returns HTTP 507 if insufficient, before opening the temp file
 - INSTALL.md has a note about system disk sizing under §3 hardware requirements
 - Low-disk warning logged when free < 2× Content-Length
-- `[ ]` committed
+- `[x]` committed
+
+> **Kludde — 2026-06-07**
+>
+> Implemented in commit c2a31accf. Agent now reads `file_path.stat().st_size` and
+> passes `Content-Length: {size}` in the POST headers. Gatekeeper checks
+> `shutil.disk_usage(upload_tmp_dir).free` against Content-Length before opening
+> the temp file — returns HTTP 507 if insufficient, logs WARNING if free < 2× size.
+> INSTALL.md §2 and README updated with system disk sizing guidance.
+> 945 unit tests pass.
 
 ---
 
