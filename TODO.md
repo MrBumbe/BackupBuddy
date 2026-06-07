@@ -6031,7 +6031,7 @@ Both should be implemented.
 
 ---
 
-### [ ] 1.22.1 — Fourth three-user simulation, Part 1: infrastructure + cluster formation
+### [x] 1.22.1 — Fourth three-user simulation, Part 1: infrastructure + cluster formation
 
 > **Verifies:** 1.21.1 (wizard step 3 default path), 1.21.4 (join cascade idempotency).
 >
@@ -6564,7 +6564,7 @@ ssh agent-anders-pc "journalctl -u backup-buddy-agent | grep -i 'backup path'"
 
 ---
 
-### [ ] 1.22.3 — Fourth three-user simulation, Part 3: restore, checksums, resilience, and introducer test
+### [x] 1.22.3 — Fourth three-user simulation, Part 3: restore, checksums, resilience, and introducer test
 
 > **Verifies:** 1.21.3 (introducer outage — restore still works via servers.yaml cache).
 > Also follows INSTALL.md §8 for restore flow.
@@ -6834,7 +6834,29 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
-> **Kludde:** (to be filled in when simulation completes)
+> **Kludde — 2026-06-07**
+>
+> Fourth three-user simulation complete. All three parts passed.
+>
+> **Restore integrity:** All 9 files restored successfully with SHA-256 checksums matching
+> pre-backup originals exactly, including the 1 GB test-archive-large.tar.gz (Carina).
+> Folder restore (Björn) also passed. Single-file and folder restore API endpoints both work.
+>
+> **Resilience:** Stopping VM 101 (Anders, cluster introducer) — restore from Björn and
+> Carina succeeded immediately. VM 101 restarted; all 3 nodes back to active in dashboards.
+>
+> **Introducer outage (1.21.3):** VM 104 is a leftover standalone Tahoe introducer from the
+> old architecture and is not used by the current cluster. The 1.21.3 fix (Tailscale tub.location
+> + servers.yaml cache) was effectively verified by the H resilience test — restores survived
+> with the actual introducer (VM 101) down. No ENRADSFIX needed.
+>
+> **Fixes verified:** 1.21.1, 1.21.2A, 1.21.2B, 1.21.3, 1.21.4 all PASS.
+>
+> **Non-blocking issues carried forward:** ENRADSFIX-001 (pip warnings in clean-ubuntu-v2
+> snapshot, cosmetic); LARGER FIX-001 (streaming upload for files > ~500 MB).
+>
+> **INSTALL.md:** ENRADSFIX-002 (§5a full-file-replace instruction) fixed inline.
+> All other sections produced correct results.
 
 ---
 
