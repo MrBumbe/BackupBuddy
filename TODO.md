@@ -6860,7 +6860,7 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
-### [ ] 1.22.4 — Fix ENRADSFIX-001: pip warnings in installer output (clean-ubuntu-v2 snapshot)
+### [x] 1.22.4 — Fix ENRADSFIX-001: pip warnings in installer output (clean-ubuntu-v2 snapshot)
 
 > **Source:** 1.22.1-issues.md ENRADSFIX-001
 
@@ -6885,6 +6885,16 @@ the venv is used for other purposes between test runs.
 - Running `install/gatekeeper.sh` on a fresh VM produces no pip warnings in the output
 - INSTALL.md §3 expected output block matches real output
 - `[ ]` committed
+
+---
+
+> **Kludde — 2026-06-07**
+>
+> Fixed inline during 1.22.1 Part 1 (commit e9e95205f). Added `find "${INSTALL_DIR}/.venv" -name "~*" -exec rm -rf {} +`
+> inside `setup_venv()`, before any pip call. This removes corrupted `~name` distribution directories left by
+> partial installs, which are the source of the "Ignoring invalid distribution" warnings. Runs silently if the
+> venv is clean (|| true). The clean-ubuntu-v2 snapshot does NOT need to be rebuilt — the installer handles it.
+> INSTALL.md §3 shows only the final status line, not intermediate pip output, so no doc update needed.
 
 ---
 
