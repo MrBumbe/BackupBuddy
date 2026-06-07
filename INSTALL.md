@@ -498,8 +498,10 @@ running, **no action is needed** — your backups are intact.
 If your gatekeeper machine is destroyed and you have lost both `recovery-kit.enc` and
 your passphrase, your backups cannot be recovered. This is why saving both is critical.
 
-If you still have access to your gatekeeper and want to generate a new recovery kit,
-contact the BackupBuddy project for guidance — this will be added to the GUI in a future release.
+If you still have access to your gatekeeper and want to download the recovery kit again,
+open the dashboard → **Settings** → **Lifeboat** → click **Download recovery kit**.
+
+For full restore instructions including disaster recovery, see **RESTORE.md**.
 
 ---
 
