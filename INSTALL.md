@@ -21,7 +21,11 @@ rebuild it from scratch using a recovery key you saved when you first set up.
 - **RAM:** 1 GB minimum, 2 GB recommended
 - **CPU:** Any 64-bit processor — x86-64 or ARM64 (e.g. Raspberry Pi 4 or 5 running Ubuntu arm64)
 - **Storage (two separate parts):**
-  - A small system disk: 20 GB for the OS and BackupBuddy itself
+  - A small system disk: 20 GB minimum for the OS and BackupBuddy itself. The gatekeeper
+    temporarily stages incoming files on this disk while transferring them to the storage
+    cluster. The free space on this disk must be at least as large as the biggest single
+    file any connected agent will upload. For concurrent uploads, plan for 2× the largest
+    expected file. A 20 GB system disk typically has 10–12 GB free after installation.
   - A larger disk or folder where your buddy's encrypted data will be stored (at least 10 GB,
     more is better — 1 TB is typical)
 - **Network:** A stable internet connection (home broadband is fine)

@@ -28,6 +28,12 @@ nodes never see the content of what they store.
 - **Cluster** — all gatekeepers connected via Tailscale, using Tahoe-LAFS for storage.
 - **Introducer** — Tahoe-LAFS built-in node that helps gatekeepers find each other.
 
+## System disk requirement
+
+The gatekeeper stages incoming files on its system disk before forwarding them to the
+storage cluster. The system disk must have free space equal to at least the size of the
+largest file any connected agent will upload. See INSTALL.md § 2 for sizing guidance.
+
 ## Base project
 
 Forked from [Tahoe-LAFS](https://github.com/tahoe-lafs/tahoe-lafs) (Python, GPL2+).

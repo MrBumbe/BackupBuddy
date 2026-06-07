@@ -7,6 +7,7 @@ Covers:
   - Lifespan in setup mode (root_dir.cap absent → 503 from /api/status)
   - Lifespan in normal mode with fully mocked Tahoe components
   - Graceful shutdown (TahoeClient.aclose, StorageNode.stop, DB.close called)
+  - Agent API receive_file: disk space check (507 when full, warning when low)
 
 Note: starlette.testclient.TestClient is used instead of httpx.ASGITransport
 because ASGITransport 0.28.1 does not trigger the ASGI lifespan. TestClient
@@ -15,11 +16,20 @@ runs the lifespan correctly via anyio inside a sync context.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
 
-from gatekeeper.main import _derive_catalog_key, _create_app, _state, main
+from gatekeeper.main import (
+    _derive_catalog_key,
+    _create_app,
+    _create_agent_api_app,
+    _state,
+    main,
+)
 from gatekeeper.tailscale import TailscaleNotRunning
 
 
@@ -298,3 +308,159 @@ class TestLifespanNormalMode:
                 client.get("/api/status")
 
         mock_tc_cls.assert_called_once_with(expected_url)
+
+
+# ── Agent API — receive_file disk space check ─────────────────────────────────
+
+_AGENT_TOKEN = "agent-secret"
+_LAN_CLIENT = ("192.168.1.10", 54321)
+_FRAGMENT_META = '{"original_path": "/home/user/doc.txt", "agent_name": "laptop"}'
+
+
+def _make_agent_cfg() -> MagicMock:
+    cfg = MagicMock()
+    cfg.agent_api.token = _AGENT_TOKEN
+    return cfg
+
+
+def _setup_agent_state(tmp_path) -> dict:
+    """Populate _state entries required by receive_file and return them."""
+    queue: asyncio.Queue = asyncio.Queue()
+    tmp_dir = tmp_path / "upload_tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    mock_cfg = MagicMock()
+    mock_cfg.fragmentation.profile = "balanced"
+    _state["upload_queue"] = queue
+    _state["upload_tmp_dir"] = tmp_dir
+    _state["config"] = mock_cfg
+    return {"queue": queue, "tmp_dir": tmp_dir}
+
+
+def _teardown_agent_state():
+    _state.pop("upload_queue", None)
+    _state.pop("upload_tmp_dir", None)
+    _state.pop("config", None)
+
+
+class TestReceiveFileDiskCheck:
+    """POST /api/agents/fragments — disk space guard added in task 1.22.7."""
+
+    def test_returns_507_when_disk_has_insufficient_space(self, tmp_path):
+        _setup_agent_state(tmp_path)
+        try:
+            app = _create_agent_api_app(_make_agent_cfg(), tmp_path)
+            with (
+                patch("gatekeeper.main.shutil.disk_usage") as mock_du,
+                TestClient(app, client=_LAN_CLIENT) as client,
+            ):
+                mock_du.return_value = MagicMock(free=99)
+                response = client.post(
+                    "/api/agents/fragments",
+                    content=b"x" * 100,
+                    headers={
+                        "Authorization": f"Bearer {_AGENT_TOKEN}",
+                        "X-Fragment-Metadata": _FRAGMENT_META,
+                        "Content-Length": "100",
+                    },
+                )
+            assert response.status_code == 507
+        finally:
+            _teardown_agent_state()
+
+    def test_no_temp_file_created_when_507_returned(self, tmp_path):
+        _setup_agent_state(tmp_path)
+        tmp_dir = tmp_path / "upload_tmp"
+        try:
+            app = _create_agent_api_app(_make_agent_cfg(), tmp_path)
+            with (
+                patch("gatekeeper.main.shutil.disk_usage") as mock_du,
+                TestClient(app, client=_LAN_CLIENT) as client,
+            ):
+                mock_du.return_value = MagicMock(free=0)
+                client.post(
+                    "/api/agents/fragments",
+                    content=b"data",
+                    headers={
+                        "Authorization": f"Bearer {_AGENT_TOKEN}",
+                        "X-Fragment-Metadata": _FRAGMENT_META,
+                        "Content-Length": "4",
+                    },
+                )
+            assert list(tmp_dir.glob("*.tmp")) == []
+        finally:
+            _teardown_agent_state()
+
+    def test_returns_200_when_disk_has_sufficient_space(self, tmp_path):
+        _setup_agent_state(tmp_path)
+        try:
+            app = _create_agent_api_app(_make_agent_cfg(), tmp_path)
+            with (
+                patch("gatekeeper.main.shutil.disk_usage") as mock_du,
+                TestClient(app, client=_LAN_CLIENT) as client,
+            ):
+                mock_du.return_value = MagicMock(free=10 * 1024 * 1024)
+                response = client.post(
+                    "/api/agents/fragments",
+                    content=b"x" * 100,
+                    headers={
+                        "Authorization": f"Bearer {_AGENT_TOKEN}",
+                        "X-Fragment-Metadata": _FRAGMENT_META,
+                        "Content-Length": "100",
+                    },
+                )
+            assert response.status_code == 200
+        finally:
+            _teardown_agent_state()
+
+    def test_logs_warning_when_free_less_than_2x_content_length(self, tmp_path, caplog):
+        _setup_agent_state(tmp_path)
+        try:
+            app = _create_agent_api_app(_make_agent_cfg(), tmp_path)
+            with (
+                patch("gatekeeper.main.shutil.disk_usage") as mock_du,
+                TestClient(app, client=_LAN_CLIENT) as client,
+                caplog.at_level(logging.WARNING, logger="gatekeeper.main"),
+            ):
+                mock_du.return_value = MagicMock(free=150)
+                response = client.post(
+                    "/api/agents/fragments",
+                    content=b"x" * 100,
+                    headers={
+                        "Authorization": f"Bearer {_AGENT_TOKEN}",
+                        "X-Fragment-Metadata": _FRAGMENT_META,
+                        "Content-Length": "100",
+                    },
+                )
+            assert response.status_code == 200
+            assert any("Low disk space" in r.message for r in caplog.records)
+        finally:
+            _teardown_agent_state()
+
+    def test_507_logged_with_agent_name_and_byte_counts(self, tmp_path, caplog):
+        _setup_agent_state(tmp_path)
+        try:
+            app = _create_agent_api_app(_make_agent_cfg(), tmp_path)
+            with (
+                patch("gatekeeper.main.shutil.disk_usage") as mock_du,
+                TestClient(app, client=_LAN_CLIENT) as client,
+                caplog.at_level(logging.WARNING, logger="gatekeeper.main"),
+            ):
+                mock_du.return_value = MagicMock(free=50)
+                client.post(
+                    "/api/agents/fragments",
+                    content=b"x" * 100,
+                    headers={
+                        "Authorization": f"Bearer {_AGENT_TOKEN}",
+                        "X-Fragment-Metadata": _FRAGMENT_META,
+                        "Content-Length": "100",
+                    },
+                )
+            rejection_records = [
+                r for r in caplog.records if "insufficient" in r.message.lower()
+            ]
+            assert rejection_records, "Expected a rejection log entry"
+            msg = rejection_records[0].message
+            assert "laptop" in msg
+            assert "100" in msg
+        finally:
+            _teardown_agent_state()

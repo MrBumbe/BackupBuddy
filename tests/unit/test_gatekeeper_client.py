@@ -133,6 +133,41 @@ class TestSendFragment:
             with pytest.raises(IOError):
                 asyncio.run(client.send_fragment(test_file, {}))
 
+    def test_sends_content_length_header_matching_file_size(
+        self, client: GatekeeperClient, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "fragment.bin"
+        test_file.write_bytes(b"x" * 4096)
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_post = AsyncMock(return_value=mock_resp)
+
+        with patch.object(client._client, "post", mock_post):
+            asyncio.run(client.send_fragment(test_file, {}))
+
+        call_kwargs = mock_post.call_args[1]
+        headers = call_kwargs["headers"]
+        assert headers.get("Content-Length") == "4096"
+
+    def test_content_length_reflects_actual_file_size(
+        self, client: GatekeeperClient, tmp_path: Path
+    ) -> None:
+        """Content-Length must match st_size, not a hardcoded value."""
+        content = b"BackupBuddy fragment payload"
+        test_file = tmp_path / "fragment.bin"
+        test_file.write_bytes(content)
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_post = AsyncMock(return_value=mock_resp)
+
+        with patch.object(client._client, "post", mock_post):
+            asyncio.run(client.send_fragment(test_file, {}))
+
+        call_kwargs = mock_post.call_args[1]
+        assert call_kwargs["headers"]["Content-Length"] == str(len(content))
+
 
 # ── store_lifeboat() ──────────────────────────────────────────────────────────
 

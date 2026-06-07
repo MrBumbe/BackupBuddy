@@ -83,11 +83,15 @@ class GatekeeperClient:
         Metadata is passed as a JSON-encoded header so the body can be a raw
         byte stream.  Raises IOError on transport or HTTP failure.
         """
+        file_size = file_path.stat().st_size
         try:
             resp = await self._client.post(
                 f"{self._url}/api/agents/fragments",
                 content=self._iter_file(file_path),
-                headers={"X-Fragment-Metadata": json.dumps(metadata)},
+                headers={
+                    "X-Fragment-Metadata": json.dumps(metadata),
+                    "Content-Length": str(file_size),
+                },
             )
             resp.raise_for_status()
         except httpx.HTTPError as exc:

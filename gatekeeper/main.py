@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
+import shutil
 import uvicorn
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -848,6 +849,29 @@ def _create_agent_api_app(cfg: GatekeeperConfig, data_dir: Path) -> FastAPI:
 
         upload_tmp_dir: Path = _state.get("upload_tmp_dir", data_dir / "upload_tmp")
         upload_tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Reject before streaming if Content-Length exceeds available disk space.
+        content_length_str = request.headers.get("content-length")
+        if content_length_str is not None:
+            try:
+                content_length = int(content_length_str)
+            except ValueError:
+                return JSONResponse({"error": "Invalid Content-Length"}, status_code=400)
+            free_bytes = shutil.disk_usage(upload_tmp_dir).free
+            if free_bytes < content_length:
+                logger.warning(
+                    "Upload rejected — insufficient disk space in upload_tmp/: "
+                    "need %d bytes, %d bytes free (agent='%s')",
+                    content_length, free_bytes, meta.agent_name,
+                )
+                return JSONResponse({"error": "Insufficient storage space"}, status_code=507)
+            if free_bytes < 2 * content_length:
+                logger.warning(
+                    "Low disk space in upload_tmp/: %d bytes free, file is %d bytes — "
+                    "concurrent uploads may exhaust disk",
+                    free_bytes, content_length,
+                )
+
         tmp_path = upload_tmp_dir / f"{uuid.uuid4().hex}.tmp"
 
         bytes_received = 0
