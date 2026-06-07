@@ -43,7 +43,7 @@ class GatekeeperClient:
         self._lifeboat_path = Path(lifeboat_path)
         self._client = httpx.AsyncClient(
             headers={"Authorization": f"Bearer {token}"},
-            timeout=30.0,
+            timeout=httpx.Timeout(connect=30.0, read=600.0, write=600.0, pool=30.0),
         )
 
     # ── HTTP operations (agent → gatekeeper) ──────────────────────────────────
