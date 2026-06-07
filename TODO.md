@@ -6860,6 +6860,93 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
+### [ ] 1.22.4 — Fix ENRADSFIX-001: pip warnings in installer output (clean-ubuntu-v2 snapshot)
+
+> **Source:** 1.22.1-issues.md ENRADSFIX-001
+
+**Problem:** The `clean-ubuntu-v2` snapshot for VM 101 contains a partially-installed
+`magic_wormhole` package left over from a previous test run. During `install/gatekeeper.sh`,
+the pip step emits many `WARNING: Ignoring invalid distribution ~agic-wormhole` lines.
+These do not appear on fresh installs (VM 102, 103). A real user following INSTALL.md §3
+would see alarming spam — the expected output block shows only `[✓]` check lines.
+
+**Fix options (pick one):**
+- (A) Rebuild the `clean-ubuntu-v2` snapshot with a clean venv (or no pre-existing venv).
+  Cleanest fix — the root cause disappears.
+- (B) Add a pip cleanup step at the start of `install/gatekeeper.sh`:
+  `pip install --upgrade pip && pip uninstall -y magic-wormhole || true`
+  before the `pip install -r requirements.txt` call. Defensive — handles any future
+  snapshot drift.
+
+**Recommendation:** Option A first (snapshot rebuild); option B as belt-and-suspenders if
+the venv is used for other purposes between test runs.
+
+**Done when:**
+- Running `install/gatekeeper.sh` on a fresh VM produces no pip warnings in the output
+- INSTALL.md §3 expected output block matches real output
+- `[ ]` committed
+
+---
+
+### [ ] 1.22.5 — Implement LARGER FIX-001: Streaming upload for large files (> ~500 MB)
+
+> **Source:** 1.22.1-issues.md LARGER FIX-001, ISSUE-001, ISSUE-002
+
+**Problem:** Large file uploads load the entire file into memory on both the agent and gatekeeper:
+
+- **Agent (`agent/upload_worker.py`):** `Path(file_path).read_bytes()` reads the full file
+  before POST. A 1 GB file requires 1 GB RAM — killed the agent LXC (512 MB) with OOM.
+- **Gatekeeper (`gatekeeper/api/agents.py`):** FastAPI buffers the full request body before
+  the route handler runs. With Tahoe + Python already consuming ~1.65 GB, a 1 GB body
+  pushed VM 103 (2 GB) over the limit repeatedly.
+
+Workaround for the simulation: increased LXC 302 → 2048 MB and VM 103 → 4096 MB. Not
+acceptable as a permanent solution — typical homelab nodes may have 2–4 GB total RAM.
+
+**Required changes:**
+
+1. **Agent `_upload_worker`:** Replace `read_bytes()` + bulk POST with a streaming upload:
+   ```python
+   with open(file_path, "rb") as f:
+       response = await client.post(
+           "/api/agents/fragments",
+           content=f,
+           headers={"Content-Type": "application/octet-stream", ...},
+       )
+   ```
+   `httpx` supports passing a file-like object as `content` — it streams in chunks without
+   loading the full file into memory.
+
+2. **Gatekeeper `/api/agents/fragments`:** Replace `await request.body()` with incremental
+   streaming to a temp file:
+   ```python
+   tmp_path = upload_tmp / f"{uuid4()}.part"
+   async with aiofiles.open(tmp_path, "wb") as f:
+       async for chunk in request.stream():
+           await f.write(chunk)
+   # hand tmp_path to fragmenter queue
+   ```
+   `Content-Length` header should be read and validated before streaming to reject
+   obviously oversized requests early.
+
+**Constraints:**
+- The fragmenter queue currently expects a local file path — passing `tmp_path` is
+  compatible with the existing interface.
+- Hash verification (SHA-256 before/after fragmentation) still applies to `tmp_path`.
+- `upload_tmp/` cleanup: delete `.part` file after fragmenter confirms placement.
+
+**Priority:** Medium — only affects files > ~500 MB on hardware with < 4 GB RAM. Typical
+homelab files (photos, documents) are well under this threshold. Large ISO / tar.gz backups
+are the affected case.
+
+**Done when:**
+- Agent uploads a 1 GB file from a 512 MB LXC without OOM
+- Gatekeeper receives a 1 GB upload on a 2 GB VM without OOM
+- SHA-256 verification still passes end-to-end
+- `[ ]` committed
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
