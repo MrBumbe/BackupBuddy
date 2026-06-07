@@ -24,6 +24,17 @@ _CHUNK_SIZE = 65536
 _DEFAULT_TIMEOUT = 300  # seconds — large files may take a while
 
 
+async def _iter_file(path: Path) -> ...:
+    """Yield file content in chunks without loading the whole file into memory."""
+    loop = asyncio.get_running_loop()
+    with open(path, "rb") as f:
+        while True:
+            chunk = await loop.run_in_executor(None, f.read, _CHUNK_SIZE)
+            if not chunk:
+                break
+            yield chunk
+
+
 class TahoeClient:
     """
     Async client for the Tahoe-LAFS HTTP gateway.
@@ -67,12 +78,12 @@ class TahoeClient:
         Raises TahoeError on upload failure.
         """
         path = Path(file_path)
-        file_bytes = await asyncio.to_thread(path.read_bytes)
-        logger.debug("Uploading %s (%d bytes)", path.name, len(file_bytes))
+        file_size = path.stat().st_size
+        logger.debug("Uploading %s (%d bytes)", path.name, file_size)
 
         response = await self._http.put(
             f"{self._node_url}/uri",
-            content=file_bytes,
+            content=_iter_file(path),
             headers={"Content-Type": "application/octet-stream"},
         )
 
