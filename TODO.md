@@ -6987,7 +6987,7 @@ are the affected case.
 
 ---
 
-### [ ] 1.22.6 — Fix TahoeClient timeout for large file uploads
+### [x] 1.22.6 — Fix TahoeClient timeout for large file uploads
 
 > **Source:** Post-1.22.5 analysis — identified after streaming fix revealed second bottleneck.
 
@@ -7025,6 +7025,14 @@ Remove the now-unused `_DEFAULT_TIMEOUT` constant.
 - `TahoeClient.__init__` uses `httpx.Timeout(...)` instead of a plain float
 - A 4 GB upload over a slow link does not produce `ReadTimeout` in GK logs
 - `[ ]` committed
+
+---
+
+> **Kludde — 2026-06-07**
+>
+> Fixed in commit f77cd4d13. Replaced `timeout=_DEFAULT_TIMEOUT` (plain float 300s) with
+> `httpx.Timeout(connect=30.0, read=3600.0, write=3600.0, pool=30.0)`. Removed the `timeout`
+> parameter from `__init__` (no caller was passing it). All 22 TahoeClient unit tests pass.
 
 ---
 
