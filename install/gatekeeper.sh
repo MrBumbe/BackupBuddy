@@ -104,6 +104,12 @@ setup_venv() {
         "$PYTHON" -m venv "${INSTALL_DIR}/.venv"
     fi
 
+    # Remove any corrupted distributions left by a previous partial install.
+    # pip warns about these with "Ignoring invalid distribution ~name" on every
+    # subsequent run. Safe to remove: package names starting with ~ are always
+    # invalid and are never created by a successful install.
+    find "${INSTALL_DIR}/.venv" -name "~*" -exec rm -rf {} + 2>/dev/null || true
+
     info "Installing Python dependencies (this may take a minute)..."
     "${INSTALL_DIR}/.venv/bin/pip" install --quiet --upgrade pip
     # The Tahoe-LAFS fork must be installed in editable mode (-e) so that

@@ -6318,15 +6318,19 @@ Only run this if E1–E5 completed successfully and Carina's cluster.db shows sh
 
 ```bash
 # On the operator machine, record Carina's invite code from state file.
-# Then simulate the split state:
+# Then simulate the split state (joiner crashed before gatekeeper.cfg was written):
 ssh gk-carina "sudo rm -f /var/lib/backup-buddy/root_dir.cap"
 ssh gk-carina "sudo rm -f /var/lib/backup-buddy/onboarding_state.json"
+ssh gk-carina "sudo rm -f /etc/backup-buddy/gatekeeper.cfg"
 ssh gk-carina "sudo systemctl restart backup-buddy-gatekeeper"
 sleep 5
 ssh gk-carina "sudo systemctl status backup-buddy-gatekeeper | head -5"
 ```
 
 Open `http://10.99.0.13:8080` in browser. The wizard should appear in setup mode.
+> Note: gatekeeper.cfg must also be removed (see 1.22.1-issues.md NOTE-002).
+> Without removing gatekeeper.cfg, the service starts in post-config setup mode
+> on the Tailscale IP — the wizard is only available in pre-config mode (no config file).
 
 - Step 1: **Join an existing cluster**
 - Join screen: enter the **same invite code as before** (already used) + Anders's Tailscale address
