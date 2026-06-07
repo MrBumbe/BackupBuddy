@@ -6957,6 +6957,24 @@ are the affected case.
 
 ---
 
+> **Kludde — 2026-06-07**
+>
+> Code implemented in commit 9276e063f. Four files changed:
+> - `agent/gatekeeper_client.py`: `send_fragment` now accepts `Path` instead of `bytes`.
+>   Added `_iter_file` async generator (run_in_executor chunks, 64 KB) as `content=` to httpx.
+> - `agent/main.py`: `_upload_worker` uses `path.stat().st_size` for logging; passes `Path` to
+>   `send_fragment` instead of reading the whole file first.
+> - `gatekeeper/main.py`: `receive_file` uses `aiofiles.open` + `request.stream()` loop instead
+>   of `await request.body()`. Tracks `bytes_received`; cleans up tmp file on error or empty body.
+> - `tests/unit/test_gatekeeper_client.py`: `TestSendFragment` updated to pass `Path` (temp file)
+>   instead of bytes. All 938 unit tests pass.
+>
+> **Integration verification deferred:** The "Done when" OOM checks (512 MB LXC, 2 GB VM) require
+> the Proxmox environment. Roll back LXC 302 → 512 MB and VM 103 → 2 GB before the next simulation
+> run to confirm. SHA-256 end-to-end is covered by the fragmenter's existing verify step.
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
