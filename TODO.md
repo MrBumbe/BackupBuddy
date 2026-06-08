@@ -8112,6 +8112,67 @@ pattern is safe (CPython GIL makes `set.discard` atomic, but this should be expl
 
 ---
 
+### [ ] 1.24.4 — Targeted regression: verify 1.24.1–1.24.3 on existing VMs
+
+**Reads:** project-docs/testing.md
+**Environment:** existing Proxmox VMs — no snapshot rollback or wizard needed
+
+These three fixes cover edge cases that do not occur in the normal backup/restore
+flow. A full simulation is overkill. Instead: push HEAD to VMs, restart services,
+trigger each specific condition, verify behaviour.
+
+**1.24.1 — Join idempotency**
+
+Precondition: gk-anders is already a member of the cluster.
+
+Steps:
+1. On gk-anders: generate a fresh invite code via GUI or API
+2. Send the join request manually as if gk-anders were a new joiner:
+   ```bash
+   curl -s -X POST http://<gk-anders-tailscale-ip>:8080/api/cluster/join \
+     -H "Content-Type: application/json" \
+     -d '{"invite_code": "<code>", "node_id": "<anders-node-id>", ...}'
+   ```
+3. Expected: HTTP 200, body `{"status": "already_member"}` or similar success response
+4. Verify: invite row consumed in cluster.db, no duplicate row in members table
+
+**1.24.2 — NightlyVerifier wired**
+
+Steps:
+1. `systemctl restart backup-buddy-gatekeeper` on gk-anders
+2. Check startup log — must NOT contain the old stub message:
+   `Verify scheduler: pending implementation (task 1.13.2)`
+3. Must contain a line confirming the verifier is scheduled (04:00 or configurable)
+4. Trigger an early run:
+   ```bash
+   backup-buddy verify --now   # or equivalent API call
+   ```
+5. Expected: verifier runs to completion; logs show start, completion, no exceptions
+6. If any verification failure is expected on the current cluster state, confirm it
+   generates an alert (not a silent crash)
+
+**1.24.3 — Upload re-queue after failed upload**
+
+Steps:
+1. On agent-anders-pc: place a new file in the backup path
+2. While the file is in the stability window, temporarily block the gatekeeper port
+   so the upload attempt fails (e.g. `iptables -I OUTPUT -p tcp --dport 8081 -j REJECT`)
+3. Let the upload attempt fire and fail — confirm error in agent log
+4. Remove the iptables rule
+5. Wait for the next watcher scan cycle (1 min in test config)
+6. Confirm agent log shows the file upload succeeding on retry
+7. Remove the iptables block: `iptables -D OUTPUT -p tcp --dport 8081 -j REJECT`
+
+**Requirements:**
+- All three checks pass without modifying any config or resetting any VM
+- No new issues introduced (check gatekeeper and agent logs for unexpected errors)
+
+```
+> Kludde:
+```
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
