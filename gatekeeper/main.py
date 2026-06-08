@@ -9,7 +9,7 @@ Startup order (abort on steps 1–7 failure):
   5. Derive catalog key from root_dir.cap; open catalog.db and cluster.db
   6. Start Tahoe introducer node (only if [tahoe] run_introducer = true)
   7. Start Tahoe storage/client node
-  8. Register background scheduler stubs (watcher/lifeboat/rebalance/verify)
+  8. Register background schedulers (watcher/lifeboat/rebalance stubs; verify live)
   9. Start FastAPI on Tailscale IP
 """
 
@@ -71,6 +71,7 @@ from gatekeeper.tahoe.client import TahoeClient
 from gatekeeper.tahoe.introducer import IntroducerNode
 from gatekeeper.tahoe.storage_node import StorageNode
 from gatekeeper.gui.app import setup_gui, setup_onboarding_app
+from gatekeeper.verify.nightly import NightlyVerifier
 from gatekeeper.tailscale import (
     _TAILSCALE_CGNAT,
     TailscaleNotRunning,
@@ -133,10 +134,6 @@ async def _watcher_stub() -> None:
 
 async def _rebalance_stub() -> None:
     logger.info("Rebalance scheduler: pending implementation (task 1.11.2)")
-
-
-async def _verify_stub() -> None:
-    logger.info("Verify scheduler: pending implementation (task 1.13.2)")
 
 
 async def _orphan_cleanup_loop(
@@ -254,6 +251,7 @@ def _register_background_tasks(
     tahoe_client: TahoeClient | None = None,
     pool: StoragePoolManager | None = None,
     config: "GatekeeperConfig | None" = None,
+    nightly_verifier: NightlyVerifier | None = None,
 ) -> list[asyncio.Task]:
     tasks: list[asyncio.Task] = []
     tasks.append(asyncio.create_task(_watcher_stub(), name="watcher"))
@@ -262,7 +260,8 @@ def _register_background_tasks(
             asyncio.create_task(lifeboat_distributor.run_scheduler(), name="lifeboat")
         )
     tasks.append(asyncio.create_task(_rebalance_stub(), name="rebalance"))
-    tasks.append(asyncio.create_task(_verify_stub(), name="verify"))
+    if nightly_verifier is not None:
+        tasks.append(asyncio.create_task(nightly_verifier.run_scheduler(), name="verify"))
     if cluster_db is not None and tahoe_client is not None and pool is not None and config is not None:
         tasks.append(
             asyncio.create_task(
@@ -457,12 +456,22 @@ async def lifespan(app: FastAPI):
                     agent_token=config.agent_api.token,
                     interval_seconds=config.lifeboat.interval_seconds,
                 )
+            nightly_verifier = NightlyVerifier(
+                verify_config=config.verify,
+                catalog=catalog_db,  # type: ignore[arg-type]
+                cluster=cluster_db,  # type: ignore[arg-type]
+                tahoe=tahoe_client,  # type: ignore[arg-type]
+                root_dir_cap=root_dir_cap,  # type: ignore[arg-type]
+                agent_token=config.agent_api.token,
+                send_alert=None,
+            )
             background_tasks = _register_background_tasks(
                 lifeboat_distributor,
                 cluster_db=cluster_db,
                 tahoe_client=tahoe_client,
                 pool=pool,
                 config=config,
+                nightly_verifier=nightly_verifier,
             )
             app.state.background_tasks = background_tasks  # keep refs to prevent GC
 

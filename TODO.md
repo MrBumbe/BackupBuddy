@@ -8050,7 +8050,7 @@ outcome as Fix C). The invite is consumed — this is intentional, as the join s
 
 ---
 
-### [ ] 1.24.2 — Wire NightlyVerifier into gatekeeper scheduler
+### [x] 1.24.2 — Wire NightlyVerifier into gatekeeper scheduler
 
 **Reads:** SECURITY.md, project-docs/architecture.md → background jobs
 **Modifies:** `gatekeeper/main.py`
