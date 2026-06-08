@@ -8243,6 +8243,65 @@ An on-demand trigger is necessary for:
 
 ---
 
+### [ ] 1.25.2 — Log viewer in gatekeeper GUI
+
+**Reads:** project-docs/design.md, project-docs/architecture.md
+**Complements:** existing `journalctl`-based logging — this is an additive GUI surface, not a replacement
+
+Homelab users should not need to SSH in and run `journalctl` to see what their gatekeeper is
+doing. A simple log viewer page in the web GUI surfaces the local node's log in real time,
+with level filtering and component filtering, without changing how or where logs are written.
+
+**Scope (local node only — no cross-node aggregation):**
+
+1. **Log file handler added at startup**
+   - `_configure_logging()` in `gatekeeper/main.py` gets a `RotatingFileHandler` alongside
+     the existing `StreamHandler` — logs continue to go to journal AND are written to
+     `/var/lib/backup-buddy/gatekeeper.log` (max 5 MB × 3 rotated files)
+   - Same format as today: `%(asctime)s %(levelname)-8s %(name)s — %(message)s`
+   - Log file path configurable via `[logging] log_file` in `gatekeeper.cfg`; default is the
+     path above so zero config required for standard installs
+   - No change to any existing log call — purely additive
+
+2. **`GET /api/logs` endpoint**
+   - Query params: `level` (DEBUG/INFO/WARNING/ERROR, default INFO), `component` (optional
+     prefix match on logger name e.g. `cluster`, `verify`, `watcher`), `n` (last N lines,
+     default 200, max 1000)
+   - Reads from the rotating log file — no subprocess call to `journalctl`
+   - Returns JSON: `{"lines": [{"ts": "...", "level": "...", "name": "...", "msg": "..."}]}`
+   - Accessible on Tailscale interface only (same binding rule as all routes)
+
+3. **`/logs` page in GUI**
+   - Simple Jinja2 template: table of log lines, newest first
+   - Dropdown filters: level (INFO / WARNING / ERROR) and component (All / cluster / verify /
+     watcher / restore / lifeboat / rebalance)
+   - "Refresh" button (no auto-poll — keeps it simple, no websocket needed in Phase 1)
+   - No pagination needed for 200 lines; increase via URL param for power users
+
+**Implementation notes:**
+- Parse log file lines with a simple regex on the known format — no extra dependency
+- `RotatingFileHandler` is stdlib (`logging.handlers`) — no new package
+- The `/api/logs` endpoint does a single tail-read of the log file, filtered in-process;
+  no need to keep lines in memory between requests
+- Guard the endpoint: if the log file does not exist yet (first boot before any log line),
+  return `{"lines": []}` rather than 500
+
+**Out of scope for this task:**
+- Cross-node log aggregation (Phase 2 or later)
+- Log streaming / live tail (websocket — future task if needed)
+- Agent log viewer (agent has no GUI in Phase 1)
+- Structured JSON log format (would break the existing human-readable journal output)
+
+**Acceptance criteria:**
+- `/var/lib/backup-buddy/gatekeeper.log` is written on startup alongside journal output
+- `GET /api/logs?level=WARNING` returns only WARNING and ERROR lines
+- `GET /api/logs?component=verify` returns only lines from `gatekeeper.verify.*` loggers
+- `/logs` page loads, shows recent lines, and filters work without a page reload
+- Rotating: after 5 MB the file rotates; old log is `gatekeeper.log.1`, not lost
+- `journalctl` output is unchanged — existing log pipeline unaffected
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
