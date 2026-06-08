@@ -8112,7 +8112,7 @@ pattern is safe (CPython GIL makes `set.discard` atomic, but this should be expl
 
 ---
 
-### [ ] 1.24.4 — Targeted regression: verify 1.24.1–1.24.3 on existing VMs
+### [x] 1.24.4 — Targeted regression: verify 1.24.1–1.24.3 on existing VMs
 
 **Reads:** project-docs/testing.md
 **Environment:** existing Proxmox VMs — no snapshot rollback or wizard needed
@@ -8168,7 +8168,26 @@ Steps:
 - No new issues introduced (check gatekeeper and agent logs for unexpected errors)
 
 ```
-> Kludde:
+> Kludde: All three checks pass on HEAD (7a7a1b38f) on existing VMs — no snapshot rollback needed.
+>
+> 1.24.1 — Join idempotency: Generated fresh invite blush-grill-5, sent POST /api/cluster/join
+> with anders-home's own node_id. HTTP 200 returned with cluster state. Log confirms:
+> "Node 'Anders home node' (anders-home) presented a fresh invite but is already a member
+> — invite consumed, returning cluster state." DB check: invite used=1, still exactly 1
+> row for anders-home in members (no duplicate).
+>
+> 1.24.2 — NightlyVerifier wired: Startup log shows "Nightly verify scheduler started
+> (daily at 04:00:00)" — no stub message. Triggered early run by temporarily setting
+> daily_check_time=21:06 in gatekeeper.cfg. All 4 layers ran at 21:06:00: Layer 1
+> (root_dir.cap accessible), Layer 2 (15 catalog entries OK), Layer 3 (3 test restores
+> passed), Layer 4 (lifeboat OK). Log: "Nightly verification completed — all layers passed."
+> Config restored to 04:00 after test.
+>
+> 1.24.3 — Upload re-queue: Created /home/testuser/backup-test/requeue_test.txt on
+> agent-anders-pc. Blocked port 8081 before stability window expired. Upload failed with
+> OSError at 21:05, 21:06, 21:07. Removed iptables block at 21:07:58. Next scan cycle
+> at 21:08:11 succeeded: agent log "SUCCESS — uploaded file (54 bytes)", gatekeeper
+> log "Upload complete: agent=anders-laptop size=54". Dequeue-and-retry mechanism confirmed.
 ```
 
 ---
