@@ -8076,7 +8076,7 @@ APScheduler or asyncio pattern already in place for other background jobs.
 
 ---
 
-### [ ] 1.24.3 — Fix watcher: re-queue files after failed upload
+### [x] 1.24.3 — Fix watcher: re-queue files after failed upload
 
 **Reads:** SECURITY.md, project-docs/architecture.md → agent upload pipeline
 **Modifies:** `agent/watcher.py`, `agent/main.py`
@@ -8102,7 +8102,12 @@ pattern is safe (CPython GIL makes `set.discard` atomic, but this should be expl
 - Unit test: watcher queues file → upload fails → dequeue called → next scan re-queues
 
 ```
-> Kludde:
+> Kludde: Added FileWatcher.dequeue(path) with threading.Lock guarding all _queued
+> writes (both the new dequeue path and the existing _check_file/scan_once paths).
+> _upload_worker extended with watcher parameter; dequeue called in both except
+> branches (OSError/IOError and Exception) — NOT in finally, so successful uploads
+> stay in _queued. Three unit tests: dequeue removes path, no-op for unknown path,
+> next scan re-queues. 18/18 tests pass.
 ```
 
 ---

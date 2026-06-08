@@ -107,6 +107,7 @@ async def _upload_worker(
     queue: asyncio.Queue,
     client: GatekeeperClient,
     agent_name: str,
+    watcher: FileWatcher,
 ) -> None:
     """Read file paths from the upload queue and send each file to the gatekeeper."""
     logger.info("Upload worker started")
@@ -123,8 +124,10 @@ async def _upload_worker(
             logger.info("SUCCESS — uploaded file (%d bytes)", file_size)
         except (OSError, IOError) as exc:
             logger.error("Failed to upload file: %s", type(exc).__name__)
+            watcher.dequeue(file_path)
         except Exception as exc:
             logger.error("Unexpected upload error: %s", type(exc).__name__)
+            watcher.dequeue(file_path)
         finally:
             queue.task_done()
 
@@ -191,7 +194,7 @@ async def _run(config_path: Path) -> None:
     logger.info("Agent running — file watcher and upload worker active")
 
     upload_worker_task = asyncio.create_task(
-        _upload_worker(upload_queue, client, config.gatekeeper.name),
+        _upload_worker(upload_queue, client, config.gatekeeper.name, watcher),
         name="upload-worker",
     )
     try:

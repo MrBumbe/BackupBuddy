@@ -239,6 +239,48 @@ class TestScanOnce:
         assert watcher.queue.empty(), "_scan_once must not touch the queue"
 
 
+# ── FileWatcher.dequeue() — re-queue after failed upload ─────────────────────
+
+class TestDequeue:
+    def test_dequeue_removes_path_from_queued(self, tmp_path: Path) -> None:
+        f = _touch(tmp_path / "photo.jpg")
+        watcher = _make_watcher([str(tmp_path)], stability_seconds=0)
+
+        t0 = time.monotonic()
+        _scan(watcher, t0)
+        ready = _scan(watcher, t0 + 1)
+        real = os.path.realpath(str(f))
+
+        assert real in ready, "file must be queued before dequeue"
+        assert real in watcher._queued
+
+        watcher.dequeue(real)
+        assert real not in watcher._queued
+
+    def test_dequeue_noop_for_unknown_path(self, tmp_path: Path) -> None:
+        watcher = _make_watcher([str(tmp_path)], stability_seconds=0)
+        watcher.dequeue("/nonexistent/file.txt")  # must not raise
+
+    def test_dequeue_allows_next_scan_to_requeue(self, tmp_path: Path) -> None:
+        f = _touch(tmp_path / "report.docx")
+        watcher = _make_watcher([str(tmp_path)], stability_seconds=0)
+        real = os.path.realpath(str(f))
+
+        t0 = time.monotonic()
+        _scan(watcher, t0)
+        first = _scan(watcher, t0 + 1)
+        assert real in first, "file must appear on first stable scan"
+        assert real in watcher._queued
+
+        # Simulate failed upload: dequeue without clearing _state.
+        watcher.dequeue(real)
+        assert real not in watcher._queued
+
+        # Next scan cycle: _state still holds the stable entry → file re-queued.
+        second = _scan(watcher, t0 + 2)
+        assert real in second, "file must be re-queued after dequeue"
+
+
 # ── FileWatcher.run() — async integration ─────────────────────────────────────
 
 class TestWatcherRun:

@@ -18,6 +18,7 @@ import asyncio
 import fnmatch
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable
@@ -76,8 +77,21 @@ class FileWatcher:
         self._scan_interval = scan_interval
         self._state: dict[str, _FileState] = {}
         self._queued: set[str] = set()
+        # _queued is written from _scan_once (thread-pool thread) and dequeue
+        # (event-loop thread). _queued_lock guards all writes; individual set
+        # reads are atomic under CPython's GIL so no lock is needed for them.
+        self._queued_lock = threading.Lock()
 
     # ── Public interface ──────────────────────────────────────────────────────
+
+    def dequeue(self, path: str) -> None:
+        """Remove *path* from the queued set so the next scan re-evaluates it.
+
+        Called from the upload worker after a failed upload so the file is
+        retried on the next scan cycle. No-op if *path* is not in the set.
+        """
+        with self._queued_lock:
+            self._queued.discard(path)
 
     async def run(self) -> None:
         """Run the watcher loop indefinitely. Call from an asyncio task."""
@@ -128,7 +142,8 @@ class FileWatcher:
         gone = set(self._state) - seen
         for path in gone:
             del self._state[path]
-            self._queued.discard(path)
+            with self._queued_lock:
+                self._queued.discard(path)
 
         return ready
 
@@ -169,10 +184,12 @@ class FileWatcher:
 
         # Check catalog: skip if already backed up at this exact version.
         if self._catalog_check(real, mtime, size):
-            self._queued.add(real)
+            with self._queued_lock:
+                self._queued.add(real)
             return False
 
-        self._queued.add(real)
+        with self._queued_lock:
+            self._queued.add(real)
         return True
 
     # ── Helpers ───────────────────────────────────────────────────────────────
