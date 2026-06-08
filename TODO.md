@@ -8023,7 +8023,7 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
-### [ ] 1.24.1 — Fix join idempotency: fresh invite + already a member
+### [x] 1.24.1 — Fix join idempotency: fresh invite + already a member
 
 **Reads:** SECURITY.md, DECISIONS.md, project-docs/architecture.md → cluster join
 **Modifies:** `gatekeeper/cluster/join.py`

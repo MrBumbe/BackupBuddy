@@ -170,21 +170,6 @@ class TestAcceptJoinFailures:
 # ---------------------------------------------------------------------------
 
 class TestAcceptJoinAtomicity:
-    def test_duplicate_node_id_does_not_consume_invite(self, db, invite, node_info):
-        """Duplicate node_id IntegrityError must leave the invite unconsumed."""
-        db.insert_member(
-            node_id=node_info.node_id,
-            display_name="Pre-existing node",
-            tailscale_hostname="pre-existing",
-            joined_at=time.time(),
-        )
-
-        with pytest.raises(ValueError):
-            accept_join(db, invite.code, node_info, _FURL)
-
-        row = db.get_invite(invite.code)
-        assert row["used"] == 0, "invite must remain unused after IntegrityError"
-
     def test_successful_join_marks_invite_used(self, db, invite, node_info):
         accept_join(db, invite.code, node_info, _FURL)
         row = db.get_invite(invite.code)
@@ -212,6 +197,44 @@ class TestAcceptJoinIdempotency:
 
         with pytest.raises(ValueError):
             accept_join(db, invite.code, node_info, _FURL)
+
+
+# ---------------------------------------------------------------------------
+# accept_join — Fix (D): fresh invite + node already a member
+# ---------------------------------------------------------------------------
+
+class TestAcceptJoinFreshInviteDuplicate:
+    """Fresh (unused) invite code presented by a node that is already a member."""
+
+    def _pre_insert(self, db, node_info):
+        db.insert_member(
+            node_id=node_info.node_id,
+            display_name="Pre-existing node",
+            tailscale_hostname="pre-existing",
+            joined_at=time.time(),
+        )
+
+    def test_returns_success(self, db, invite, node_info):
+        self._pre_insert(db, node_info)
+        result = accept_join(db, invite.code, node_info, _FURL)
+        assert isinstance(result, JoinAcceptResponse)
+        assert result.introducer_furl == _FURL
+
+    def test_invite_consumed(self, db, invite, node_info):
+        self._pre_insert(db, node_info)
+        accept_join(db, invite.code, node_info, _FURL)
+        row = db.get_invite(invite.code)
+        assert row["used"] == 1
+
+    def test_no_duplicate_member_row(self, db, invite, node_info):
+        self._pre_insert(db, node_info)
+        members_before = len(db.list_members())
+        accept_join(db, invite.code, node_info, _FURL)
+        members_after = len(db.list_members())
+        assert members_after == members_before
+        # Existing row is untouched (not overwritten by node_info's display_name)
+        stored = db.get_member(node_info.node_id)
+        assert stored["display_name"] == "Pre-existing node"
 
 
 # ---------------------------------------------------------------------------

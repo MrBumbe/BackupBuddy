@@ -147,6 +147,22 @@ def accept_join(
     if validate_invite(db, invite_code) is None:
         raise ValueError("Invalid, expired, or already-used invite code")
 
+    # Fix (D): fresh invite + node already a member.
+    # Handles the scenario where an operator generates a new invite for a node
+    # that already completed its join (e.g. after a cascade failure followed by
+    # a fresh code). Consume the invite and return success without inserting a
+    # duplicate member row.
+    if db.get_member(node_info.node_id) is not None:
+        db.update_invite(invite_code, used=1)
+        members = db.list_members(status="active")
+        logger.info(
+            "Node '%s' (%s) presented a fresh invite but is already a member"
+            " — invite consumed, returning cluster state",
+            node_info.display_name,
+            node_info.node_id,
+        )
+        return JoinAcceptResponse(introducer_furl=introducer_furl, members=members)
+
     # Fix (B): insert member and mark invite used in one atomic transaction.
     # If insert raises IntegrityError (duplicate node_id) the invite is NOT
     # consumed — the admin does not need to generate a new code.
