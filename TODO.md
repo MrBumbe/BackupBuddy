@@ -8192,6 +8192,57 @@ Steps:
 
 ---
 
+### [ ] 1.25.1 — Add on-demand verify trigger (CLI + API)
+
+**Reads:** project-docs/testing.md, project-docs/architecture.md
+**Found during:** 1.24.4 regression — no `backup-buddy verify --now` or equivalent exists
+
+The nightly verifier can only be triggered by the scheduler (daily at `verify.daily_check_time`).
+There is no way to run it on demand — no CLI flag and no API endpoint. During the 1.24.4
+regression test, the only way to trigger an early run was to temporarily modify `gatekeeper.cfg`,
+which is a config-manipulation hack, not an operator tool.
+
+An on-demand trigger is necessary for:
+- Confirming verifier behaviour after a fix without waiting for the next nightly window
+- Operator investigation after an alert or incident
+- Smoke-testing after a gatekeeper restart or config change
+- Integration test scenarios that need a controlled verify run
+
+**Scope:**
+
+1. **CLI flag** — `backup-buddy verify --now` (or `gatekeeper-ctl verify --now`)
+   - Runs `NightlyVerifier.run()` synchronously, exits with code 0 on success, 1 on failure
+   - Logs go to the same logger as the scheduled run (no separate log path)
+   - Must not interfere with a scheduled run that happens to fire concurrently (lock or skip)
+
+2. **API endpoint** — `POST /api/verify/run-now`
+   - Triggers a verify run in the background (non-blocking, returns HTTP 202)
+   - Response body: `{"status": "started", "triggered_at": "<iso8601>"}`
+   - Rate-limited: reject with HTTP 429 if a run is already in progress
+   - Accessible only from Tailscale interface (same binding rule as all other routes)
+
+3. **Status endpoint** — `GET /api/verify/status`
+   - Returns last run result: `{"last_run_at": ..., "result": "passed"|"failed"|"never", "layers": [...]}`
+   - Reads from a small status record persisted to cluster.db after each run
+
+**Implementation notes:**
+- `NightlyVerifier.run()` already does all the work — the trigger is just plumbing
+- Store last-run result in cluster.db (`verify_runs` table: `run_at`, `result`, `detail_json`)
+- CLI entry point: add `verify` subcommand to existing argparse setup in `gatekeeper/main.py`
+  or as a standalone `gatekeeper-ctl` script (whichever is already the operator CLI pattern)
+- The concurrent-run guard: a simple `asyncio.Event` or an `is_running: bool` flag on the
+  `NightlyVerifier` instance is sufficient — no distributed lock needed (single-node)
+
+**Acceptance criteria:**
+- `backup-buddy verify --now` triggers a full verify run and exits 0 on success
+- `POST /api/verify/run-now` returns 202 and run completes; returns 429 if already running
+- `GET /api/verify/status` returns the result of the last run
+- Concurrent calls do not cause two simultaneous verify runs
+- All four verify layers are run (same as scheduled run — no shortcuts)
+- Unit test: mock `NightlyVerifier.run()`, assert it is called exactly once per API request
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
