@@ -8192,7 +8192,7 @@ Steps:
 
 ---
 
-### [ ] 1.25.1 — Add on-demand verify trigger (CLI + API)
+### [x] 1.25.1 — Add on-demand verify trigger (CLI + API)
 
 **Reads:** project-docs/testing.md, project-docs/architecture.md
 **Found during:** 1.24.4 regression — no `backup-buddy verify --now` or equivalent exists
