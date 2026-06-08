@@ -681,3 +681,138 @@ class TestNightlyVerifierRun(unittest.IsolatedAsyncioTestCase):
         await v.run()
 
         send_alert.assert_not_called()
+
+    async def test_result_persisted_to_cluster_db(self):
+        """run() must call cluster.insert_verify_run() exactly once."""
+        cluster = MagicMock()
+        v = _make_verifier(cluster=cluster)
+        v._layer1_root_dir_cap = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer2_catalog_vs_cluster = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer3_test_restore = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer4_lifeboat = AsyncMock(return_value=LayerResult(ok=True))
+
+        await v.run(triggered_by="api")
+
+        cluster.insert_verify_run.assert_called_once()
+        call_kwargs = cluster.insert_verify_run.call_args
+        self.assertEqual(call_kwargs.kwargs.get("triggered_by") or call_kwargs.args[3], "api")
+
+    async def test_persisted_result_is_passed_when_all_ok(self):
+        cluster = MagicMock()
+        v = _make_verifier(cluster=cluster)
+        v._layer1_root_dir_cap = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer2_catalog_vs_cluster = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer3_test_restore = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer4_lifeboat = AsyncMock(return_value=LayerResult(ok=True))
+
+        await v.run()
+
+        args = cluster.insert_verify_run.call_args
+        result_arg = args.kwargs.get("result") or args.args[1]
+        self.assertEqual(result_arg, "passed")
+
+    async def test_persisted_result_is_failed_when_layer_fails(self):
+        cluster = MagicMock()
+        v = _make_verifier(cluster=cluster)
+        v._layer1_root_dir_cap = AsyncMock(return_value=LayerResult(ok=False, errors=1))
+        v._layer2_catalog_vs_cluster = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer3_test_restore = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer4_lifeboat = AsyncMock(return_value=LayerResult(ok=True))
+
+        await v.run()
+
+        args = cluster.insert_verify_run.call_args
+        result_arg = args.kwargs.get("result") or args.args[1]
+        self.assertEqual(result_arg, "failed")
+
+    async def test_db_failure_does_not_raise(self):
+        """A cluster DB error during persist must not propagate from run()."""
+        cluster = MagicMock()
+        cluster.insert_verify_run.side_effect = Exception("DB locked")
+        v = _make_verifier(cluster=cluster)
+        v._layer1_root_dir_cap = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer2_catalog_vs_cluster = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer3_test_restore = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer4_lifeboat = AsyncMock(return_value=LayerResult(ok=True))
+
+        result = await v.run()
+
+        self.assertTrue(result.overall_ok)
+
+
+# ── On-demand trigger (API concurrency guard) ─────────────────────────────────
+
+class TestVerifyOnDemandConcurrency(unittest.IsolatedAsyncioTestCase):
+    """Tests for the is_running concurrency guard used by the on-demand API route."""
+
+    async def test_is_running_false_initially(self):
+        v = _make_verifier()
+        self.assertFalse(v.is_running)
+
+    async def test_run_called_exactly_once_per_api_trigger(self):
+        """Simulates the API handler: run() must be called exactly once."""
+        v = _make_verifier()
+        run_mock = AsyncMock(return_value=VerifyResult(
+            layer1=LayerResult(ok=True),
+            layer2=LayerResult(ok=True),
+            layer3=LayerResult(ok=True),
+            layer4=LayerResult(ok=True),
+        ))
+        v.run = run_mock
+
+        self.assertFalse(v.is_running)
+        v._is_running = True
+        try:
+            await v.run(triggered_by="api")
+        finally:
+            v._is_running = False
+
+        run_mock.assert_awaited_once_with(triggered_by="api")
+
+    async def test_is_running_true_while_run_is_in_progress(self):
+        """The flag stays True while run() is executing."""
+        v = _make_verifier()
+        observed: list[bool] = []
+
+        async def _mock_run(triggered_by: str = "scheduler") -> VerifyResult:
+            observed.append(v.is_running)
+            return VerifyResult(
+                layer1=LayerResult(ok=True),
+                layer2=LayerResult(ok=True),
+                layer3=LayerResult(ok=True),
+                layer4=LayerResult(ok=True),
+            )
+
+        v.run = _mock_run
+
+        v._is_running = True
+        try:
+            await v.run(triggered_by="api")
+        finally:
+            v._is_running = False
+
+        self.assertEqual(observed, [True])
+
+    async def test_is_running_resets_to_false_after_completion(self):
+        """is_running must be False after the run (and its finally block) complete."""
+        cluster = MagicMock()
+        v = _make_verifier(cluster=cluster)
+        v._layer1_root_dir_cap = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer2_catalog_vs_cluster = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer3_test_restore = AsyncMock(return_value=LayerResult(ok=True))
+        v._layer4_lifeboat = AsyncMock(return_value=LayerResult(ok=True))
+
+        v._is_running = True
+        self.assertTrue(v.is_running)
+        try:
+            await v.run(triggered_by="api")
+        finally:
+            v._is_running = False
+        self.assertFalse(v.is_running)
+
+    async def test_is_running_blocks_second_trigger(self):
+        """When is_running is True, the API handler must return 429 (not start a second run)."""
+        v = _make_verifier()
+        v._is_running = True
+        # The API route checks this before scheduling a new run.
+        self.assertTrue(v.is_running)

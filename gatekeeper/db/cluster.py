@@ -533,6 +533,30 @@ class ClusterDB:
         return dict(row) if row else None
 
     # ------------------------------------------------------------------
+    # verify_runs
+    # ------------------------------------------------------------------
+
+    def insert_verify_run(
+        self,
+        run_at: float,
+        result: str,
+        detail_json: str,
+        triggered_by: str = "scheduler",
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO verify_runs (run_at, result, detail_json, triggered_by) "
+            "VALUES (?, ?, ?, ?)",
+            (run_at, result, detail_json, triggered_by),
+        )
+        self._conn.commit()
+
+    def get_last_verify_run(self) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM verify_runs ORDER BY run_at DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 

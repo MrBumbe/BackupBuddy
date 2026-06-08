@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import json
 import logging
 import os
 import random
@@ -117,17 +118,21 @@ class NightlyVerifier:
         self._root_dir_cap = root_dir_cap
         self._agent_token = agent_token
         self._send_alert = send_alert
-        self._lock = asyncio.Lock()
+        self._is_running: bool = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._is_running
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    async def run(self) -> VerifyResult:
+    async def run(self, triggered_by: str = "scheduler") -> VerifyResult:
         """Run all four verification layers and return a combined VerifyResult.
 
         Each layer is isolated — an exception in one layer does not prevent
         the others from running.
         """
-        logger.info("Nightly verification started")
+        logger.info("Nightly verification started (triggered_by=%s)", triggered_by)
         result = VerifyResult()
 
         for layer_num, layer_fn in [
@@ -156,6 +161,24 @@ class NightlyVerifier:
                 "Nightly verification completed — one or more layers failed"
             )
 
+        # Persist result — store counts only, never raw exception strings or cap material.
+        detail_json = json.dumps({
+            f"layer{i + 1}": {"ok": lr.ok, "warnings": lr.warnings, "errors": lr.errors}
+            for i, lr in enumerate(
+                [result.layer1, result.layer2, result.layer3, result.layer4]
+            )
+            if lr is not None
+        })
+        try:
+            self._cluster.insert_verify_run(
+                run_at=time.time(),
+                result="passed" if result.overall_ok else "failed",
+                detail_json=detail_json,
+                triggered_by=triggered_by,
+            )
+        except Exception:
+            logger.exception("Failed to persist verify run result to cluster DB")
+
         return result
 
     async def run_scheduler(self) -> None:
@@ -177,17 +200,19 @@ class NightlyVerifier:
                 target += datetime.timedelta(days=1)
             await asyncio.sleep((target - now).total_seconds())
 
-            if self._lock.locked():
+            if self._is_running:
                 logger.warning(
                     "Nightly verify still in progress — skipping this cycle"
                 )
                 continue
 
-            async with self._lock:
-                try:
-                    await self.run()
-                except Exception:
-                    logger.exception("Nightly verify unexpected error")
+            self._is_running = True
+            try:
+                await self.run(triggered_by="scheduler")
+            except Exception:
+                logger.exception("Nightly verify unexpected error")
+            finally:
+                self._is_running = False
 
     # ── Layer 1 — root_dir.cap ────────────────────────────────────────────────
 

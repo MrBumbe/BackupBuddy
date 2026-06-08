@@ -311,6 +311,7 @@ async def lifespan(app: FastAPI):
         app.state.storage_node = None
         app.state.tahoe_client = None
         app.state.fragmenter = None
+        app.state.nightly_verifier = None
         app.state.introducer_furl = ""
         app.state.local_node_id = None
         app.state.background_tasks = []
@@ -329,6 +330,7 @@ async def lifespan(app: FastAPI):
     tahoe_client: TahoeClient | None = None
     fragmenter: Fragmenter | None = None
     queue_worker: UploadQueueWorker | None = None
+    nightly_verifier: NightlyVerifier | None = None
 
     try:
         # Step 3 — storage pool (always runs; validates paths are accessible)
@@ -486,6 +488,7 @@ async def lifespan(app: FastAPI):
         app.state.storage_node = storage_node
         app.state.tahoe_client = tahoe_client
         app.state.fragmenter = fragmenter
+        app.state.nightly_verifier = nightly_verifier
         # FURL is internal — available to the join route but never logged or shown to users
         app.state.introducer_furl = introducer_furl
         app.state.local_node_id = config.node.name
@@ -532,6 +535,70 @@ def _register_routes(app: FastAPI) -> None:
             "status": "ok",
             "node": cfg.node.name,
             "display_name": cfg.node.display_name,
+        })
+
+    @app.post("/api/verify/run-now")
+    async def verify_run_now(request: Request) -> JSONResponse:
+        """Trigger an on-demand verification run.
+
+        Returns 202 and starts the run in the background.
+        Returns 429 if a run is already in progress.
+        The caller may poll GET /api/verify/status for the result.
+        """
+        if request.app.state.setup_required:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+        verifier: NightlyVerifier | None = getattr(
+            request.app.state, "nightly_verifier", None
+        )
+        if verifier is None:
+            return JSONResponse({"error": "Verifier not available"}, status_code=503)
+        if verifier.is_running:
+            return JSONResponse(
+                {"error": "Verification already in progress"}, status_code=429
+            )
+        triggered_at = datetime.now(timezone.utc).isoformat()
+        # Atomic: no await between the is_running check above and this set.
+        verifier._is_running = True
+
+        async def _bg() -> None:
+            try:
+                await verifier.run(triggered_by="api")
+            except Exception:
+                logger.exception("On-demand verify raised unexpectedly")
+            finally:
+                verifier._is_running = False
+
+        task = asyncio.create_task(_bg())
+        bg = getattr(request.app.state, "background_tasks", None)
+        if bg is not None:
+            bg.append(task)
+        return JSONResponse({"status": "started", "triggered_at": triggered_at}, status_code=202)
+
+    @app.get("/api/verify/status")
+    async def verify_status(request: Request) -> JSONResponse:
+        """Return the result of the last verification run."""
+        if request.app.state.setup_required:
+            return JSONResponse({"error": "Gatekeeper not ready"}, status_code=503)
+        db = request.app.state.cluster_db
+        if db is None:
+            return JSONResponse(
+                {"error": "Cluster database not available"}, status_code=503
+            )
+        last = db.get_last_verify_run()
+        if last is None:
+            return JSONResponse(
+                {"last_run_at": None, "result": "never", "triggered_by": None, "layers": []}
+            )
+        layers_raw: dict = json.loads(last.get("detail_json", "{}"))
+        layers = [
+            {"layer": int(k[5:]), **v}
+            for k, v in sorted(layers_raw.items())
+        ]
+        return JSONResponse({
+            "last_run_at": last["run_at"],
+            "result": last["result"],
+            "triggered_by": last.get("triggered_by", "scheduler"),
+            "layers": layers,
         })
 
     @app.post("/api/cluster/sync/vote")
@@ -1024,6 +1091,18 @@ def _parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="log level (default: INFO)",
     )
+
+    subparsers = parser.add_subparsers(dest="command")
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="on-demand verification commands",
+    )
+    verify_parser.add_argument(
+        "--now",
+        action="store_true",
+        help="trigger a full verification run and wait for the result",
+    )
+
     return parser.parse_args()
 
 
@@ -1036,6 +1115,86 @@ def _configure_logging(level: str) -> None:
     )
 
 
+def _cmd_verify_now(data_dir: Path, config_path: Path, log_level: str) -> None:
+    """Trigger an on-demand verification run via the gatekeeper API and wait for the result.
+
+    Exits 0 if the run passes, 1 on failure, 1 on error.
+    """
+    import time as _time
+
+    import httpx
+
+    _configure_logging(log_level)
+
+    try:
+        tailscale_ip = assert_tailscale_running()
+    except TailscaleNotRunning as exc:
+        logger.critical("Tailscale not running: %s", exc)
+        sys.exit(1)
+
+    try:
+        config = load_config(config_path, tailscale_ip=tailscale_ip)
+    except ConfigError as exc:
+        logger.critical("Configuration error: %s", exc)
+        sys.exit(1)
+
+    base_url = f"http://{tailscale_ip}:{config.web.port}"
+
+    with httpx.Client(timeout=10.0) as client:
+        try:
+            resp = client.post(f"{base_url}/api/verify/run-now")
+        except Exception as exc:
+            logger.error(
+                "Could not reach gatekeeper at %s: %s", base_url, type(exc).__name__
+            )
+            sys.exit(1)
+
+        if resp.status_code == 429:
+            logger.info("Verification already in progress — waiting for completion")
+            pre_trigger = 0.0
+        elif resp.status_code == 202:
+            triggered_at_str = resp.json().get("triggered_at", "")
+            try:
+                pre_trigger = datetime.fromisoformat(triggered_at_str).timestamp()
+            except (ValueError, TypeError):
+                pre_trigger = 0.0
+            logger.info("Verification run triggered")
+        elif resp.status_code == 503:
+            logger.error("Gatekeeper not ready: %s", resp.json().get("error", ""))
+            sys.exit(1)
+        else:
+            logger.error("Unexpected response from gatekeeper: %d", resp.status_code)
+            sys.exit(1)
+
+        deadline = _time.time() + 3600
+        while _time.time() < deadline:
+            _time.sleep(5.0)
+            try:
+                status_resp = client.get(f"{base_url}/api/verify/status")
+            except Exception as exc:
+                logger.warning("Error polling verify status: %s", type(exc).__name__)
+                continue
+            if status_resp.status_code != 200:
+                logger.warning(
+                    "Unexpected status response: %d", status_resp.status_code
+                )
+                continue
+            data = status_resp.json()
+            last_run_at = data.get("last_run_at")
+            if last_run_at is None or last_run_at <= pre_trigger:
+                continue
+            result = data.get("result", "failed")
+            if result == "passed":
+                logger.info("Verification passed")
+                sys.exit(0)
+            else:
+                logger.error("Verification failed")
+                sys.exit(1)
+
+    logger.error("Timed out waiting for verification to complete (1 hour)")
+    sys.exit(1)
+
+
 def main() -> None:
     args = _parse_args()
     _configure_logging(args.log_level)
@@ -1044,6 +1203,11 @@ def main() -> None:
     config_path = (
         Path(args.config).resolve() if args.config else data_dir / "gatekeeper.cfg"
     )
+
+    if getattr(args, "command", None) == "verify":
+        if getattr(args, "now", False):
+            _cmd_verify_now(data_dir, config_path, args.log_level)
+        return
 
     logger.info("BackupBuddy gatekeeper starting")
     logger.info("Data directory: %s", data_dir)
