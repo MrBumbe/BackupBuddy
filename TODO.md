@@ -7408,7 +7408,7 @@ Record PASS / FAIL (including which dashboard(s) show fewer than 3 if FAIL).
 
 ---
 
-### [ ] 1.23.2 — Fifth simulation, Part 2: agent setup + streaming upload validation
+### [x] 1.23.2 — Fifth simulation, Part 2: agent setup + streaming upload validation
 
 > **Key verification:** The 1 GB file must be backed up at NOMINAL hardware (512 MB LXC agent,
 > 2 GB GK VM) without OOM. In 1.22, OOM required expanding both VMs. After the streaming fix
