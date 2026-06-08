@@ -559,3 +559,51 @@ table.inner-table thead th {
 .small {
     font-size: 0.8rem;
 }
+
+/* ── Log viewer ───────────────────────────────────────────────────────────── */
+
+.log-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.log-controls label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #555;
+}
+
+.log-controls select {
+    font-size: 0.875rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 0.25rem;
+    background: #fff;
+}
+
+.log-info {
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+
+#log-table {
+    font-size: 0.82rem;
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+.col-ts    { white-space: nowrap; width: 11rem; }
+.col-level { white-space: nowrap; width: 6rem; }
+.col-name  { white-space: nowrap; width: 18rem; color: #555; }
+.col-msg   { word-break: break-word; }
+
+.log-row.log-warning td { background: #fffbe6; }
+.log-row.log-error td   { background: #fff0f0; }
+
+.log-badge-debug    { background: #e0e0e0; color: #333; }
+.log-badge-info     { background: #dbeafe; color: #1e40af; }
+.log-badge-warning  { background: #fef3c7; color: #92400e; }
+.log-badge-error    { background: #fee2e2; color: #991b1b; }
+.log-badge-critical { background: #7f1d1d; color: #fff; }

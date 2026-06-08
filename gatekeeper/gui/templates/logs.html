@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Logs — BackupBuddy{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Logs</h1>
+</div>
+
+<section class="card">
+    <div class="log-controls">
+        <label for="level-select">Level:</label>
+        <select id="level-select">
+            <option value="DEBUG"   {% if current_level == "DEBUG"   %}selected{% endif %}>DEBUG</option>
+            <option value="INFO"    {% if current_level == "INFO"    %}selected{% endif %}>INFO</option>
+            <option value="WARNING" {% if current_level == "WARNING" %}selected{% endif %}>WARNING</option>
+            <option value="ERROR"   {% if current_level == "ERROR"   %}selected{% endif %}>ERROR</option>
+        </select>
+
+        <label for="component-select">Component:</label>
+        <select id="component-select">
+            <option value="" {% if not current_component %}selected{% endif %}>All</option>
+            {% for c in components %}
+            <option value="{{ c }}" {% if current_component == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+
+        <button id="refresh-btn" type="button">Refresh</button>
+    </div>
+
+    <p class="text-muted log-info">Showing last {{ current_n }} matching lines, newest first.</p>
+
+    <table id="log-table">
+        <thead>
+            <tr>
+                <th class="col-ts">Timestamp</th>
+                <th class="col-level">Level</th>
+                <th class="col-name">Logger</th>
+                <th class="col-msg">Message</th>
+            </tr>
+        </thead>
+        <tbody id="log-tbody">
+            {% for line in lines %}
+            <tr class="log-row log-{{ line.level | lower }}">
+                <td class="col-ts">{{ line.ts }}</td>
+                <td class="col-level"><span class="badge log-badge-{{ line.level | lower }}">{{ line.level }}</span></td>
+                <td class="col-name">{{ line.name }}</td>
+                <td class="col-msg">{{ line.msg }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="empty">No log entries match the current filter.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<script>
+(function () {
+    'use strict';
+
+    var levelSelect = document.getElementById('level-select');
+    var componentSelect = document.getElementById('component-select');
+    var refreshBtn = document.getElementById('refresh-btn');
+    var tbody = document.getElementById('log-tbody');
+    var n = {{ current_n }};
+
+    function levelClass(lvl) {
+        return 'log-row log-' + lvl.toLowerCase();
+    }
+
+    function levelBadge(lvl) {
+        return '<span class="badge log-badge-' + lvl.toLowerCase() + '">' + lvl + '</span>';
+    }
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function renderRows(lines) {
+        if (!lines.length) {
+            return '<tr><td colspan="4" class="empty">No log entries match the current filter.</td></tr>';
+        }
+        return lines.map(function (l) {
+            return '<tr class="' + levelClass(l.level) + '">'
+                + '<td class="col-ts">' + esc(l.ts) + '</td>'
+                + '<td class="col-level">' + levelBadge(l.level) + '</td>'
+                + '<td class="col-name">' + esc(l.name) + '</td>'
+                + '<td class="col-msg">' + esc(l.msg) + '</td>'
+                + '</tr>';
+        }).join('');
+    }
+
+    function refresh() {
+        var level = levelSelect.value;
+        var component = componentSelect.value;
+        var url = '/api/logs?level=' + encodeURIComponent(level)
+            + '&component=' + encodeURIComponent(component)
+            + '&n=' + n;
+        refreshBtn.disabled = true;
+        fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (data) { tbody.innerHTML = renderRows(data.lines || []); })
+            .catch(function () {})
+            .finally(function () { refreshBtn.disabled = false; });
+    }
+
+    refreshBtn.addEventListener('click', refresh);
+    levelSelect.addEventListener('change', refresh);
+    componentSelect.addEventListener('change', refresh);
+}());
+</script>
+{% endblock %}

@@ -139,6 +139,12 @@ bind    = tailscale    # listen on Tailscale interface only
 enabled = true
 port    = 8081
 token   = changeme-generate-at-setup
+
+# ── Logging ───────────────────────────────────────────
+# Log file written alongside journal output (RotatingFileHandler, 5 MB × 3).
+# Visible in the GUI at /logs. Omit the section to use the default path.
+[logging]
+log_file = /var/lib/backup-buddy/gatekeeper.log
 ```
 
 ---

@@ -193,6 +193,10 @@ class AgentApiConfig(BaseModel):
     token: str = ""  # plaintext, Phase 1 — see ADR-017
 
 
+class LoggingConfig(BaseModel):
+    log_file: str = "/var/lib/backup-buddy/gatekeeper.log"
+
+
 # ── Top-level config ──────────────────────────────────────────────────────────
 
 class GatekeeperConfig(BaseModel):
@@ -211,6 +215,7 @@ class GatekeeperConfig(BaseModel):
     notify: NotifyConfig = NotifyConfig()
     web: WebConfig = WebConfig()
     agent_api: AgentApiConfig = AgentApiConfig()
+    logging: LoggingConfig = LoggingConfig()
     # Populated at startup — None until resolved
     tailscale_ip: Optional[str] = None
     lan_ip: Optional[str] = None
@@ -400,6 +405,12 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
         token=aa_raw.get("token", ""),
     )
 
+    # [logging]
+    log_raw = sec("logging")
+    logging_cfg = LoggingConfig(
+        log_file=log_raw.get("log_file", "/var/lib/backup-buddy/gatekeeper.log"),
+    )
+
     return GatekeeperConfig(
         node=node,
         tahoe=tahoe,
@@ -416,6 +427,7 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
         notify=notify,
         web=web,
         agent_api=agent_api,
+        logging=logging_cfg,
     )
 
 

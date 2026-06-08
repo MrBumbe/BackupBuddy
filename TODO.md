@@ -8243,7 +8243,7 @@ An on-demand trigger is necessary for:
 
 ---
 
-### [ ] 1.25.2 — Log viewer in gatekeeper GUI
+### [x] 1.25.2 — Log viewer in gatekeeper GUI
 
 **Reads:** project-docs/design.md, project-docs/architecture.md
 **Complements:** existing `journalctl`-based logging — this is an additive GUI surface, not a replacement

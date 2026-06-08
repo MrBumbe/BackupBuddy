@@ -84,6 +84,8 @@ logger = logging.getLogger(__name__)
 # Default web port used in setup mode before gatekeeper.cfg is written.
 _DEFAULT_WEB_PORT = 8080
 
+_DEFAULT_LOG_FILE = "/var/lib/backup-buddy/gatekeeper.log"
+
 # Floor of free space Tahoe's storage node will leave in the storage directory.
 # StoragePoolManager enforces the real quota; this is Tahoe's own safety valve.
 _TAHOE_RESERVED_BYTES = 1 * 1024**3  # 1 GB
@@ -305,6 +307,7 @@ async def lifespan(app: FastAPI):
         app.state.config = None
         app.state.config_path = _state.get("config_path")
         app.state.data_dir = _state.get("data_dir")
+        app.state.log_file = _state.get("log_file", _DEFAULT_LOG_FILE)
         app.state.pool = None
         app.state.catalog_db = None
         app.state.cluster_db = None
@@ -479,6 +482,7 @@ async def lifespan(app: FastAPI):
 
         # Expose shared state to route handlers (None in setup mode)
         app.state.setup_required = setup_required
+        app.state.log_file = _state.get("log_file", _DEFAULT_LOG_FILE)
         app.state.config = config
         app.state.config_path = config_path
         app.state.data_dir = data_dir
@@ -1044,11 +1048,13 @@ def _start_setup_mode(data_dir: Path, config_path: Path, log_level: str) -> None
     # Ensure data directory exists so lifeboat.key and databases have a home.
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    log_file = _attach_file_handler(_DEFAULT_LOG_FILE)
     _state.update({
         "setup_mode": True,
         "data_dir": data_dir,
         "config_path": config_path,
         "config": None,
+        "log_file": log_file,
     })
 
     gui_app = _create_app()
@@ -1113,6 +1119,39 @@ def _configure_logging(level: str) -> None:
         datefmt="%Y-%m-%dT%H:%M:%S",
         force=True,
     )
+
+
+def _attach_file_handler(log_file: str) -> str:
+    """Add a RotatingFileHandler to the root logger alongside the existing StreamHandler.
+
+    Creates the parent directory if it does not exist.  If the directory cannot be
+    created or the file cannot be opened (e.g. permission denied), logs a warning
+    and returns without raising — stream logging continues unaffected.
+
+    Returns the resolved log file path.
+    """
+    from logging.handlers import RotatingFileHandler
+
+    log_path = Path(log_file).resolve()
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            log_path,
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        ))
+        logging.getLogger().addHandler(handler)
+        logger.info("File logging enabled: %s", log_path)
+    except Exception as exc:
+        logger.warning(
+            "Could not set up file logging at %s: %s", log_path, type(exc).__name__
+        )
+    return str(log_path)
 
 
 def _cmd_verify_now(data_dir: Path, config_path: Path, log_level: str) -> None:
@@ -1238,6 +1277,7 @@ def main() -> None:
     _state["config"] = config
     _state["data_dir"] = data_dir
     _state["config_path"] = config_path
+    _state["log_file"] = _attach_file_handler(config.logging.log_file)
 
     # Reload config on SIGHUP (no-op on Windows)
     install_sighup_handler(
