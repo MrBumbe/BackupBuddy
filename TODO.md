@@ -7115,7 +7115,7 @@ Tahoe data, logs, and BackupBuddy itself, ~10–12 GB is typically free. Edge ca
 
 ---
 
-### [ ] 1.23.1 — Fifth simulation, Part 1: infrastructure + cluster formation
+### [x] 1.23.1 — Fifth simulation, Part 1: infrastructure + cluster formation
 
 > **Verifies:** Memory reset to nominal sizes; expired invite code; all 3 dashboards Online.
 >
@@ -7668,7 +7668,7 @@ Expected output includes one of:
 
 ---
 
-### [ ] 1.23.3 — Fifth simulation, Part 3: extended restore + disk guard + final docs audit
+### [x] 1.23.3 — Fifth simulation, Part 3: extended restore + disk guard + final docs audit
 
 > **Resume:** Read `1.23.1-state.md`. All agents must show SUCCESS for all test files.
 > Pre-backup checksums must be in state file.
@@ -8006,7 +8006,13 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
-> **Kludde:**
+> **Kludde:** K1–K6 PASS (all restore scenarios: baseline, alternate folder, deleted file,
+> nested folder with structure preserved, file with spaces, 1 GB tar.gz). L PASS (HTTP 507
+> guard confirmed; L4 required agent restart — ISSUE-3 logged: _queued not cleared on failed
+> upload, no auto-retry). M PASS (restore from Björn + Carina with Anders down; all 3/3 Online
+> after restart). N PASS (INSTALL.md and RESTORE.md fully accurate — no ENRADSFIX items).
+> 3 issues total: ISSUE-1 (join idempotency gap), ISSUE-2 (NightlyVerifier not wired),
+> ISSUE-3 (failed uploads not retried). Fifth simulation complete.
 
 ---
 
