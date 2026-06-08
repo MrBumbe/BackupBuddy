@@ -8016,6 +8016,97 @@ Mark PASS / FAIL / N/A. Add notes to issues file for every FAIL.
 
 ---
 
+## 1.24 — Post-fifth-simulation fixes
+
+> Fixes for the three issues logged in `tests/integration/1.23.1-issues.md`.
+> All three are medium severity and must be resolved before Phase 1 is declared complete.
+
+---
+
+### [ ] 1.24.1 — Fix join idempotency: fresh invite + already a member
+
+**Reads:** SECURITY.md, DECISIONS.md, project-docs/architecture.md → cluster join
+**Modifies:** `gatekeeper/cluster/join.py`
+
+ISSUE-1 from 1.23.1: when a node that is already in the `members` table uses a
+fresh (unused) invite code, `accept_new_member` raises `IntegrityError` (duplicate
+`node_id`) → HTTP 400. The invite is consumed but the joiner gets an error.
+
+Fix (C) in join.py already handles "used invite + already a member" (returns success).
+This adds the symmetric case: before calling `accept_new_member`, check whether
+`node_id` is already in `members`. If yes, skip the insert and return success (same
+outcome as Fix C). The invite is consumed — this is intentional, as the join succeeded.
+
+**Requirements:**
+- In `accept_join`, query `members` for `node_id` before calling `accept_new_member`
+- If already a member: consume the invite, skip insert, return success (HTTP 200)
+- If not a member: existing path — call `accept_new_member` as before
+- Parameterized query, Pydantic-validated input — same rules as the existing code
+- Unit test: fresh invite + duplicate node_id → HTTP 200, invite consumed, no new row
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.24.2 — Wire NightlyVerifier into gatekeeper scheduler
+
+**Reads:** SECURITY.md, project-docs/architecture.md → background jobs
+**Modifies:** `gatekeeper/main.py`
+
+ISSUE-2 from 1.23.1: `NightlyVerifier` in `gatekeeper/verify/nightly.py` is fully
+implemented but the scheduler in `gatekeeper/main.py` calls `_verify_stub()` instead,
+logging `Verify scheduler: pending implementation (task 1.13.2)` on every startup.
+
+Replace the `_verify_stub()` call with a real scheduled task using the existing
+APScheduler or asyncio pattern already in place for other background jobs.
+
+**Requirements:**
+- Remove `_verify_stub()` call (or the stub itself if nothing else calls it)
+- Wire `NightlyVerifier.run()` (or equivalent entry point) into the startup scheduler
+- Job must log start, completion, and any errors per the background job pattern in CLAUDE.md
+- Trigger: once per day (time configurable via gatekeeper.cfg if already supported,
+  otherwise default 02:00 local time and document the default)
+- Unit test or smoke check: startup log shows verifier scheduled, not stub
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.24.3 — Fix watcher: re-queue files after failed upload
+
+**Reads:** SECURITY.md, project-docs/architecture.md → agent upload pipeline
+**Modifies:** `agent/watcher.py`, `agent/main.py`
+
+ISSUE-3 from 1.23.1: after a failed upload (e.g. HTTP 507 insufficient disk space),
+the file path stays in `FileWatcher._queued` permanently. `_upload_worker` catches
+the exception and logs it but does not notify the watcher. On the next scan cycle
+`_check_file` returns `False` immediately for queued paths → the file is never retried
+without an agent restart.
+
+Fix: add a `dequeue(path: str)` method to `FileWatcher` that removes a path from
+`_queued`. Call it from `_upload_worker` in the `except` branch after a failed upload.
+Thread-safety note: `_queued` is written by `_scan_once` (in a thread via
+`asyncio.to_thread`) and by `dequeue` (called from the event loop in `_upload_worker`).
+Use a `threading.Lock` to guard both write paths, or document why the current access
+pattern is safe (CPython GIL makes `set.discard` atomic, but this should be explicit).
+
+**Requirements:**
+- `FileWatcher.dequeue(path: str)` removes `path` from `self._queued`; no-op if not present
+- `_upload_worker` calls `watcher.dequeue(file_path)` after any upload exception
+- After dequeue, the next scan cycle re-evaluates stability and re-queues if still stable
+- Thread-safety: document the approach (Lock or GIL reliance) with a comment
+- Unit test: watcher queues file → upload fails → dequeue called → next scan re-queues
+
+```
+> Kludde:
+```
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
