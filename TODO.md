@@ -8428,6 +8428,805 @@ Phase 1. Deferred per project owner decision.
 
 ---
 
+## 1.26 — Sixth simulation: fresh-VM validation (1.24 fixes + 1.25 features)
+
+> **Goal:** Full end-to-end simulation on clean-installed Ubuntu VMs — no snapshot rollbacks.
+> Tests all changes since 1.23: three 1.24 bug fixes and three 1.25 features
+> (on-demand verify, log viewer, GUI access control via ADR-023).
+>
+> **Key change from 1.23 — ADR-023 dual-listener model:**
+> GUI routes (`/`, `/logs`, `/api/restore/*`, `/api/agents`, `/api/logs`) now bind to
+> the **LAN IP only** (default `gui_on_lan=true`, `gui_on_tailscale=false`).
+> Cluster API routes (`/api/cluster/*`, `/api/verify/*`) require a **Tailscale source IP**.
+> Every dashboard, catalog, restore, and log-viewer call in 1.26 uses the **LAN IP (10.99.0.x)**;
+> cluster and verify API calls use the **Tailscale IP**.
+>
+> **Logging improvement protocol:**
+> This is the first simulation run with a GUI log viewer. When a log message in the viewer
+> or in `journalctl` is unclear, lacks context, or would confuse a non-technical user:
+> 1. Record it in `1.26.1-issues.md` as `LOG-N` (separate numbering from `ISSUE-N`).
+> 2. If the fix is a message-text or log-level change only — apply inline, commit, restart,
+>    continue. Max 15 minutes per fix. Do not change control flow mid-simulation.
+> 3. If the fix requires structural change — defer to a post-sim task. Do not apply
+>    structural changes mid-run (avoids the 1.23 run-1 discard scenario).
+
+---
+
+### [ ] 1.26.1 — Pre-flight: test file migration + fresh VM provisioning
+
+**Reads:** `tests/integration/1.23.1-state.md` (test file checksums, section B)
+
+> **State file:** `tests/integration/1.26.1-state.md` — create fresh, update after each section.
+> This single file covers all five 1.26 parts, same pattern as 1.23.1-state.md.
+> **Issues file:** `tests/integration/1.26.1-issues.md` — `ISSUE-N` for code defects,
+> `LOG-N` for logging improvement candidates.
+
+**Why fresh VMs (not snapshot rollback):**
+Snapshot rollback carries whatever OS/package state existed when the snapshot was taken.
+A fresh Ubuntu install validates the path a real user follows: bare OS, no pre-existing
+packages, no Tailscale auth residue, no stale BackupBuddy config.
+
+---
+
+**A — Test file migration (Proxmox host, before any teardown)**
+
+Strategy: copy all test files to the Proxmox host (192.168.1.60) first.
+Keep **LXC 302** running until last — it holds `test-archive-large.tar.gz` (1 GB),
+the most expensive file to regenerate. Copy from 301 and 303 first as a safety net.
+
+```bash
+# On Proxmox host as root
+mkdir -p /tmp/testfiles-v6/{lxc301,lxc302,lxc303,lxc303-nested}
+
+# Step 1: LXC 301 — photos, ISO, "my document 2026.bin"
+pct exec 301 -- bash -c 'tar -C /home/testuser/backup-test -cf - .' \
+  | tar -C /tmp/testfiles-v6/lxc301 -xf -
+
+# Step 2: LXC 303 — docs, archive, nested files
+pct exec 303 -- bash -c 'tar -C /home/testuser/backup-test -cf - .' \
+  | tar -C /tmp/testfiles-v6/lxc303 -xf -
+pct exec 303 -- bash -c 'tar -C /home/testuser/nested-test -cf - .' \
+  | tar -C /tmp/testfiles-v6/lxc303-nested -xf -
+
+# Step 3: LXC 302 — earth-from-space.jpg + 1 GB tar.gz (last)
+pct exec 302 -- bash -c 'tar -C /home/testuser/backup-test -cf - .' \
+  | tar -C /tmp/testfiles-v6/lxc302 -xf -
+```
+
+Verify checksums against `1.23.1-state.md` § B:
+
+```bash
+find /tmp/testfiles-v6 -type f | sort | xargs sha256sum
+```
+
+**Stop if any checksum mismatches before proceeding to teardown.**
+
+> **State update:** Record checksum verification result in `1.26.1-state.md` § A.
+
+---
+
+**B — Delete all snapshots and destroy VMs/LXCs**
+
+Only after checksums verified on Proxmox host:
+
+```bash
+# List existing snapshots before deleting
+qm listsnapshot 101; qm listsnapshot 102; qm listsnapshot 103
+pct listsnapshot 301; pct listsnapshot 302; pct listsnapshot 303
+
+# Delete all snapshots (adjust snapshot names to match what exists)
+# qm delsnapshot 101 <snapshot-name> && ...
+
+# Stop and destroy all nodes
+for vmid in 101 102 103; do qm stop $vmid 2>/dev/null; qm destroy $vmid --purge; done
+for ctid in 301 302 303; do pct stop $ctid 2>/dev/null; pct destroy $ctid --purge; done
+```
+
+> **State update:** Confirm all nodes and snapshots destroyed.
+
+---
+
+**C — Provision fresh VMs and LXCs**
+
+Create in Proxmox web UI or CLI with Ubuntu 24.04 minimal.
+
+| ID | Type | Name | RAM | Disk | Role |
+|----|------|------|-----|------|------|
+| 101 | VM | gk-anders | 2 GB | 20 GB | Cluster founder |
+| 102 | VM | gk-bjorn | 2 GB | 20 GB | Joins via invite |
+| 103 | VM | gk-carina | 2 GB | 20 GB | Joins via invite |
+| 301 | LXC | agent-anders-pc | 512 MB | 8 GB | anders-laptop agent |
+| 302 | LXC | agent-anders-nas | 512 MB | 12 GB | carina-laptop agent (1 GB file) |
+| 303 | LXC | agent-bjorn-pc | 512 MB | 8 GB | bjorn-laptop agent |
+
+Install Ubuntu 24.04 server/minimal on each. Create user `testuser` on agent LXCs.
+
+**Recommended:** After Ubuntu install and before any BackupBuddy installation, take a snapshot
+of each node named `clean-ubuntu-v3`. This is a pre-code snapshot — avoids a full OS
+reinstall on future re-runs. No stale-code risk (see `feedback_snapshot_code_version.md`)
+because BackupBuddy has not been installed yet at this point.
+
+> **State update:** Record LAN IPs (10.99.0.x) assigned to each node.
+
+---
+
+**D — Tailscale setup on fresh VMs**
+
+Install and authenticate Tailscale on all 6 nodes:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up       # Follow auth URL or use a pre-auth key
+tailscale ip -4    # Record assigned IP
+```
+
+New VMs will receive new Tailscale IPs (different from 1.23). This is expected.
+The gatekeeper wizard detects the local Tailscale IP automatically.
+
+> **State update:** Record new Tailscale IPs for all 6 nodes.
+
+---
+
+**E — Transfer test files to new LXCs**
+
+```bash
+# LXC 301 — photos, ISO, "my document 2026.bin"
+pct exec 301 -- mkdir -p /home/testuser/backup-test
+tar -C /tmp/testfiles-v6/lxc301 -cf - . \
+  | pct exec 301 -- bash -c 'tar -C /home/testuser/backup-test -xf -'
+pct exec 301 -- chown -R testuser:testuser /home/testuser/backup-test
+
+# LXC 302 — earth-from-space.jpg + 1 GB tar.gz
+pct exec 302 -- mkdir -p /home/testuser/backup-test
+tar -C /tmp/testfiles-v6/lxc302 -cf - . \
+  | pct exec 302 -- bash -c 'tar -C /home/testuser/backup-test -xf -'
+pct exec 302 -- chown -R testuser:testuser /home/testuser/backup-test
+
+# LXC 303 — docs, archive, nested files
+pct exec 303 -- mkdir -p /home/testuser/backup-test /home/testuser/nested-test
+tar -C /tmp/testfiles-v6/lxc303 -cf - . \
+  | pct exec 303 -- bash -c 'tar -C /home/testuser/backup-test -xf -'
+tar -C /tmp/testfiles-v6/lxc303-nested -cf - . \
+  | pct exec 303 -- bash -c 'tar -C /home/testuser/nested-test -xf -'
+pct exec 303 -- chown -R testuser:testuser \
+  /home/testuser/backup-test /home/testuser/nested-test
+```
+
+Spot-check checksums on each LXC against `1.23.1-state.md` § B.
+
+> **State update:** Checksum verification on LXCs.
+
+**Completion criteria:**
+- [ ] All test file checksums verified on Proxmox host before any teardown
+- [ ] All 6 nodes destroyed; all snapshots deleted
+- [ ] Fresh Ubuntu 24.04 installed on all 6 nodes
+- [ ] `clean-ubuntu-v3` snapshot taken on each node (recommended, pre-BackupBuddy)
+- [ ] Tailscale installed and running; all IPs recorded in state file
+- [ ] Test files transferred to LXCs; checksums match `1.23.1-state.md` § B
+- [ ] Committed: `chore(test): 1.26.1 pre-flight done — fresh VMs provisioned`
+
+---
+
+### [ ] 1.26.2 — Cluster formation on fresh VMs
+
+> **Resume:** Read `1.26.1-state.md`. All 6 nodes provisioned with Ubuntu and Tailscale.
+> **State file:** `1.26.1-state.md` — continue updating.
+> **Issues file:** `1.26.1-issues.md` — `ISSUE-N` and `LOG-N`.
+>
+> **ADR-023 binding reminder:** After wizard + service restart, all GUI access
+> (dashboard, settings) uses the **LAN IP (10.99.0.x)**. Cluster join calls use
+> the **Tailscale IP** (the wizard sends `/api/cluster/join` to the Tailscale IP
+> of the founder — this is unchanged).
+
+---
+
+**A — Code deployment (all 3 GK VMs, before any wizard step)**
+
+Deploy BackupBuddy to HEAD on each gatekeeper. Never hot-swap mid-simulation.
+
+```bash
+# On each gatekeeper VM
+sudo git clone https://github.com/<repo>/BackupBuddy /opt/backup-buddy
+cd /opt/backup-buddy && sudo pip install -e .
+git log --oneline -1   # Record commit hash
+```
+
+> **State update:** HEAD commit hash on all three GK VMs.
+
+---
+
+**B — Anders install (cluster founder)**
+
+```bash
+sudo bash /opt/backup-buddy/gatekeeper.sh
+```
+
+Wizard via LAN IP (setup mode binds to LAN before gatekeeper.cfg exists):
+```bash
+# Step 1: display name
+curl -s -X POST http://<anders-lan-ip>:8080/api/onboarding/step/1 \
+  -H "Content-Type: application/json" -d '{"display_name": "Anders"}'
+# Steps 2-5: storage dir, confirm, network, finish
+```
+
+After wizard + service restart:
+- `curl -s -o /dev/null -w "%{http_code}" http://<anders-lan-ip>:8080/` → 200 (LAN)
+- `systemctl is-active backup-buddy-gatekeeper` → active
+- Record first invite code from `GET http://<anders-lan-ip>:8080/api/cluster/invites`
+
+> **State update:** Anders LAN IP, Tailscale IP, first invite code.
+
+---
+
+**C — Björn install (join)**
+
+```bash
+sudo bash /opt/backup-buddy/gatekeeper.sh
+```
+
+Wizard: provide gk-anders Tailscale IP and invite code at step 5.
+The wizard sends `/api/cluster/join` to the **Tailscale IP** — this is the service API route.
+
+After wizard:
+- Dashboard accessible at `http://<bjorn-lan-ip>:8080/`
+- `GET http://<anders-lan-ip>:8080/api/agents` → bjorn appears as member
+
+> **State update:** Björn LAN IP, Tailscale IP.
+
+---
+
+**D — Carina install (join)**
+
+Same wizard flow as Björn.
+
+> **State update:** Carina LAN IP, Tailscale IP.
+
+---
+
+**E — Idempotency tests (both 1.24.1 paths)**
+
+**E1 — Used invite + already a member (1.24.1 fix, original path):**
+
+Re-run wizard on gk-carina using the **same invite code** (now marked used):
+```bash
+sudo rm /var/lib/backup-buddy/root_dir.cap \
+        /var/lib/backup-buddy/onboarding_state.json \
+        /etc/backup-buddy/gatekeeper.cfg
+sudo systemctl restart backup-buddy-gatekeeper
+# Re-run wizard steps 1-5 with used invite code
+```
+
+Expected: step 5 returns 303 — Fix(C) in `join.py` handles used invite + existing member.
+
+**E2 — Fresh invite + already a member (1.24.1 fix, ISSUE-1 from 1.23):**
+
+Generate a **new unused** invite code on gk-anders dashboard.
+Re-run wizard on gk-carina (same reset as E1) with the fresh invite code:
+
+Expected: step 5 returns 303 — 1.24.1 fix handles fresh invite + existing member → success,
+not `IntegrityError`.
+
+If E2 returns HTTP 400 → ISSUE-1 regression, file in issues file.
+
+> **State update:** E1 and E2 results.
+
+---
+
+**F — Expired invite code test**
+
+Generate a new invite code on gk-anders. Expire it:
+
+```python
+# On gk-anders via Python sqlite3
+import sqlite3, time
+conn = sqlite3.connect('/var/lib/backup-buddy/cluster.db')
+conn.execute("UPDATE invites SET expires_at = ? WHERE code = ?",
+             (time.time() - 3600, '<code>'))
+conn.commit()
+```
+
+```bash
+curl -s -X POST http://<anders-tailscale-ip>:8080/api/cluster/join \
+  -H "Content-Type: application/json" \
+  -d '{"invite_code": "<code>", "node_id": "test-expire", ...}'
+```
+
+Expected: HTTP 400, body contains "expired".
+
+> **State update:** F result.
+
+---
+
+**G — All-three-dashboards-online**
+
+| Dashboard | URL (LAN) | online_count | Result |
+|-----------|-----------|-------------|--------|
+| Anders | http://\<anders-lan-ip\>:8080/ | 3/3 | — |
+| Björn | http://\<bjorn-lan-ip\>:8080/ | 3/3 | — |
+| Carina | http://\<carina-lan-ip\>:8080/ | 3/3 | — |
+
+**NightlyVerifier startup check (1.24.2 fix):**
+
+```bash
+journalctl -u backup-buddy-gatekeeper | grep -i "verify\|nightly"
+```
+
+Expected: "Nightly verify scheduler started" (or equivalent), **not** the old stub
+"Verify scheduler: pending implementation (task 1.13.2)".
+
+> **State update:** G result, NightlyVerifier log line.
+
+**Completion criteria:**
+- [ ] HEAD commit hash recorded; no code deployed before wizard
+- [ ] Anders, Björn, Carina wizard: all complete
+- [ ] E1 (used invite + existing member): 303 ✓
+- [ ] E2 (fresh invite + existing member): 303 ✓ — 1.24.1 verified
+- [ ] F (expired invite): 400 ✓
+- [ ] G (3/3 Online on all dashboards via LAN IP): PASS
+- [ ] NightlyVerifier startup log: scheduler started (not stub) ✓
+- [ ] LOG-N notes recorded if any messages were unclear
+- [ ] Committed: `chore(test): 1.26.2 cluster formation done`
+
+---
+
+### [ ] 1.26.3 — Agent setup + streaming upload + disk guard
+
+> **Resume:** Read `1.26.1-state.md`. All 3 GKs installed, cluster formed.
+> **State file:** `1.26.1-state.md` — continue updating.
+
+---
+
+**H1 — LXC 301 (agent-anders-pc / anders-laptop)**
+
+```bash
+pct exec 301 -- bash /opt/backup-buddy/agent.sh
+```
+
+`backup.cfg` on LXC 301:
+```
+[watcher]
+stability_minutes = 1
+paths = /home/testuser/backup-test
+```
+
+Token added to gk-anders, agent started.
+
+Test files: `test-photo-1.jpg`, `test-photo-2.jpg`, `test-photo-3.jpg`,
+`test-disk.iso`, `my document 2026.bin` (50 MB)
+
+---
+
+**H2 — LXC 303 (agent-bjorn-pc / bjorn-laptop)**
+
+`backup.cfg` on LXC 303:
+```
+[watcher]
+stability_minutes = 1
+paths = /home/testuser/backup-test
+       /home/testuser/nested-test
+```
+
+Test files: `test-archive.zip`, `test-document-1.docx`,
+`nested-test/subdir-a/nested-photo.bin`, `nested-test/subdir-a/nested-video.bin`,
+`nested-test/subdir-b/nested-doc.bin`
+
+---
+
+**H3 — LXC 302 (agent-anders-nas / carina-laptop)**
+
+`backup.cfg` on LXC 302:
+```
+[watcher]
+stability_minutes = 1
+paths = /home/testuser/backup-test
+```
+
+Test files: `test-document-2.docx`, `earth-from-space.jpg`,
+`test-archive-large.tar.gz` (1 GB)
+
+---
+
+**I — Memory monitoring during 1 GB upload**
+
+Start monitors before launching the carina agent (LXC 302):
+
+```bash
+# LXC 302
+pct exec 302 -- bash -c \
+  'while true; do grep MemAvailable /proc/meminfo >> /tmp/mem-agent.log; sleep 5; done' &
+
+# VM 103 (gk-carina)
+ssh <carina-lan-ip> \
+  'while true; do grep MemAvailable /proc/meminfo >> /tmp/mem-gk.log; sleep 5; done' &
+```
+
+Start agent. Watch for 1 GB upload completion:
+```bash
+pct exec 302 -- journalctl -u backup-buddy-agent -f | grep -E "SUCCESS|ERROR|1073"
+```
+
+After upload: check minimum MemAvailable and `dmesg | grep -i oom` on both nodes.
+Expected: no OOM; streaming confirmed (MemAvailable stays positive throughout).
+
+> **State update:** I — memory stats, OOM check, upload result.
+
+---
+
+**J — Backup monitoring and catalog verification**
+
+Wait until all agents show SUCCESS for all files.
+
+Verify catalog via **LAN IP** (not Tailscale):
+
+```bash
+curl -s 'http://<anders-lan-ip>:8080/api/restore/catalog?q=2026'
+# Expected: "my document 2026.bin" present, correct path and size
+
+curl -s 'http://<bjorn-lan-ip>:8080/api/restore/catalog?q=nested'
+# Expected: all 3 nested files present
+
+curl -s 'http://<carina-lan-ip>:8080/api/restore/catalog?q=archive'
+# Expected: test-archive-large.tar.gz present
+```
+
+J1 — All agent logs: all files SUCCESS
+J2 — "my document 2026.bin" in catalog with correct path
+J3 — 3 nested files in catalog with full paths (subdir-a, subdir-b)
+J4 — Dashboard agent file counts correct (via LAN IP)
+
+> **State update:** J1-J4 results.
+
+---
+
+**L — Disk space guard test + upload re-queue regression (1.24.3)**
+
+**L1 — Mount 100 MB tmpfs on gk-anders:**
+
+```bash
+sudo mount -t tmpfs -o size=100M tmpfs /var/lib/backup-buddy/upload_tmp/
+df -h /var/lib/backup-buddy/upload_tmp/
+```
+
+**L2 — Create 200 MB file on agent-anders-pc:**
+
+```bash
+pct exec 301 -- dd if=/dev/urandom \
+  of=/home/testuser/backup-test/disk-guard-test.bin bs=1M count=200
+```
+
+**L3 — Verify HTTP 507:**
+
+```bash
+journalctl -u backup-buddy-gatekeeper | grep -E "507|upload_tmp|insufficient"
+journalctl -u backup-buddy-agent | grep -E "ERROR|failed|507"
+```
+
+Expected:
+- GK log: "Upload rejected — insufficient disk space in upload_tmp/" with byte counts
+- Agent log: upload failure message (if message lacks file name → `LOG-N`)
+- Agent service: `active` (no crash)
+
+**L4 — ISSUE-3 regression (1.24.3 fix — no agent restart needed):**
+
+```bash
+sudo umount /var/lib/backup-buddy/upload_tmp/
+# Wait one watcher cycle (~60 s), then check agent log
+journalctl -u backup-buddy-agent -f | grep -E "SUCCESS|re-queue|queued|retry"
+```
+
+Expected (1.24.3 fix): `disk-guard-test.bin` uploads successfully on next cycle
+**without any agent restart**. If a manual restart is still required → `ISSUE-N`.
+
+> **State update:** L1-L4 results.
+
+**Completion criteria:**
+- [ ] All 3 agents installed, all files SUCCESS
+- [ ] 1 GB upload: no OOM on agent or gatekeeper; streaming confirmed
+- [ ] Catalog verified via LAN IP on all 3 gatekeepers
+- [ ] HTTP 507 returned correctly for oversized upload
+- [ ] ISSUE-3 regression: file re-queued automatically (no restart) ✓
+- [ ] LOG-N improvements noted if agent failure message was unclear
+- [ ] Committed: `chore(test): 1.26.3 agent setup and upload done`
+
+---
+
+### [ ] 1.26.4 — 1.25 feature verification
+
+> **Resume:** Read `1.26.1-state.md`. All agents running, all files backed up.
+> **State file:** `1.26.1-state.md` — continue updating.
+>
+> This is the primary logging audit section. Open the log viewer on each gatekeeper
+> after each major operation and review messages critically for clarity and usefulness.
+
+---
+
+**P — On-demand verify (1.25.1)**
+
+**P1 — CLI trigger:**
+
+```bash
+sudo /opt/backup-buddy/.venv/bin/python -m gatekeeper verify --now
+```
+
+Expected: exits 0; logs show all four verify layers completing; output visible
+in `/var/lib/backup-buddy/gatekeeper.log` after the run.
+
+**P2 — API trigger (non-blocking):**
+
+```bash
+curl -s -X POST http://<anders-tailscale-ip>:8080/api/verify/run-now
+```
+
+Expected: HTTP 202, `{"status": "started", "triggered_at": "..."}`
+
+**P3 — Concurrent call returns 429:**
+
+```bash
+curl -s -X POST http://<anders-tailscale-ip>:8080/api/verify/run-now &
+sleep 0.2
+curl -s -X POST http://<anders-tailscale-ip>:8080/api/verify/run-now
+```
+
+Expected: first 202, second 429 "verify already in progress".
+
+**P4 — Status endpoint:**
+
+```bash
+curl -s http://<anders-tailscale-ip>:8080/api/verify/status
+```
+
+Expected: `{"last_run_at": ..., "result": "passed"|"failed", "layers": [...]}`
+
+> **State update:** P1-P4 results.
+
+---
+
+**Q — Log viewer (1.25.2) + logging audit**
+
+**Q1 — Log file exists and has content:**
+
+```bash
+ls -lh /var/lib/backup-buddy/gatekeeper.log
+wc -l /var/lib/backup-buddy/gatekeeper.log
+```
+
+Expected: file exists, non-empty after a full simulation run.
+
+**Q2 — `/logs` page loads:**
+
+`http://<anders-lan-ip>:8080/logs` → page loads, shows log lines.
+
+**Q3 — Level filter:**
+
+```bash
+curl -s 'http://<anders-lan-ip>:8080/api/logs?level=WARNING'
+```
+
+Expected: only WARNING and ERROR lines returned. Spot-check 3-5 entries.
+
+**Q4 — Component filter:**
+
+```bash
+curl -s 'http://<anders-lan-ip>:8080/api/logs?component=verify'
+curl -s 'http://<anders-lan-ip>:8080/api/logs?component=watcher'
+curl -s 'http://<anders-lan-ip>:8080/api/logs?component=cluster'
+```
+
+Expected: each returns only lines from that component.
+
+**Q5 — Logging audit (the improvement pass):**
+
+Open `/logs` on each of the three gatekeepers after the verify run in P1-P2.
+Read through all visible log messages as a non-technical homelab user would.
+
+Look specifically for:
+- Upload failures: does the message include the file name, or just "OSError"?
+- Upload re-queue (after L4): is there a visible "re-queuing file for retry" line?
+- Verify layers: are pass/fail results labeled per layer, or is output cryptic?
+- Cluster join/sync: does the log confirm success in plain language?
+- Agent identification: does the GK log always show which agent the message relates to?
+- Any `__main__` logger names that should be module-specific names
+
+For each finding: record as `LOG-N` in issues file.
+Apply text-only fixes inline (commit + restart + confirm message changed).
+Defer structural fixes to a follow-up task.
+
+> **State update:** Q1-Q5 results + list of LOG-N items found and applied/deferred.
+
+---
+
+**R — GUI access control (1.25.3 — ADR-023 network test)**
+
+**R1 — GUI reachable from LAN source:**
+
+```bash
+# From dev machine or Proxmox host (LAN source)
+curl -s -o /dev/null -w "%{http_code}" http://<anders-lan-ip>:8080/
+```
+
+Expected: 200
+
+**R2 — GUI blocked from Tailscale source (tested from gk-bjorn):**
+
+```bash
+# SSH to gk-bjorn, then:
+curl -s -o /dev/null -w "%{http_code}" http://<anders-tailscale-ip>:8080/
+```
+
+Expected: 404 (not 403 — information-disclosure prevention per ADR-023)
+
+**R3 — Restore API blocked from Tailscale source:**
+
+```bash
+# From gk-bjorn:
+curl -s -o /dev/null -w "%{http_code}" \
+  "http://<anders-tailscale-ip>:8080/api/restore/catalog?q=photo"
+```
+
+Expected: 404
+
+**R4 — Cluster API still reachable from Tailscale source:**
+
+```bash
+# From gk-bjorn:
+curl -s -o /dev/null -w "%{http_code}" \
+  http://<anders-tailscale-ip>:8080/api/cluster/sync/status
+```
+
+Expected: 200, 405, or any non-404 response (connection must be accepted, route is service-prefixed)
+
+**R5 — Verify API reachable from Tailscale source:**
+
+```bash
+curl -s -X POST http://<anders-tailscale-ip>:8080/api/verify/run-now
+```
+
+Expected: 202 or 429 — not 404
+
+> **State update:** R1-R5 results.
+
+**Completion criteria:**
+- [ ] P1 (CLI verify): exits 0, all 4 layers logged ✓
+- [ ] P2 (API verify): HTTP 202 ✓
+- [ ] P3 (concurrent): second call returns 429 ✓
+- [ ] P4 (status): last-run result returned ✓
+- [ ] Q1 (log file exists): `/var/lib/backup-buddy/gatekeeper.log` present and non-empty ✓
+- [ ] Q2 (log page): `/logs` loads via LAN IP ✓
+- [ ] Q3 (level filter): WARNING filter works ✓
+- [ ] Q4 (component filters): verify, watcher, cluster filters return correct lines ✓
+- [ ] Q5 (logging audit): all LOG-N items recorded; text-only fixes applied ✓
+- [ ] R1 (GUI reachable from LAN): 200 ✓
+- [ ] R2 (GUI blocked from Tailscale): 404 ✓
+- [ ] R3 (restore API blocked from Tailscale): 404 ✓
+- [ ] R4 (cluster API reachable from Tailscale): not blocked ✓
+- [ ] R5 (verify API reachable from Tailscale): not blocked ✓
+- [ ] Committed: `chore(test): 1.26.4 feature verification done`
+
+---
+
+### [ ] 1.26.5 — Extended restore + resilience + final audit
+
+> **Resume:** Read `1.26.1-state.md`. 1.25 features verified. All files backed up.
+> **State file:** `1.26.1-state.md` — final updates.
+>
+> **ADR-023 binding reminder:** All restore calls use `POST /api/restore/file` on the
+> **LAN IP**. The restore API is a GUI route — it is blocked from Tailscale source.
+
+---
+
+**K — Restore scenarios**
+
+All restores via `POST http://<gk-lan-ip>:8080/api/restore/file` or the `/restore` GUI page.
+
+**K1 — Baseline restore (one file per gatekeeper):**
+
+| GK | File | Dest | Expected SHA-256 |
+|----|------|------|-----------------|
+| Anders (LAN) | test-photo-2.jpg | /tmp/restored-v6/ | 4c6bd9ed1d9950d3b46365e2129fcf1087a76ea7907e536853f13afa082ead97 |
+| Björn (LAN) | test-document-1.docx | /tmp/restored-v6/ | b60eef0692133593d2382691b10381c57b6e2bcd65a0b2c35acb9bc7221c8c80 |
+| Carina (LAN) | earth-from-space.jpg | /tmp/restored-v6/ | 3f55578a3c58509029c6a1ec88c683199f585ea9ffe974efd4265aec314156fb |
+
+**K2 — Alternate folder restore:**
+
+File: `test-archive.zip` from bjorn-laptop
+Dest: `/tmp/alternate-restore/` (completely different from original path)
+Expected SHA-256: `d0a641015c7dd9d3c7b80bdc633fd37ff32ccc2a2f908e2ab5ad0738f397b376`
+
+**K3 — Restore after file deleted from agent:**
+
+Delete `/home/testuser/backup-test/test-photo-1.jpg` from LXC 301.
+Restore to `/tmp/deleted-restore/`.
+Expected SHA-256: `344c994439b97711afb8d46ba2812a81c62ab7c9c331e69f4731acfa319b10eb`
+
+**K4 — Nested folder restore, subdirectory structure preserved:**
+
+Restore `/home/testuser/nested-test` from bjorn-laptop to `/tmp/nested-restore/`.
+Verify:
+- `/tmp/nested-restore/subdir-a/nested-photo.bin` — `5395e9710dcc26213e5f789d6b3a281ce2d201152e8c9ae9b5aa9755dedc799e`
+- `/tmp/nested-restore/subdir-a/nested-video.bin` — `f99f8ff52efa8002709f23de9897ddbcc5668e2afe33dc9ef9541b89abe70f1a`
+- `/tmp/nested-restore/subdir-b/nested-doc.bin` — `885c26fa6a01816e1e0b4647c37366de65bf9b69767018a809cd3c00fd1bcc3c`
+
+**K5 — File with spaces in name:**
+
+Restore `my document 2026.bin` to `/tmp/spaces-restore/`.
+Expected SHA-256: `9e7c85b7d5e6024dc95d12bf61e4b411edc27777152e62714651edd3eb8bfbc2`
+
+**K6 — Carina's 1 GB tar.gz restore:**
+
+Restore `test-archive-large.tar.gz` to `/tmp/restored-v6/carina/`.
+Record restore time and any log messages about progress.
+Expected SHA-256: `4b39b68d93bb7c9fac3ce8848f24973d418e52bea3d1da8d4fa84da6ecc45055`
+
+> **State update:** K1-K6 results with checksums and restore times.
+
+---
+
+**M — Resilience test**
+
+Stop VM 101 (gk-anders): `qm stop 101`
+
+Verify restore works from remaining two nodes (using their LAN IPs):
+
+| Dashboard | File | Expected SHA-256 | Result |
+|-----------|------|-----------------|--------|
+| Björn (LAN) | test-document-1.docx | b60eef0692133593d2382691b10381c57b6e2bcd65a0b2c35acb9bc7221c8c80 | — |
+| Carina (LAN) | earth-from-space.jpg | 3f55578a3c58509029c6a1ec88c683199f585ea9ffe974efd4265aec314156fb | — |
+
+Start gk-anders: `qm start 101`
+Verify all 3 dashboards show 3/3 Online (via each node's LAN IP).
+
+> **State update:** M result.
+
+---
+
+**N — INSTALL.md and RESTORE.md audit**
+
+**N1 — INSTALL.md:** Walk each section for accuracy. Key ADR-023 changes to verify:
+- Does the post-wizard access instruction say **LAN IP** (not Tailscale IP)?
+- Is there a note that the GUI is not reachable from cluster peer Tailscale IPs by default?
+- Does §8 (restore procedure) reference the LAN IP for restore calls?
+- Is `gui_on_lan` / `gui_on_tailscale` documented?
+
+**N2 — RESTORE.md:** Verify all endpoints and examples reference the LAN IP.
+
+Record discrepancies. Commit corrections separately:
+`fix(docs): update INSTALL.md and RESTORE.md for ADR-023 LAN GUI access`
+
+> **State update:** N1-N2 results.
+
+---
+
+**O — Final checklist (Phase 1 readiness)**
+
+| Check | Result |
+|-------|--------|
+| Fresh Ubuntu install — no snapshot residue | — |
+| All 3 GK wizards completed from HEAD code | — |
+| E1: used invite + existing member → 303 (1.24.1) | — |
+| E2: fresh invite + existing member → 303 (1.24.1 new path) | — |
+| NightlyVerifier wired at startup (1.24.2) | — |
+| Upload re-queue without restart (1.24.3) | — |
+| On-demand verify CLI + API + status + 429 (1.25.1) | — |
+| Log viewer: page, filters, log file (1.25.2) | — |
+| Logging audit: LOG-N items found, text fixes applied (1.25.2) | — |
+| GUI blocked from Tailscale; reachable from LAN (1.25.3) | — |
+| Cluster + verify APIs reachable from Tailscale (1.25.3) | — |
+| K1-K6 restore scenarios: all checksums match | — |
+| Resilience: restore with one node down | — |
+| INSTALL.md + RESTORE.md: ADR-023 access model documented | — |
+
+**Completion criteria:**
+- [ ] K1-K6 checksums match `1.23.1-state.md` § B
+- [ ] M resilience: PASS
+- [ ] N docs audit: complete; corrections committed if needed
+- [ ] O checklist: complete
+- [ ] `1.26.1-state.md` updated with all final statuses
+- [ ] Issues file committed: `chore(test): 1.26.1 issues file — N issues, M log improvements`
+- [ ] Mark 1.26.1–1.26.5 as `[x]` in TODO.md
+- [ ] Final commit: `chore(test): mark 1.26.1-1.26.5 done — sixth sim complete`
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
