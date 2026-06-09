@@ -8302,6 +8302,86 @@ with level filtering and component filtering, without changing how or where logs
 
 ---
 
+### [ ] 1.25.3 — GUI access control: who can reach the gatekeeper web interface?
+
+**Reads:** DECISIONS.md (check for existing ADR), project-docs/architecture.md
+**Depends on:** 1.25.2 (log viewer exposes per-node data — triggered this review)
+**Decision required before implementation** — see below.
+
+**Background:**
+
+The gatekeeper GUI currently binds to the Tailscale interface and is protected only
+by `TailscaleOnlyMiddleware`, which accepts any request whose source IP falls in the
+Tailscale CGNAT block (`100.64.0.0/10`).
+
+This means **every node in the Tailscale network can reach every other node's GUI**,
+including the log viewer, dashboard, settings, and restore pages.
+
+This was not the original intent. The owner's expectation is that the GUI is a
+local-operator interface — visible to the node operator, not to cluster peers.
+
+**The conflict:**
+
+Two different server roles share the same TCP listener:
+
+| Route group | Who should be able to call it |
+|---|---|
+| GUI pages (`/`, `/logs`, `/restore`, `/settings`, `/buddies`, `/agents`) | Local operator only |
+| Cluster API (`/api/cluster/join`, `/api/cluster/sync/*`) | Other gatekeepers over Tailscale |
+
+These are currently served on the same port (default 8080, Tailscale IP).
+Solving the access problem cleanly likely means separating them, or adding
+per-route authentication.
+
+**Options to evaluate:**
+
+1. **Split listeners** — GUI on LAN interface (operator access from home network),
+   cluster API stays on Tailscale interface. Same pattern as the existing agent API
+   split (ADR-017). Simple, no auth needed. Downside: operator must be on LAN.
+
+2. **Tailscale ACL-based restriction** — GUI stays on Tailscale but the operator
+   configures a Tailscale ACL that blocks peer gatekeepers from reaching port 8080.
+   No code change required. Downside: requires Tailscale admin access; fragile if
+   ACL is misconfigured; out of scope for BackupBuddy to document or enforce.
+
+3. **Session-based GUI authentication** — add a login step (passphrase or token)
+   that gates all `/` routes. Cluster API remains unauthenticated on Tailscale.
+   More effort; requires storing a credential; but makes GUI safe regardless of
+   Tailscale topology.
+
+4. **Tailscale node identity check** — use the Tailscale local API (`/localapi/v0/whois`)
+   to verify that the connecting IP belongs to *this node's* Tailscale identity, not
+   a peer. Elegant but couples the code tightly to Tailscale's local API.
+
+**Decision required before implementing:**
+
+Before writing any code, determine:
+1. Should this be formalised as an ADR (it touches a core security boundary)?
+   If yes, write the ADR first and update DECISIONS.md.
+2. Which option above is chosen — or is a different approach preferred?
+
+Flag to project owner: this is an architectural decision, not just a task.
+The author recommends **Option 1 (split listeners)** as it is the simplest,
+consistent with the existing agent API separation (ADR-017), and requires no
+new credential management. The operator trades remote GUI access for clear
+isolation — a good trade for a homelab tool.
+
+**If Option 1 is chosen, scope of work:**
+- Add a `[web] lan_bind = true` config option (default `false` for backwards compat)
+  or make it the new default with an explicit opt-in for Tailscale GUI access
+- Move GUI router to LAN listener; leave cluster API routes on Tailscale listener
+- Update `TailscaleOnlyMiddleware` to apply only to the cluster API routes
+- Update `project-docs/architecture.md` and `project-docs/configuration.md`
+- Write or update the relevant ADR
+
+**Acceptance criteria (Option 1 — to be confirmed):**
+- GUI pages are not reachable from other cluster members' Tailscale IPs
+- Cluster API endpoints (`/api/cluster/*`) remain reachable over Tailscale
+- Operator can reach the GUI from a browser on the local LAN
+- Configuration documented; existing installs informed of the change
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
