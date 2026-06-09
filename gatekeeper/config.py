@@ -181,7 +181,16 @@ class NotifyConfig(BaseModel):
 class WebConfig(BaseModel):
     enabled: bool = True
     port: int = 8080
-    bind: str = "tailscale"  # literal selector, not an IP address
+    # gui_on_lan: bind the GUI to the LAN interface (default: true).
+    # The operator accesses the GUI from inside their own home network.
+    # Cluster peers on other Tailscale nodes cannot reach this listener.
+    gui_on_lan: bool = True
+    # gui_on_tailscale: also bind the GUI to the Tailscale interface (default: false).
+    # Enables remote GUI access from other Tailscale devices (e.g. a laptop away from home).
+    # When true, cluster peers can also reach the GUI over Tailscale — enable only if needed.
+    # Setting both gui_on_lan and gui_on_tailscale to false disables the GUI entirely.
+    # The Tailscale listener continues to serve cluster API routes regardless of these flags.
+    gui_on_tailscale: bool = False
 
 
 class AgentApiConfig(BaseModel):
@@ -394,7 +403,8 @@ def _parse_ini(parser: configparser.ConfigParser) -> GatekeeperConfig:
     web = WebConfig(
         enabled=_bool(web_raw.get("enabled", "true")),
         port=int(web_raw.get("port", 8080)),
-        bind=web_raw.get("bind", "tailscale"),
+        gui_on_lan=_bool(web_raw.get("gui_on_lan", "true")),
+        gui_on_tailscale=_bool(web_raw.get("gui_on_tailscale", "false")),
     )
 
     # [agent_api]

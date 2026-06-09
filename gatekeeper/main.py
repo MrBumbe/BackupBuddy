@@ -817,7 +817,12 @@ def _create_app() -> FastAPI:
     if _state.get("setup_mode"):
         setup_onboarding_app(app)
     else:
-        setup_gui(app)
+        cfg = _state.get("config")
+        setup_gui(
+            app,
+            gui_on_lan=cfg.web.gui_on_lan if cfg else True,
+            gui_on_tailscale=cfg.web.gui_on_tailscale if cfg else False,
+        )
     return app
 
 
@@ -1011,12 +1016,27 @@ async def _run_servers(
     agent_host: str | None,
     agent_port: int,
     log_level: str,
+    gui_lan_host: str | None = None,
 ) -> None:
-    """Run GUI and (optionally) agent API servers concurrently."""
+    """Run GUI and (optionally) agent API and LAN GUI servers concurrently.
+
+    gui_host (Tailscale IP) always starts — serves cluster API routes and GUI if
+    gui_on_tailscale is enabled. gui_lan_host, when set, starts a second Uvicorn
+    server on the LAN interface with lifespan="off" so that startup/shutdown hooks
+    run only once on the primary server (ADR-017, ADR-023).
+    """
     gui_cfg = uvicorn.Config(
         gui_app, host=gui_host, port=gui_port, log_level=log_level
     )
     coroutines = [uvicorn.Server(gui_cfg).serve()]
+
+    if gui_lan_host is not None:
+        # Second listener on LAN — lifespan="off" to avoid double-initialisation
+        gui_lan_cfg = uvicorn.Config(
+            gui_app, host=gui_lan_host, port=gui_port,
+            log_level=log_level, lifespan="off",
+        )
+        coroutines.append(uvicorn.Server(gui_lan_cfg).serve())
 
     if agent_app is not None and agent_host is not None:
         agent_cfg = uvicorn.Config(
@@ -1312,12 +1332,40 @@ def main() -> None:
             )
             agent_app = _create_agent_api_app(config, data_dir)
 
-    # GUI binds to Tailscale only; agent API binds to LAN only (ADR-002, ADR-017)
+    # Determine GUI listener(s) per ADR-023.
+    # The Tailscale listener always starts (cluster API).
+    # The LAN listener starts only when gui_on_lan = true and a LAN IP is available.
+    gui_lan_host: str | None = None
+    if config.web.gui_on_lan:
+        if lan_ip is None:
+            logger.warning(
+                "gui_on_lan = true but no LAN interface found — "
+                "GUI will not be available on LAN"
+            )
+        else:
+            gui_lan_host = lan_ip
+            logger.info("GUI on LAN: http://%s:%d", lan_ip, config.web.port)
+
+    if config.web.gui_on_tailscale:
+        logger.info(
+            "GUI on Tailscale: http://%s:%d", tailscale_ip, config.web.port
+        )
+
+    if not config.web.gui_on_lan and not config.web.gui_on_tailscale:
+        logger.warning(
+            "GUI is disabled — both gui_on_lan and gui_on_tailscale are false. "
+            "Cluster API on %s:%d continues to operate normally.",
+            tailscale_ip,
+            config.web.port,
+        )
+
+    # Cluster API always binds to Tailscale; agent API to LAN only (ADR-017, ADR-023)
     asyncio.run(
         _run_servers(
             gui_app=gui_app,
             gui_host=tailscale_ip,
             gui_port=config.web.port,
+            gui_lan_host=gui_lan_host,
             agent_app=agent_app,
             agent_host=lan_ip,
             agent_port=config.agent_api.port,

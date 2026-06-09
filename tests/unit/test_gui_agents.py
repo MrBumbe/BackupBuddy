@@ -94,7 +94,7 @@ def _make_app(
     recent_events: list[dict] | None = None,
 ) -> FastAPI:
     app = FastAPI()
-    setup_gui(app)
+    setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
 
     app.state.setup_required = setup_required
     app.state.config = _make_config()
@@ -129,12 +129,12 @@ class TestAgentsSetupMode:
         assert r.json()["setup_required"] is True
 
 
-# ── Tailscale guard ───────────────────────────────────────────────────────────
+# ── Access control (test helper uses gui_on_lan=True, gui_on_tailscale=True) ──
 
-class TestAgentsTailscaleGuard:
-    def test_rejects_non_tailscale_ip(self):
+class TestAgentsAccessControl:
+    def test_accepts_lan_ip(self):
         client = _lan_client(_make_app())
-        assert client.get("/agents").status_code == 404
+        assert client.get("/agents").status_code == 200
 
     def test_accepts_tailscale_ip(self):
         client = _ts_client(_make_app())

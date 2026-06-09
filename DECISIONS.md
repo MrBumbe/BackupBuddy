@@ -57,7 +57,9 @@ gatekeeper nodes. No direct TCP/IP connections between home networks.
 - Tailscale availability is a dependency (outage affects new node discovery,
   but existing connections between nodes may persist via direct WireGuard)
 - Tailscale join and cluster join are two separate steps (Phase 1 decision)
-- The gatekeeper GUI must bind exclusively to the Tailscale interface
+- All cluster API traffic (peer-to-peer sync, verify triggers, status) travels
+  exclusively over the Tailscale interface — this is unconditional
+- GUI binding is configurable via `gui_on_lan` / `gui_on_tailscale` — see ADR-023
 
 **Not in scope:** we do not integrate with the Tailscale API for automated
 device enrollment (Phase 1). Users handle Tailscale setup manually.
@@ -484,36 +486,47 @@ tested end-to-end per docs/testing.md.
 
 ---
 
-## ADR-017 — Dual-listener architecture: Tailscale GUI + LAN agent API
+## ADR-017 — Dual-listener architecture: Tailscale cluster API + LAN agent API
 
-**Status:** Accepted
+**Status:** Accepted (updated by ADR-023 — GUI binding is now configurable)
 
-**Decision:** The gatekeeper runs two independent HTTP servers:
+**Decision:** The gatekeeper runs up to three independent HTTP servers:
 
-1. **GUI / cluster API** — bound to the Tailscale IP, port 8080 (default).
-   Handles the web GUI, cluster-to-cluster communication, and any endpoint
-   that buddies in other home networks need to reach via Tailscale.
+1. **Cluster API (always on)** — bound to the Tailscale IP, port 8080 (default).
+   Handles all cluster-to-cluster communication and any service endpoint that
+   buddies in other home networks need to reach via Tailscale:
+   `/api/cluster/*`, `/api/verify/*`, `/api/status`.
+   Also serves the GUI if `gui_on_tailscale = true` (default: false).
 
-2. **Agent API** — bound to the local LAN IP, port 8081 (default).
+2. **GUI on LAN (default on)** — bound to the local LAN IP, port 8080 (default).
+   Started when `gui_on_lan = true` (default). Serves GUI routes only;
+   service routes are inaccessible from this listener (AccessControlMiddleware).
+   Started as a second Uvicorn server on the same FastAPI app, with
+   `lifespan="off"` to avoid running startup/shutdown hooks twice.
+
+3. **Agent API** — bound to the local LAN IP, port 8081 (default).
    Handles agent registration, fragment upload, and lifeboat distribution.
    Accepts connections from the local subnet only; never reachable via
    Tailscale or the public internet.
 
-Both servers are started with `asyncio.gather()` inside a single process.
+Servers 1 and 3 are always started; server 2 is conditional on `gui_on_lan`.
+All are started with `asyncio.gather()` inside a single process.
 
 **Rationale:**
-- SECURITY.md §3 requires the GUI to bind to Tailscale only, but agents
-  on the home LAN cannot reach the Tailscale interface.
-- Separating the two listeners enforces the network boundary in code:
-  a compromised cluster node cannot reach the agent API even if it has
-  Tailscale access to the gatekeeper.
-- Binding each server to a specific interface is simpler and more auditable
-  than a single 0.0.0.0 server with runtime IP-filtering middleware.
+- Agents on the home LAN cannot reach the Tailscale interface, so the agent
+  API must be on LAN (unchanged from original ADR-017).
+- The cluster API must remain on Tailscale so peers can always reach it,
+  regardless of the user's GUI binding preferences (see ADR-023).
+- The GUI defaulting to LAN means the operator accesses the GUI from inside
+  their own home network — the most natural setup for a homelab appliance.
+  Cluster peers on Tailscale cannot reach the GUI by default.
+- Using `lifespan="off"` for the second Uvicorn server ensures the FastAPI
+  lifespan (database init, Tahoe startup, background schedulers) runs exactly
+  once, on the primary Tailscale-bound server.
 
 **Consequences:**
-- The gatekeeper detects its LAN IP at startup using psutil (same library
-  used for Tailscale detection). If no LAN IP is found, the agent API is
-  skipped with a warning — the gatekeeper still starts in GUI-only mode.
+- The gatekeeper detects its LAN IP at startup using psutil. If no LAN IP is
+  found and `gui_on_lan = true`, the LAN GUI listener is skipped with a warning.
 - The agent API is only activated when `[agent_api] token` is set in
   gatekeeper.cfg. An empty token disables the agent API.
 - Agent token is stored in plaintext in both backup.cfg and gatekeeper.cfg
@@ -522,6 +535,7 @@ Both servers are started with `asyncio.gather()` inside a single process.
   validated with `secrets.compare_digest` to prevent timing attacks.
 - Agent → gatekeeper communication uses the LAN URL (e.g. http://192.168.1.50:8081).
   Cluster → cluster communication uses Tailscale hostnames.
+- See ADR-023 for full details on GUI binding flags and route classification.
 
 ---
 
@@ -757,6 +771,113 @@ benefit and only increases recovery risk.
 - The Lifeboat section shows a download link whenever `recovery_kit.enc` exists.
 - If the file is absent (disaster scenario), the route returns 404 with a plain
   error message — no Tahoe internals exposed.
+
+---
+
+## ADR-023 — Configurable GUI binding: gui_on_lan / gui_on_tailscale
+
+**Status:** Accepted
+
+**Supersedes:** ADR-002 (partial — cluster API remains Tailscale-only; GUI binding
+is now user-configurable rather than fixed to Tailscale).
+**Updates:** ADR-017 (adds LAN GUI as an optional third listener).
+
+**Context:**
+
+The original design bound the entire port-8080 server to the Tailscale interface,
+protecting the GUI from external access. This worked but had an unintended consequence:
+all 250+ Tailscale CGNAT addresses (100.64.0.0/10) could reach the GUI — meaning that
+cluster peers, who are legitimately on the Tailscale network, could access the log
+viewer, settings page, restore UI, and any other operator-facing GUI.
+
+The `TailscaleOnlyMiddleware` protected against the public internet but provided no
+separation between "my own operator session" and "another cluster member's gatekeeper
+reaching my GUI over Tailscale".
+
+**Decision:**
+
+Replace the fixed Tailscale-only GUI binding with two independent boolean flags in
+`gatekeeper.cfg`:
+
+```ini
+[web]
+gui_on_lan        = true   # bind GUI to LAN interface (192.168.x.x) — default ON
+gui_on_tailscale  = false  # also bind GUI to Tailscale interface — default OFF
+```
+
+- **`gui_on_lan = true`** (default): a second Uvicorn server starts on the LAN IP,
+  serving only GUI routes. The operator accesses the GUI from inside their own home
+  network. Cluster peers on Tailscale cannot reach this listener.
+
+- **`gui_on_tailscale = false`** (default): the Tailscale listener does NOT serve GUI
+  routes. Only service routes (`/api/cluster/*`, `/api/verify/*`, `/api/status`) are
+  accessible on the Tailscale interface. This prevents cluster peers from reaching the
+  GUI even though they share the same Tailscale network.
+
+- **Both true**: GUI is reachable from both LAN and Tailscale (e.g. for a user who
+  wants remote GUI access via Tailscale subnet routing from a laptop).
+
+- **Both false**: GUI is completely disabled. The Tailscale listener continues to
+  serve cluster API routes. The operator is warned at startup that the GUI is unreachable.
+
+**The Tailscale listener is unconditional and unaffected by these flags.**
+It always starts, always serves cluster API routes, and is required for cluster
+communication. These flags govern only the GUI — nothing else.
+
+**Route classification:**
+
+| Route prefix              | Type         | Access rule |
+|---------------------------|--------------|-------------|
+| `/api/cluster/*`          | Service      | Tailscale source IP required (always) |
+| `/api/verify/*`           | Service      | Tailscale source IP required (always) |
+| `/api/status`             | Service      | Tailscale source IP required (always) |
+| Everything else (GUI)     | GUI          | Governed by `gui_on_lan` / `gui_on_tailscale` |
+
+GUI routes accessed from a non-Tailscale IP are allowed only when `gui_on_lan = true`.
+GUI routes accessed from a Tailscale IP are allowed only when `gui_on_tailscale = true`.
+Service routes always require a Tailscale source IP regardless of GUI flag values.
+
+**Implementation:**
+
+- `WebConfig` in `config.py` replaces the unused `bind: str` field with
+  `gui_on_lan: bool = True` and `gui_on_tailscale: bool = False`.
+- `TailscaleOnlyMiddleware` in `gui/app.py` is replaced by `AccessControlMiddleware`,
+  which receives `gui_on_lan` and `gui_on_tailscale` as constructor arguments and
+  applies the route classification table above.
+- `setup_gui(app, gui_on_lan, gui_on_tailscale)` forwards the flags to the middleware.
+- `_run_servers()` in `main.py` starts the LAN GUI server conditionally:
+  `uvicorn.Config(gui_app, host=lan_ip, port=config.web.port, lifespan="off")`.
+  The `lifespan="off"` ensures database init, Tahoe startup, and background schedulers
+  run only on the primary Tailscale-bound server (see ADR-017).
+- Onboarding mode (ADR-019): `AccessControlMiddleware` passes all requests through
+  when `app.state.setup_required = True`, identical to the previous behaviour.
+
+**Rationale:**
+
+- LAN-only GUI by default is the correct security posture for a homelab appliance.
+  The operator is at home on the same network — Tailscale access to the GUI is an
+  opt-in, not the default.
+- Separating "cluster peer on Tailscale" from "operator accessing GUI" is not possible
+  with a single listener and IP-range middleware — it requires either separate listeners
+  or per-route source IP checks. Separate listeners (LAN vs. Tailscale) are cleaner
+  and auditable: you can see what is bound where in `ss -tlnp`.
+- Two independent booleans are more expressive than a single `lan_bind` flag:
+  users can enable both interfaces simultaneously for valid use cases (remote access),
+  while the both-false case explicitly communicates "GUI disabled" rather than
+  being a silent misconfiguration.
+
+**Consequences:**
+
+- Default install: GUI on LAN only. Cluster API on Tailscale only. Clean separation.
+- A user wanting remote GUI access sets `gui_on_tailscale = true` and understands
+  the implication (other Tailscale nodes can reach the GUI).
+- Startup warning logged when both flags are false: GUI is disabled but cluster
+  continues to function.
+- `gatekeeper verify --now` calls `/api/verify/run-now` over the Tailscale IP —
+  this is a service route and always works regardless of GUI flags.
+- SECURITY.md §3 note: "GUI binds to Tailscale only" is now contextual — the
+  cluster API always does; the GUI defaults to LAN. The intent (GUI not on 0.0.0.0)
+  is preserved and strengthened.
 
 ---
 

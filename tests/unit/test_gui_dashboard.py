@@ -4,7 +4,7 @@ Unit tests for gatekeeper/gui/routes/dashboard.py.
 Covers:
   - _build_dashboard_data(): data assembly from app.state
   - GET /api/dashboard: JSON structure, setup mode, ratio thresholds, agent online/offline
-  - GET /: HTML rendering, status badge, blocked for non-Tailscale IPs
+  - GET /: HTML rendering, status badge
 """
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def _make_app(
         app.state.cluster_db = cluster_db if cluster_db is not None else _MockClusterDB()
         app.state.catalog_db = catalog_db if catalog_db is not None else _MockCatalogDB()
         app.state.pool = pool if pool is not None else _MockPool()
-    setup_gui(app)
+    setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
     return app
 
 
@@ -134,9 +134,9 @@ class TestDashboardApiOperational:
         assert "in_progress" in j["rebalance"]
         assert "distributed_at" in j["lifeboat"]
 
-    def test_blocked_from_non_tailscale(self):
+    def test_accessible_from_lan(self):
         client = TestClient(_make_app(), client=("10.0.0.1", 9999))
-        assert client.get("/api/dashboard").status_code == 404
+        assert client.get("/api/dashboard").status_code == 200
 
     def test_empty_cluster_when_no_members(self):
         data = _ts_client(_make_app()).get("/api/dashboard").json()
@@ -278,9 +278,9 @@ class TestDashboardHtml:
         assert resp.status_code == 200
         assert "running" in resp.text.lower()
 
-    def test_blocked_from_non_tailscale(self):
+    def test_accessible_from_lan(self):
         client = TestClient(_make_app(), client=("192.168.1.1", 9999))
-        assert client.get("/").status_code == 404
+        assert client.get("/").status_code == 200
 
     def test_poll_script_present_when_operational(self):
         resp = _ts_client(_make_app(setup_required=False)).get("/")

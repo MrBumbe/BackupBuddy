@@ -190,17 +190,17 @@ def _make_app(setup_required: bool = False, cluster_db: _MockClusterDB | None = 
         app.state.local_node_id = _LOCAL_NODE_ID
         app.state.config_path = None
         app.state.data_dir = None
-    setup_gui(app)
+    setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
     return app
 
 
 def _ts(app: FastAPI) -> TestClient:
-    """TestClient with a Tailscale source IP (passes TailscaleOnlyMiddleware)."""
+    """TestClient with a Tailscale source IP."""
     return TestClient(app, client=("100.64.0.1", 9999))
 
 
 def _non_ts(app: FastAPI) -> TestClient:
-    """TestClient with a LAN source IP (rejected by TailscaleOnlyMiddleware)."""
+    """TestClient with a LAN source IP."""
     return TestClient(app, client=("192.168.1.1", 9999))
 
 
@@ -213,10 +213,11 @@ def test_buddies_page_setup_mode():
     assert "setup" in r.text.lower()
 
 
-def test_buddies_page_tailscale_required():
+def test_buddies_page_accessible_from_lan():
+    """Default config (gui_on_lan=True, gui_on_tailscale=True in test helper): both allowed."""
     app = _make_app()
     r = _non_ts(app).get("/buddies")
-    assert r.status_code == 404
+    assert r.status_code == 200
 
 
 def test_buddies_page_operational():

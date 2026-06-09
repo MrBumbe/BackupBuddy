@@ -61,7 +61,7 @@ def _make_app(
     if not setup_required:
         app.state.catalog_db = catalog_db if catalog_db is not None else _MockCatalogDB()
         app.state.tahoe_client = tahoe if tahoe is not None else MagicMock()
-    setup_gui(app)
+    setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
     return app
 
 
@@ -93,9 +93,9 @@ class TestRestorePage:
         assert "Restore a folder" in resp.text
         assert "Emergency restore" in resp.text
 
-    def test_blocked_from_non_tailscale(self):
+    def test_accessible_from_lan(self):
         client = TestClient(_make_app(), client=("10.0.0.1", 9999))
-        assert client.get("/restore").status_code == 404
+        assert client.get("/restore").status_code == 200
 
 
 # ── GET /api/restore/catalog ──────────────────────────────────────────────────
@@ -118,7 +118,7 @@ class TestCatalogSearch:
     def test_no_catalog_returns_503(self):
         app = FastAPI()
         app.state.setup_required = False
-        setup_gui(app)
+        setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
         resp = _ts(app).get("/api/restore/catalog")
         assert resp.status_code == 503
 
@@ -207,7 +207,7 @@ class TestStartFileRestore:
     def test_no_services_returns_503(self):
         app = FastAPI()
         app.state.setup_required = False
-        setup_gui(app)
+        setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
         resp = _ts(app).post("/api/restore/start/file", json=self._body)
         assert resp.status_code == 503
 
@@ -280,7 +280,7 @@ class TestEmergencyRestore:
     def test_no_services_returns_503(self):
         app = FastAPI()
         app.state.setup_required = False
-        setup_gui(app)
+        setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
         resp = _ts(app).post("/api/restore/emergency", json=self._body)
         assert resp.status_code == 503
 

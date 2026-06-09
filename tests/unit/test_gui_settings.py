@@ -97,7 +97,7 @@ def _make_app(
         app.state.pool = pool if pool is not None else _MockPool()
         app.state.cluster_db = cluster_db if cluster_db is not None else _MockClusterDB()
         app.state.catalog_db = catalog_db if catalog_db is not None else _MockCatalogDB()
-    setup_gui(app)
+    setup_gui(app, gui_on_lan=True, gui_on_tailscale=True)
     return app
 
 

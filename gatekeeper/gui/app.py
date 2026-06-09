@@ -2,7 +2,7 @@
 GUI application setup — middleware, templates, static files, routes.
 
 Registered components:
-  TailscaleOnlyMiddleware  — rejects all requests from non-Tailscale IPs (404)
+  AccessControlMiddleware  — route-aware access control (ADR-023)
   RequestLoggingMiddleware — logs method + path + status (never query string)
   /static                  — CSS and assets, no external CDN
   /                        — dashboard (cluster status, storage, agents, jobs)
@@ -12,7 +12,7 @@ Registered components:
   /buddies                 — cluster member management, invites, votes
   /api/buddies/*           — buddies API
 
-Normal mode:  wired via setup_gui(app).
+Normal mode:  wired via setup_gui(app, gui_on_lan=..., gui_on_tailscale=...).
 Setup mode:   wired via setup_onboarding_app(app) — only the wizard is served.
 """
 from __future__ import annotations
@@ -44,6 +44,11 @@ _STATIC_DIR = Path(__file__).parent / "static"
 
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
+# Paths that are cluster/service routes — always require a Tailscale source IP.
+# GUI flags (gui_on_lan, gui_on_tailscale) do not affect these routes.
+_SERVICE_PREFIXES = ("/api/cluster/", "/api/verify/")
+_SERVICE_EXACT = {"/api/status"}
+
 
 def _is_tailscale_ip(ip_str: str) -> bool:
     """Return True if ip_str falls in the Tailscale CGNAT block (100.64.0.0/10)."""
@@ -53,23 +58,58 @@ def _is_tailscale_ip(ip_str: str) -> bool:
         return False
 
 
-class TailscaleOnlyMiddleware(BaseHTTPMiddleware):
-    """Reject requests from non-Tailscale source IPs with 404.
+class AccessControlMiddleware(BaseHTTPMiddleware):
+    """Route-aware access control for the gatekeeper GUI (ADR-023).
 
-    Returns 404 rather than 403 to avoid information disclosure — callers
-    outside the Tailscale network should not know the GUI exists.
-    None client (ASGI scope without client tuple) is also rejected.
+    Service routes (/api/cluster/*, /api/verify/*, /api/status):
+      Always require a Tailscale source IP — enforces the cluster API boundary
+      unconditionally, regardless of gui_on_lan / gui_on_tailscale.
 
-    In setup mode (app.state.setup_required = True), the check is bypassed so the
-    onboarding wizard is reachable on the LAN before Tailscale is active. (ADR-019)
+    GUI routes (everything else):
+      Allowed from a Tailscale source only when gui_on_tailscale is True.
+      Allowed from a LAN (non-Tailscale) source only when gui_on_lan is True.
+      Any other combination returns 404.
+
+    Returns 404 (not 403) to avoid information disclosure — callers that are
+    not allowed should not learn that the endpoint exists.
+    None client (ASGI scope without client tuple) is always rejected.
+
+    In setup mode (app.state.setup_required = True), all checks are bypassed
+    so the onboarding wizard is reachable on the LAN before Tailscale is
+    active. (ADR-019)
     """
+
+    def __init__(self, app: Any, *, gui_on_lan: bool, gui_on_tailscale: bool) -> None:
+        super().__init__(app)
+        self._gui_on_lan = gui_on_lan
+        self._gui_on_tailscale = gui_on_tailscale
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         if getattr(request.app.state, "setup_required", False):
             return await call_next(request)
+
         client = request.client
-        if client is None or not _is_tailscale_ip(client.host):
+        if client is None:
             return Response("Not Found", status_code=404, media_type="text/plain")
+
+        path = request.url.path
+        from_tailscale = _is_tailscale_ip(client.host)
+
+        is_service_route = (
+            path in _SERVICE_EXACT
+            or any(path.startswith(p) for p in _SERVICE_PREFIXES)
+        )
+
+        if is_service_route:
+            if not from_tailscale:
+                return Response("Not Found", status_code=404, media_type="text/plain")
+        else:
+            # GUI route — check per-source flags
+            if from_tailscale and not self._gui_on_tailscale:
+                return Response("Not Found", status_code=404, media_type="text/plain")
+            if not from_tailscale and not self._gui_on_lan:
+                return Response("Not Found", status_code=404, media_type="text/plain")
+
         return await call_next(request)
 
 
@@ -86,14 +126,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def setup_gui(app: Any) -> None:
+def setup_gui(app: Any, *, gui_on_lan: bool, gui_on_tailscale: bool) -> None:
     """Wire GUI components into a FastAPI app.
 
     Call this from _create_app() after _register_routes() so API routes
     are registered before the GUI middleware wraps the stack.
 
     Middleware ordering (last add_middleware = outermost = first on request):
-      1. add_middleware(TailscaleOnlyMiddleware) — inner, rejects non-Tailscale IPs
+      1. add_middleware(AccessControlMiddleware) — inner, route-aware access control
       2. add_middleware(RequestLoggingMiddleware) — outer, logs all requests including rejections
     """
     app.include_router(create_dashboard_router())
@@ -104,13 +144,13 @@ def setup_gui(app: Any) -> None:
     app.include_router(create_logs_router())
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-    async def _404_handler(request: Request, exc: Exception) -> HTMLResponse:
+    async def _404_handler(request: Request, exc: Exception) -> Response:
         return _templates.TemplateResponse(
             request, "error.html", {"code": 404, "message": "Page not found"},
             status_code=404,
         )
 
-    async def _500_handler(request: Request, exc: Exception) -> HTMLResponse:
+    async def _500_handler(request: Request, exc: Exception) -> Response:
         return _templates.TemplateResponse(
             request, "error.html", {"code": 500, "message": "An unexpected error occurred"},
             status_code=500,
@@ -119,7 +159,11 @@ def setup_gui(app: Any) -> None:
     app.add_exception_handler(404, _404_handler)
     app.add_exception_handler(500, _500_handler)
 
-    app.add_middleware(TailscaleOnlyMiddleware)
+    app.add_middleware(
+        AccessControlMiddleware,
+        gui_on_lan=gui_on_lan,
+        gui_on_tailscale=gui_on_tailscale,
+    )
     app.add_middleware(RequestLoggingMiddleware)
 
 
@@ -128,7 +172,7 @@ def setup_onboarding_app(app: Any) -> None:
 
     Registered instead of setup_gui() when gatekeeper.cfg does not exist.
     Only mounts the wizard router, /static, and RequestLoggingMiddleware.
-    TailscaleOnlyMiddleware is omitted — the wizard must be reachable on the
+    AccessControlMiddleware is omitted — the wizard must be reachable on the
     LAN before Tailscale is active (ADR-019).
 
     The onboarding router includes a catch-all GET that redirects unknown paths
