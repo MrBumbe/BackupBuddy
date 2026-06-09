@@ -8382,6 +8382,60 @@ isolation — a good trade for a homelab tool.
 
 ---
 
+### [ ] 1.25.4 — Eliminate introducer as runtime single point of failure
+
+**Reads:** project-docs/architecture.md, DECISIONS.md, project-docs/onboarding.md
+**Depends on:** 1.25.3
+
+**Background:**
+
+The gatekeeper GUI currently shows a warning that the introducer node is a single
+point of failure: if it goes offline, backups pause on all nodes until it recovers.
+
+Tahoe-LAFS caches storage server addresses locally, so already-connected nodes
+continue communicating directly. The real problem is **restarts**: a gatekeeper
+that restarts needs to reconnect to the introducer to rediscover peers. If the
+introducer is down at that moment, the restarted node cannot reach the cluster.
+
+**Chosen approach: static peer list (flat, no runtime introducer dependency)**
+
+Each gatekeeper's Tahoe config is extended with static storage server entries
+pointing to all other cluster members by Tailscale MagicDNS hostname. Tahoe
+connects directly to known peers at startup without consulting the introducer.
+
+The introducer is retained solely as an **onboarding aid**: new nodes join via
+the wizard and receive the introducer FURL to bootstrap their initial peer list.
+After that first connection the static entries take over. All nodes are equal —
+no node is more critical than another.
+
+**Scope of work:**
+
+- Document the decision in DECISIONS.md as a new ADR before writing any code
+- Extend `GatekeeperConfig` / Tahoe config generation to write static
+  `[storage_NNN]` entries into `tahoe.cfg` for each known cluster member
+- Source the Tailscale hostnames from `cluster.db` (already populated at
+  membership sync time)
+- Update `_run_servers` / startup to regenerate static entries when `cluster.db`
+  changes (member joins or is removed)
+- Onboarding wizard: after a new node is accepted into the cluster, push updated
+  static entries to all existing members (same mechanism as lifeboat push)
+- Remove or demote the "introducer SPOF" warning in the GUI once static entries
+  are in place; replace with a softer note that the introducer is used only at
+  first join
+- Update `project-docs/architecture.md` to reflect the new peer discovery model
+
+**Acceptance criteria:**
+- Gatekeeper restarts successfully rejoin the cluster even when the introducer
+  node is offline
+- New nodes can still join via the onboarding wizard (introducer still works for
+  that path)
+- All existing cluster members receive updated Tahoe static entries when a node
+  joins or is removed
+- The SPOF warning is gone from the GUI
+- No Tahoe internals (FURLs, caps) appear in any user-facing string or log
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
