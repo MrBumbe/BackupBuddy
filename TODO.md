@@ -8384,6 +8384,9 @@ isolation — a good trade for a homelab tool.
 
 ### [ ] 1.25.4 — Eliminate introducer as runtime single point of failure
 
+> **Deferred to Phase 2.** Pre-implementation investigation found that the required
+> changes exceed Phase 1 scope. See **Phase 2.3** for the complete task specification.
+
 **Reads:** project-docs/architecture.md, DECISIONS.md, project-docs/onboarding.md
 **Depends on:** 1.25.3
 
@@ -8397,42 +8400,31 @@ continue communicating directly. The real problem is **restarts**: a gatekeeper
 that restarts needs to reconnect to the introducer to rediscover peers. If the
 introducer is down at that moment, the restarted node cannot reach the cluster.
 
-**Chosen approach: static peer list (flat, no runtime introducer dependency)**
+**Investigation findings (why this is deferred):**
 
-Each gatekeeper's Tahoe config is extended with static storage server entries
-pointing to all other cluster members by Tailscale MagicDNS hostname. Tahoe
-connects directly to known peers at startup without consulting the introducer.
+The fix — populating Tahoe's static server list so nodes connect directly at
+startup — requires four changes that were not visible when this task was written:
 
-The introducer is retained solely as an **onboarding aid**: new nodes join via
-the wizard and receive the introducer FURL to bootstrap their initial peer list.
-After that first connection the static entries take over. All nodes are equal —
-no node is more critical than another.
+1. **Wrong mechanism in original spec.** Tahoe's static server list lives in
+   `private/servers.yaml`, read by `load_static_servers()` in
+   `src/allmydata/client.py`. There are no `[storage_NNN]` sections in `tahoe.cfg`.
 
-**Scope of work:**
+2. **FURLs required, not hostnames.** Each entry in `servers.yaml` requires a full
+   Foolscap FURL of the form `pb://tubID@host:port/swissnum`. The `tubID` and
+   `swissnum` are cryptographic values — they cannot be derived from a Tailscale
+   MagicDNS hostname. Each peer must transmit its own FURL (sourced from
+   `private/storage.furl`) at join time so that peers can record it.
 
-- Document the decision in DECISIONS.md as a new ADR before writing any code
-- Extend `GatekeeperConfig` / Tahoe config generation to write static
-  `[storage_NNN]` entries into `tahoe.cfg` for each known cluster member
-- Source the Tailscale hostnames from `cluster.db` (already populated at
-  membership sync time)
-- Update `_run_servers` / startup to regenerate static entries when `cluster.db`
-  changes (member joins or is removed)
-- Onboarding wizard: after a new node is accepted into the cluster, push updated
-  static entries to all existing members (same mechanism as lifeboat push)
-- Remove or demote the "introducer SPOF" warning in the GUI once static entries
-  are in place; replace with a softer note that the introducer is used only at
-  first join
-- Update `project-docs/architecture.md` to reflect the new peer discovery model
+3. **Schema migration required.** The `members` table in `cluster.db` has no
+   `server_furl` column. Storing and retrieving peer FURLs requires adding one.
 
-**Acceptance criteria:**
-- Gatekeeper restarts successfully rejoin the cluster even when the introducer
-  node is offline
-- New nodes can still join via the onboarding wizard (introducer still works for
-  that path)
-- All existing cluster members receive updated Tahoe static entries when a node
-  joins or is removed
-- The SPOF warning is gone from the GUI
-- No Tahoe internals (FURLs, caps) appear in any user-facing string or log
+4. **Protocol extension required.** `NodeInfo`, `MemberEntry`, the join-response
+   body (`_JoinResponseBody`), and the member-sync push (`MemberListPushMessage`)
+   all need a `server_furl` field — three API surfaces that are already stable in
+   Phase 1.
+
+All four blockers are solvable but together constitute a scope expansion beyond
+Phase 1. Deferred per project owner decision.
 
 ---
 
@@ -8452,23 +8444,65 @@ no node is more critical than another.
 - Incremental VM snapshot strategy (delta only)
 - VMware snapshot support (to be evaluated)
 
-## 2.3 — Gossip protocol
+## 2.3 — Static peer list (introducer SPOF elimination)
+
+Each gatekeeper's `private/servers.yaml` is populated with Foolscap FURLs for all
+known cluster members so Tahoe can connect directly at startup, without the
+introducer. The introducer is retained as an onboarding aid only — used once at
+first join to bootstrap the initial peer list, never again at runtime.
+
+**Why deferred from Phase 1:** the task looks simple but requires non-trivial
+plumbing that touches three stable API surfaces (see TODO task 1.25.4 for the
+full investigation).
+
+**Tahoe mechanism:** `load_static_servers()` in `src/allmydata/client.py` reads
+`private/servers.yaml` at startup and calls `storage_broker.set_static_servers()`.
+Format per entry: `{"ann": {"anonymous-storage-FURL": "pb://tubID@host:port/swissnum"}}`.
+Each node writes its own FURL to `private/storage.furl` when it first starts.
+
+**Scope of work:**
+
+- **Schema migration:** add `server_furl TEXT` column to `members` table in
+  `cluster.db`; update `ClusterDB.upsert_peer_member()` and `list_members()`
+- **Protocol extension:** add `server_furl: str` to `NodeInfo`, `MemberEntry`,
+  `_JoinResponseBody`, and `MemberListPushMessage`
+- **FURL sourcing:** after `tahoe start`, read `private/storage.furl` and persist
+  own FURL via `upsert_self_member()`; include it in all outbound cluster messages
+- **`servers.yaml` generation:** write `generate_servers_yaml(members)` in
+  `gatekeeper/tahoe/storage_node.py`; call it at startup (before Tahoe starts) and
+  on every membership change (join, removal, reconciliation sync)
+- **GUI:** remove the SPOF warning from `dashboard.html`; replace with a soft note
+  that the introducer is used only at first join
+- **ADR:** write a new ADR superseding ADR-020; document FURL propagation and the
+  `servers.yaml` approach
+- **Architecture docs:** update `project-docs/architecture.md` — introducer section
+  to reflect "onboarding only" role
+- **Testing:** restart-without-introducer scenario; new-node-join-with-introducer-down
+
+**Acceptance criteria:**
+- Restarted gatekeeper reconnects to all peers even when the introducer is unreachable
+- New nodes still join via the onboarding wizard (introducer path unchanged)
+- All members receive updated `servers.yaml` entries on membership changes
+- SPOF warning is gone from the GUI dashboard
+- FURLs never appear in any user-facing string or log
+
+## 2.4 — Gossip protocol
 - Replace Tahoe-LAFS introducer with gossip-based node discovery
 - Fully serverless — no single point of failure for cluster membership
 
-## 2.4 — Automatic quota negotiation
+## 2.5 — Automatic quota negotiation
 - Cluster-level negotiation when a buddy is close to their ratio limit
 - Automated suggestion: "consider increasing your storage contribution"
 
-## 2.5 — Free-rider throttling
+## 2.6 — Free-rider throttling
 - Automatic upload throttling when ratio exceeds 3:1
 - Lifted automatically when balance is restored
 
-## 2.6 — Hot-standby gatekeeper
+## 2.7 — Hot-standby gatekeeper
 - Semi-automatic failover: shadow agent promoted to gatekeeper on command
 - Continuous state sync from primary to shadow
 
-## 2.7 — One-step onboarding
+## 2.8 — One-step onboarding
 - Tailscale join + cluster join combined into a single flow
 - Requires Tailscale API integration
 
@@ -8547,3 +8581,21 @@ Targets homelab users who prefer containers over native installation.
 ## 3.5 — Sybil attack resistance
 - Prevent fake node farms from joining and controlling fragment distribution
 - Mechanism to be determined (time-based, challenge-based, or hybrid)
+
+---
+
+# Considerations
+
+## Future consideration: Replace Tailscale dependency with self-hosted coordination
+
+Currently all cluster networking depends on Tailscale, tied to a single user account. This creates two long-term concerns: external service dependency, and ownership/portability issues if a cluster is handed over or grows beyond a single admin.
+
+The core problem to solve: NAT traversal — home gatekeepers sit behind dynamic IPs and NAT routers. Any replacement must solve peer discovery and encrypted tunneling without requiring port forwarding or static IPs from cluster members.
+
+Recommended path forward (in order of complexity):
+
+1. **Headscale (most realistic near-term)** — open source, self-hosted drop-in replacement for Tailscale's control server. Nodes still run the Tailscale client but point to a self-hosted instance instead of Tailscale's cloud. Requires one small VPS with a static IP. Preserves all existing BackupBuddy networking code.
+2. **Raw WireGuard + coordination layer** — possible but requires solving NAT traversal manually (STUN/DERP equivalent). Significant engineering effort with limited gain over Headscale.
+3. **True serverless peer discovery (libp2p, Hypercore)** — no central coordinator at all, similar to BitTorrent. Technically feasible but constitutes a research project in its own right; introduces new security surface around node discovery.
+
+Recommendation: Evaluate Headscale as a Phase 3 objective. It solves the account dependency problem with minimal changes to existing code, and keeps the self-hosted philosophy consistent throughout the stack.
