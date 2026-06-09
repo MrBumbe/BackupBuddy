@@ -88,13 +88,24 @@ Tailscale join and cluster join are two separate manual steps (Phase 1 design).
 
 ### Web GUI access
 
+By default the GUI binds to the **LAN interface only** (ADR-023).
+The operator accesses the GUI from inside their own home network.
+Cluster peers on Tailscale cannot reach the GUI.
+
 ```
-On LAN:   http://192.168.1.50:8080
-Remote:   http://gatekeeper-anders.tailnet.ts.net:8080
+Default (gui_on_lan=true, gui_on_tailscale=false):
+  http://192.168.1.50:8080   ← accessible from home network
+
+With gui_on_tailscale=true also enabled:
+  http://gatekeeper-anders.tailnet.ts.net:8080   ← accessible via Tailscale too
 ```
 
-GUI binds to the Tailscale interface only. Not exposed on the public internet.
-Remote access works for anyone on the same Tailscale network (the buddy group).
+The **Tailscale listener always runs** and serves cluster API routes
+(`/api/cluster/*`, `/api/verify/*`, `/api/status`) regardless of GUI flags.
+GUI routes on that listener are only active when `gui_on_tailscale = true`.
+
+Setting both flags to false disables the GUI entirely; the cluster API
+continues to function normally.
 
 ---
 

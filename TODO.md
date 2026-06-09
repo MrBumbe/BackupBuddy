@@ -8302,7 +8302,7 @@ with level filtering and component filtering, without changing how or where logs
 
 ---
 
-### [ ] 1.25.3 — GUI access control: who can reach the gatekeeper web interface?
+### [x] 1.25.3 — GUI access control: who can reach the gatekeeper web interface?
 
 **Reads:** DECISIONS.md (check for existing ADR), project-docs/architecture.md
 **Depends on:** 1.25.2 (log viewer exposes per-node data — triggered this review)

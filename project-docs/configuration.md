@@ -127,10 +127,18 @@ enabled  = true
 url      = https://discord.com/api/webhooks/...
 
 # ── Web GUI ───────────────────────────────────────────
+# gui_on_lan: bind GUI to the LAN interface (default true).
+#   Operator accesses the GUI from inside their home network.
+#   Cluster peers on Tailscale cannot reach the GUI.
+# gui_on_tailscale: also bind GUI to the Tailscale interface (default false).
+#   Enables remote GUI access from other Tailscale devices (e.g. a laptop away
+#   from home). Cluster peers can also reach the GUI when this is true.
+# Setting both to false disables the GUI. Cluster API continues to function.
 [web]
-enabled = true
-port    = 8080
-bind    = tailscale    # listen on Tailscale interface only
+enabled          = true
+port             = 8080
+gui_on_lan       = true
+gui_on_tailscale = false
 
 # ── Agent API ─────────────────────────────────────────
 # LAN-only listener for agent registration and fragment upload (ADR-017).
