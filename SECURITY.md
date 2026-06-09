@@ -14,14 +14,14 @@
 ❌ NEVER log file paths, file names, or file contents from agent backup scope
 ❌ NEVER log or expose root_dir.cap, node.privkey, or lifeboat contents
 ❌ NEVER store the lifeboat passphrase on disk in any form
-❌ NEVER expose the gatekeeper GUI on 0.0.0.0 (Tailscale interface only)
+❌ NEVER bind any server to 0.0.0.0 (use specific interface addresses only)
 ❌ NEVER allow storage pool paths to be added to backup scope
 ❌ NEVER trust data received from cluster nodes without verification
 ❌ NEVER write SMTP passwords or webhook URLs to unencrypted config files
 ❌ NEVER include fragment content or file metadata in logs visible to other nodes
 ❌ NEVER allow agents to browse each other's or the gatekeeper's filesystem
 
-✅ ALWAYS bind the web GUI to the Tailscale interface only
+✅ ALWAYS keep cluster API on Tailscale only; GUI binding is configurable (see ADR-023)
 ✅ ALWAYS encrypt the lifeboat bundle before writing or transmitting it
 ✅ ALWAYS verify SHA-256 before and after fragmentation
 ✅ ALWAYS verify SHA-256 after restore before delivering to user
@@ -113,21 +113,38 @@ No other cluster node can read original_path or agent name.
 
 ## 3. Network security
 
-### GUI binding
+### GUI binding (ADR-023)
 
-The FastAPI web GUI must bind exclusively to the Tailscale network interface.
-Never bind to 0.0.0.0 or any LAN interface.
+The gatekeeper runs two separate listeners:
+
+1. **Tailscale listener** — always active. Serves cluster API routes only:
+   `/api/cluster/*`, `/api/verify/*`, `/api/status`.
+   Never serves GUI routes to Tailscale peers (unless `gui_on_tailscale = true`).
+
+2. **LAN listener** — active when `gui_on_lan = true` (default). Serves the
+   operator's GUI from inside their home network.
+
+Neither listener may bind to `0.0.0.0`. Use specific interface addresses only.
 
 ```python
-# Correct
+# Correct — Tailscale listener (cluster API always, GUI if gui_on_tailscale=true)
 uvicorn.run(app, host=tailscale_ip, port=8080)
+
+# Correct — LAN listener (GUI only, started conditionally)
+uvicorn.run(app, host=lan_ip, port=8080, lifespan="off")
 
 # NEVER
 uvicorn.run(app, host="0.0.0.0", port=8080)
 ```
 
 The Tailscale IP must be resolved at startup, not hardcoded.
-If Tailscale is not running, the GUI must not start.
+If Tailscale is not running, the gatekeeper must not start.
+
+`AccessControlMiddleware` enforces the route classification at the application
+layer regardless of which listener received the request:
+- Service routes (`/api/cluster/*`, `/api/verify/*`, `/api/status`) require
+  a Tailscale source IP — rejected with 404 from LAN.
+- GUI routes are allowed based on `gui_on_lan` / `gui_on_tailscale` flags.
 
 ### Tailscale subnet routing
 
