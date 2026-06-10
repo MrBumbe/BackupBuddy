@@ -498,7 +498,7 @@ class NightlyVerifier:
             )
             return
         if self._send_alert is None:
-            logger.error("verify alert [%s]: %s", level, message)
+            logger.error("Verification alert: %s", message)
             return
         try:
             await self._send_alert(level, message, detail)

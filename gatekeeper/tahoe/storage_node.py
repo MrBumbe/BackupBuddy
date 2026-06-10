@@ -271,14 +271,14 @@ class StorageNode:
             cached_count = self._count_cached_servers()
             if cached_count > 0:
                 logger.warning(
-                    "Introducer unreachable — operating from cached server list "
-                    "(%d servers). Uploads may be incomplete.",
+                    "Storage coordinator temporarily unreachable — using cached server list "
+                    "(%d servers). Backups may be slower or incomplete.",
                     cached_count,
                 )
             else:
                 logger.warning(
-                    "Introducer unreachable and no server cache found. "
-                    "Grid operations will fail until the introducer recovers."
+                    "Storage coordinator unreachable and no server cache found. "
+                    "Backups will fail until the coordinator recovers."
                 )
 
         logger.info("Starting storage node")

@@ -131,11 +131,11 @@ def _derive_catalog_key(root_dir_cap: str) -> bytes:
 # ── Background scheduler stubs ────────────────────────────────────────────────
 
 async def _watcher_stub() -> None:
-    logger.info("Watcher scheduler: pending implementation (task 1.6.2)")
+    logger.info("Watcher scheduler not yet active")
 
 
 async def _rebalance_stub() -> None:
-    logger.info("Rebalance scheduler: pending implementation (task 1.11.2)")
+    logger.info("Rebalance scheduler not yet active")
 
 
 async def _orphan_cleanup_loop(
