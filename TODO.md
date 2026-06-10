@@ -8607,7 +8607,7 @@ Spot-check checksums on each LXC against `1.23.1-state.md` § B.
 
 ---
 
-### [ ] 1.26.2 — Cluster formation on fresh VMs
+### [x] 1.26.2 — Cluster formation on fresh VMs
 
 > **Resume:** Read `1.26.1-state.md`. All 6 nodes provisioned with Ubuntu and Tailscale.
 > **State file:** `1.26.1-state.md` — continue updating.
