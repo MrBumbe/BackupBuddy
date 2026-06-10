@@ -8930,7 +8930,7 @@ Expected (1.24.3 fix): `disk-guard-test.bin` uploads successfully on next cycle
 
 ---
 
-### [ ] 1.26.4 — 1.25 feature verification
+### [x] 1.26.4 — 1.25 feature verification
 
 > **Resume:** Read `1.26.1-state.md`. All agents running, all files backed up.
 > **State file:** `1.26.1-state.md` — continue updating.
@@ -9086,21 +9086,21 @@ Expected: 202 or 429 — not 404
 > **State update:** R1-R5 results.
 
 **Completion criteria:**
-- [ ] P1 (CLI verify): exits 0, all 4 layers logged ✓
-- [ ] P2 (API verify): HTTP 202 ✓
-- [ ] P3 (concurrent): second call returns 429 ✓
-- [ ] P4 (status): last-run result returned ✓
-- [ ] Q1 (log file exists): `/var/lib/backup-buddy/gatekeeper.log` present and non-empty ✓
-- [ ] Q2 (log page): `/logs` loads via LAN IP ✓
-- [ ] Q3 (level filter): WARNING filter works ✓
-- [ ] Q4 (component filters): verify, watcher, cluster filters return correct lines ✓
-- [ ] Q5 (logging audit): all LOG-N items recorded; text-only fixes applied ✓
-- [ ] R1 (GUI reachable from LAN): 200 ✓
-- [ ] R2 (GUI blocked from Tailscale): 404 ✓
-- [ ] R3 (restore API blocked from Tailscale): 404 ✓
-- [ ] R4 (cluster API reachable from Tailscale): not blocked ✓
-- [ ] R5 (verify API reachable from Tailscale): not blocked ✓
-- [ ] Committed: `chore(test): 1.26.4 feature verification done`
+- [x] P1 (CLI verify): exits 0, all 4 layers logged ✓
+- [x] P2 (API verify): HTTP 202 ✓
+- [x] P3 (concurrent): second call returns 429 ✓
+- [x] P4 (status): last-run result returned ✓
+- [x] Q1 (log file exists): `/var/lib/backup-buddy/gatekeeper.log` present and non-empty ✓
+- [x] Q2 (log page): `/logs` loads via LAN IP ✓
+- [x] Q3 (level filter): WARNING filter works ✓
+- [x] Q4 (component filters): verify, watcher, cluster filters return correct lines ✓
+- [x] Q5 (logging audit): LOG-1/2/3 recorded; text-only fixes applied (commit ae8b1b15f) ✓
+- [x] R1 (GUI reachable from LAN): 200 ✓
+- [x] R2 (GUI blocked from Tailscale): 404 ✓
+- [x] R3 (restore API blocked from Tailscale): 404 ✓
+- [x] R4 (cluster API reachable from Tailscale): 405 (not blocked) ✓
+- [x] R5 (verify API reachable from Tailscale): 202 ✓
+- [x] Committed: `chore(test): 1.26.4 feature verification done`
 
 ---
 
