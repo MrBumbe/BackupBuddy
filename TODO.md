@@ -9227,6 +9227,72 @@ Record discrepancies. Commit corrections separately:
 
 ---
 
+### [ ] 1.26.6 — Fix agent upload failure message (LOG-1)
+
+**Reads:** `tests/integration/1.26.1-issues.md` → LOG-1
+**Scope:** `agent/` — structural change to upload error logging
+
+When an upload fails, the agent logs only the exception class name without the file name
+or HTTP status code. A non-technical user cannot tell which file failed.
+
+**Current:** `ERROR — Failed to upload file: OSError`
+**Target:** `ERROR — Failed to upload file disk-guard-test.bin: OSError (HTTP 507 — insufficient disk space)`
+
+Changes required:
+- Pass the file name into the upload error handler so it appears in the log message
+- Include the HTTP status code when the failure is an HTTP error (e.g. 507, 403)
+- Ensure the fix covers the `watcher.py` and `fragmenter.py` upload paths
+
+**Done when:**
+- Agent log shows file name and HTTP status on upload failure
+- Disk guard test (L3 from 1.26.3) reproduces the improved message
+- Committed: `fix(agent): include file name and HTTP status in upload failure log`
+
+---
+
+### [ ] 1.26.7 — Fix logger names showing as `__main__` (LOG-2)
+
+**Reads:** `tests/integration/1.26.1-issues.md` → LOG-2
+**Scope:** `gatekeeper/` — structural change to module invocation
+
+Multiple gatekeeper modules log as `__main__` when they are invoked directly instead
+of imported. This makes `?component=__main__` match unrelated modules in the log viewer.
+
+Changes required:
+- Identify which modules are run directly and produce `__main__` log names
+- Ensure each module uses `logging.getLogger(__name__)` and is imported (not run directly)
+- After fix: `?component=gatekeeper.main`, `?component=gatekeeper.verify.nightly`, etc.
+
+**Done when:**
+- No module logs as `__main__` in a normal simulation run
+- Log viewer `?component=` filters return distinct, module-specific lines
+- Committed: `fix(logging): replace __main__ logger names with module paths`
+
+---
+
+### [ ] 1.26.8 — Fix layer 4 verify error showing Python exception class (LOG-3)
+
+**Reads:** `tests/integration/1.26.1-issues.md` → LOG-3
+**Scope:** `gatekeeper/verify/nightly.py` — structural change to exception mapping
+
+Layer 4 verification failure logs `HTTPStatusError` (the Python exception class name)
+instead of a plain-language description. A non-technical user cannot interpret this.
+
+**Current:** `ERROR — Layer 4 verification failed: HTTPStatusError`
+**Target:** `ERROR — Layer 4 verification failed: agent did not return a valid lifeboat bundle (HTTP 404)`
+
+Changes required:
+- In `nightly.py` layer 4 handler: map exception types to user-friendly descriptions
+- Include the HTTP status code for `HTTPStatusError` (accessible via `exc.response.status_code`)
+- Other layers: audit for similar `type(exc).__name__` patterns and fix them too
+
+**Done when:**
+- Layer 4 failure log shows a plain-language message with HTTP status
+- Simulated 404 from agent (fresh sim state) produces the improved message
+- Committed: `fix(verify): plain-language layer 4 error messages`
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
