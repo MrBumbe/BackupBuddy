@@ -9104,7 +9104,7 @@ Expected: 202 or 429 — not 404
 
 ---
 
-### [ ] 1.26.5 — Extended restore + resilience + final audit
+### [x] 1.26.5 — Extended restore + resilience + final audit
 
 > **Resume:** Read `1.26.1-state.md`. 1.25 features verified. All files backed up.
 > **State file:** `1.26.1-state.md` — final updates.
@@ -9216,14 +9216,14 @@ Record discrepancies. Commit corrections separately:
 | INSTALL.md + RESTORE.md: ADR-023 access model documented | — |
 
 **Completion criteria:**
-- [ ] K1-K6 checksums match `1.23.1-state.md` § B
-- [ ] M resilience: PASS
-- [ ] N docs audit: complete; corrections committed if needed
-- [ ] O checklist: complete
-- [ ] `1.26.1-state.md` updated with all final statuses
-- [ ] Issues file committed: `chore(test): 1.26.1 issues file — N issues, M log improvements`
-- [ ] Mark 1.26.1–1.26.5 as `[x]` in TODO.md
-- [ ] Final commit: `chore(test): mark 1.26.1-1.26.5 done — sixth sim complete`
+- [x] K1-K6 checksums match `1.23.1-state.md` § B
+- [x] M resilience: PASS
+- [x] N docs audit: complete; corrections committed (2119fc29d)
+- [x] O checklist: complete
+- [x] `1.26.1-state.md` updated with all final statuses
+- [x] Issues file: LOG-1/2/3 recorded
+- [x] Mark 1.26.1–1.26.5 as `[x]` in TODO.md
+- [x] Final commit: `chore(test): mark 1.26.1-1.26.5 done — sixth sim complete`
 
 ---
 
