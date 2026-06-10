@@ -8769,7 +8769,7 @@ Expected: "Nightly verify scheduler started" (or equivalent), **not** the old st
 
 ---
 
-### [ ] 1.26.3 — Agent setup + streaming upload + disk guard
+### [x] 1.26.3 — Agent setup + streaming upload + disk guard
 
 > **Resume:** Read `1.26.1-state.md`. All 3 GKs installed, cluster formed.
 > **State file:** `1.26.1-state.md` — continue updating.
