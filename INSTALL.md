@@ -190,17 +190,20 @@ Copy it — you will need it in section 6.
 
 Click **"Go to dashboard"**.
 
-**After setup — use the Tailscale address:**
+**After setup — use your local (LAN) address:**
 
-Once setup is complete, BackupBuddy binds its dashboard to your Tailscale address for
-security. The new address will be shown on the completion screen, for example:
+Once setup is complete, continue to access your dashboard using your gatekeeper's local
+IP address, for example:
 
 ```
-http://100.64.0.1:8080
+http://192.168.1.50:8080
 ```
 
-Use this Tailscale address to open your dashboard from now on.
-You can find your Tailscale IP at any time by running `tailscale ip` on the gatekeeper.
+The dashboard is only accessible from your home network. This is by design — it
+cannot be reached from outside your LAN, even over Tailscale.
+
+> The Tailscale connection is used for communication between gatekeeper nodes (your
+> buddies), not for accessing your own dashboard.
 
 ---
 
@@ -350,7 +353,7 @@ in the dashboard under **"Buddies"**.
 
 ## 7. Verify your first backup was made
 
-Open your gatekeeper dashboard (at `http://<tailscale-ip>:8080`).
+Open your gatekeeper dashboard (at `http://<your-gatekeeper-LAN-IP>:8080`).
 
 The dashboard shows:
 
@@ -414,18 +417,20 @@ IP address that matches your home network (usually `192.168.x.x`). Then open
 
 ### The dashboard does not open after the wizard completes
 
-**Cause:** After setup, BackupBuddy switches to listening on the Tailscale address only.
-If Tailscale is not running or not connected, the dashboard is unreachable.
+**Cause:** The dashboard is only accessible from your home network (LAN). Make sure you
+are browsing from a device that is on the same local network as the gatekeeper.
 
-**Fix:** On the gatekeeper, run:
+**Fix:** Find your gatekeeper's local IP by running on the gatekeeper:
 
 ```bash
-sudo tailscale up
-tailscale ip
+hostname -I
 ```
 
-Log in to Tailscale if prompted, then use the IP address printed by `tailscale ip` to
-open the dashboard: `http://<tailscale-ip>:8080`.
+Use the IP address that matches your home network (usually `192.168.x.x` or `10.x.x.x`).
+Open `http://<that-IP>:8080` in your browser.
+
+> Note: Tailscale is required for communication with your buddies' nodes, but your
+> dashboard is not accessible over Tailscale — only from your local network.
 
 ---
 

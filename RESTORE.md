@@ -18,7 +18,7 @@ Use this when your gatekeeper is running and you just need to get a file back.
 
 ### 1.1 Single file
 
-1. Open your gatekeeper dashboard in a browser (`http://<your-tailscale-ip>:8080`).
+1. Open your gatekeeper dashboard in a browser (`http://<your-gatekeeper-LAN-IP>:8080`).
 2. Click **Restore** in the navigation menu.
 3. Type part of the file name or path in the search box.
 4. Click the file you want to restore.
