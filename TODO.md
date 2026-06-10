@@ -8452,7 +8452,7 @@ Phase 1. Deferred per project owner decision.
 
 ---
 
-### [ ] 1.26.1 — Pre-flight: test file migration + fresh VM provisioning
+### [x] 1.26.1 — Pre-flight: test file migration + fresh VM provisioning
 
 **Reads:** `tests/integration/1.23.1-state.md` (test file checksums, section B)
 
