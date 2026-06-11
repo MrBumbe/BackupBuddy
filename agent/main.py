@@ -113,8 +113,8 @@ async def _upload_worker(
     logger.info("Upload worker started")
     while True:
         file_path: str = await queue.get()
+        path = Path(file_path)
         try:
-            path = Path(file_path)
             file_size = path.stat().st_size
             metadata = {
                 "original_path": file_path,
@@ -123,10 +123,22 @@ async def _upload_worker(
             await client.send_fragment(path, metadata)
             logger.info("SUCCESS — uploaded file (%d bytes)", file_size)
         except (OSError, IOError) as exc:
-            logger.error("Failed to upload file: %s", type(exc).__name__)
+            # File name logged on upload errors only — agent-local log, owner-approved
+            # exception to SECURITY.md §6 so the user can identify which file failed.
+            detail = os.strerror(exc.errno) if exc.errno is not None else str(exc)
+            logger.error(
+                "Failed to upload file %s: %s (%s)",
+                path.name,
+                type(exc).__name__,
+                detail,
+            )
             watcher.dequeue(file_path)
         except Exception as exc:
-            logger.error("Unexpected upload error: %s", type(exc).__name__)
+            logger.error(
+                "Failed to upload file %s: unexpected error: %s",
+                path.name,
+                type(exc).__name__,
+            )
             watcher.dequeue(file_path)
         finally:
             queue.task_done()

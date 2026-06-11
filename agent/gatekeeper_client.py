@@ -24,6 +24,14 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_LIFEBOAT_PATH = Path("/etc/backup-buddy/lifeboat.enc")
 
+_HTTP_DESCRIPTIONS: dict[int, str] = {
+    401: "authentication failed",
+    403: "access denied",
+    404: "endpoint not found",
+    409: "conflict",
+    507: "insufficient disk space",
+}
+
 
 class RegistrationError(Exception):
     """Raised when the agent fails to register with the gatekeeper."""
@@ -94,10 +102,12 @@ class GatekeeperClient:
                 },
             )
             resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            desc = _HTTP_DESCRIPTIONS.get(code, "server error")
+            raise IOError(f"HTTP {code} — {desc}") from exc
         except httpx.HTTPError as exc:
-            raise IOError(
-                f"Failed to send fragment to gatekeeper: {type(exc).__name__}"
-            ) from exc
+            raise IOError(f"connection error: {type(exc).__name__}") from exc
 
     @staticmethod
     async def _iter_file(path: Path, chunk_size: int = 65536):
