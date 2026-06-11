@@ -9227,7 +9227,7 @@ Record discrepancies. Commit corrections separately:
 
 ---
 
-### [ ] 1.26.6 — Fix agent upload failure message (LOG-1)
+### [x] 1.26.6 — Fix agent upload failure message (LOG-1)
 
 **Reads:** `tests/integration/1.26.1-issues.md` → LOG-1
 **Scope:** `agent/` — structural change to upload error logging
@@ -9250,7 +9250,7 @@ Changes required:
 
 ---
 
-### [ ] 1.26.7 — Fix logger names showing as `__main__` (LOG-2)
+### [x] 1.26.7 — Fix logger names showing as `__main__` (LOG-2)
 
 **Reads:** `tests/integration/1.26.1-issues.md` → LOG-2
 **Scope:** `gatekeeper/` — structural change to module invocation
