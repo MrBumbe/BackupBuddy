@@ -79,7 +79,7 @@ from gatekeeper.tailscale import (
     get_lan_ip,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("gatekeeper.main")
 
 # Default web port used in setup mode before gatekeeper.cfg is written.
 _DEFAULT_WEB_PORT = 8080
