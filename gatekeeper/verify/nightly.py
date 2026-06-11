@@ -224,7 +224,7 @@ class NightlyVerifier:
             return LayerResult(ok=True)
         except TahoeError as exc:
             logger.error(
-                "Layer 1: root_dir.cap not accessible — %s", type(exc).__name__
+                "Layer 1: root_dir.cap not accessible — storage cluster returned an error"
             )
             await self._alert(
                 "critical",
@@ -341,22 +341,26 @@ class NightlyVerifier:
                     )
                 except (RestoreNotFoundError, RestoreIntegrityError) as exc:
                     failures += 1
+                    desc = (
+                        "file integrity check failed"
+                        if isinstance(exc, RestoreIntegrityError)
+                        else "file not found in storage cluster"
+                    )
                     logger.error(
                         "Layer 3: test restore failed for agent=%s — %s",
                         record["agent"],
-                        type(exc).__name__,
+                        desc,
                     )
                     await self._alert(
                         "error",
                         "Nightly verify: test restore failed for a file",
-                        f"agent={record['agent']} error={type(exc).__name__}",
+                        f"agent={record['agent']} error={desc}",
                     )
-                except TahoeError as exc:
+                except TahoeError:
                     failures += 1
                     logger.error(
-                        "Layer 3: download error for agent=%s — %s",
+                        "Layer 3: download error for agent=%s — storage cluster error",
                         record["agent"],
-                        type(exc).__name__,
                     )
                     await self._alert(
                         "error",
@@ -422,10 +426,13 @@ class NightlyVerifier:
 
         try:
             key = load_key()
-        except (KeyNotFoundError, Exception) as exc:
-            logger.error(
-                "Layer 4: lifeboat key unavailable — %s", type(exc).__name__
+        except Exception as exc:
+            desc = (
+                "lifeboat encryption key not found"
+                if isinstance(exc, KeyNotFoundError)
+                else f"unexpected error loading key ({type(exc).__name__})"
             )
+            logger.error("Layer 4: lifeboat key unavailable — %s", desc)
             await self._alert(
                 "critical",
                 "Nightly verify: lifeboat key is unavailable — cannot verify bundle",
@@ -435,10 +442,17 @@ class NightlyVerifier:
         try:
             bundle_bytes = await self._fetch_lifeboat(agent["lifeboat_url"])
         except Exception as exc:
+            if isinstance(exc, httpx.HTTPStatusError):
+                desc = (
+                    f"agent did not return a valid lifeboat bundle"
+                    f" (HTTP {exc.response.status_code})"
+                )
+            else:
+                desc = "network error reaching agent"
             logger.error(
                 "Layer 4: failed to fetch lifeboat from agent '%s' — %s",
                 agent["agent_name"],
-                type(exc).__name__,
+                desc,
             )
             await self._alert(
                 "critical",
