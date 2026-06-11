@@ -9293,6 +9293,158 @@ Changes required:
 
 ---
 
+### [ ] 1.26.9 — Targeted verification: LOG-1, LOG-2, LOG-3 fixes
+
+> **Scope:** Targeted — verifies the three log-quality fixes from 1.26.6–1.26.8 only.
+> No full backup/restore cycle needed.
+> **VMs required:** VM 101 (gk-anders), LXC 301 (agent-anders-pc).
+> Other nodes may remain off.
+
+All three changes are isolated to log output — no logic, storage, or timing changes.
+The core backup/restore/verify paths were fully exercised in 1.26.1–1.26.5.
+
+---
+
+**Setup — update to HEAD and restart**
+
+If the 1.26 cluster VMs are still running from the previous sim, skip rollback.
+Otherwise, roll back VM 101 and LXC 301 to the post-1.26.5 snapshot, then start them.
+
+Pull HEAD and restart services:
+
+```bash
+# VM 101 — gk-anders
+ssh 10.99.0.11 "cd /opt/backup-buddy && git pull"
+ssh 10.99.0.11 "sudo systemctl restart backup-buddy-gatekeeper"
+
+# LXC 301 — agent-anders-pc
+pct exec 301 -- bash -c "cd /opt/backup-buddy && git pull"
+pct exec 301 -- systemctl restart backup-buddy-agent
+```
+
+Wait 30 seconds for startup to complete.
+
+---
+
+**P1 — LOG-2: no module logs as `__main__`**
+
+```bash
+ssh 10.99.0.11 "journalctl -u backup-buddy-gatekeeper -n 300 | grep '__main__'"
+```
+
+Expected: zero matching lines.
+
+If any hit → regression in 1.26.7: re-check that all modules use
+`logging.getLogger(__name__)` and are imported, not run directly.
+
+> P1 result: PASS / FAIL
+
+---
+
+**P2 — LOG-3: layer 4 plain-language error with HTTP status**
+
+Force the agent's lifeboat endpoint to return HTTP 404 by deleting the stored bundle
+(if the previous sim distributed one). The agent returns 404 naturally when no bundle
+is stored at `/etc/backup-buddy/lifeboat.enc`.
+
+```bash
+pct exec 301 -- rm -f /etc/backup-buddy/lifeboat.enc
+```
+
+Ensure cluster.db has a recent `lifeboat_status` row (bypasses the age check) and
+that `agent-anders-pc` has its `lifeboat_url` set to the real endpoint:
+
+```bash
+ssh 10.99.0.11 "sqlite3 /var/lib/backup-buddy/cluster.db \
+  \"INSERT INTO lifeboat_status (distributed_at, agent_count, success_count, status) \
+    VALUES (strftime('%s','now'), 1, 1, 'ok');\""
+```
+
+Verify `lifeboat_url` is set for the agent (should already be set from registration):
+
+```bash
+ssh 10.99.0.11 "sqlite3 /var/lib/backup-buddy/cluster.db \
+  \"SELECT agent_name, lifeboat_url FROM agents;\""
+```
+
+If `lifeboat_url` is NULL, set it manually:
+
+```bash
+ssh 10.99.0.11 "sqlite3 /var/lib/backup-buddy/cluster.db \
+  \"UPDATE agents SET lifeboat_url='http://10.10.1.31:8082/lifeboat' \
+    WHERE agent_name='agent-anders-pc';\""
+```
+
+Trigger an on-demand verify (must use Tailscale IP as target):
+
+```bash
+ssh 10.99.0.11 "curl -s -X POST http://\$(tailscale ip -4):8080/api/verify/run-now"
+```
+
+Wait ~10 seconds, then check the log for layer 4 output:
+
+```bash
+ssh 10.99.0.11 "grep 'Layer 4' /var/lib/backup-buddy/gatekeeper.log | tail -5"
+```
+
+Expected log line:
+```
+Layer 4: failed to fetch lifeboat from agent 'agent-anders-pc' — agent did not return a valid lifeboat bundle (HTTP 404)
+```
+
+If log still shows `HTTPStatusError` → regression in 1.26.8.
+
+> P2 result: PASS / FAIL — paste the actual log line
+
+---
+
+**P3 — LOG-1: agent upload failure includes file name and HTTP status**
+
+Re-run the disk guard scenario from 1.26.3 (L1–L3).
+
+```bash
+# L1 — mount 100 MB tmpfs on gk-anders upload_tmp
+ssh 10.99.0.11 "sudo mount -t tmpfs -o size=100M tmpfs \
+  /var/lib/backup-buddy/upload_tmp/"
+ssh 10.99.0.11 "df -h /var/lib/backup-buddy/upload_tmp/"
+
+# L2 — create 200 MB file on agent-anders-pc
+pct exec 301 -- dd if=/dev/urandom \
+  of=/home/testuser/backup-test/log1-verify.bin bs=1M count=200
+
+# L3 — wait one watcher cycle (~60 s), then check agent log
+sleep 90
+pct exec 301 -- journalctl -u backup-buddy-agent -n 50 | \
+  grep -E "Failed to upload|507"
+```
+
+Expected log line:
+```
+Failed to upload file log1-verify.bin: IOError (HTTP 507 — insufficient disk space)
+```
+
+Both file name (`log1-verify.bin`) and HTTP status (`507`) must appear.
+
+If either is missing → regression in 1.26.6.
+
+Unmount tmpfs after confirming the result:
+
+```bash
+ssh 10.99.0.11 "sudo umount /var/lib/backup-buddy/upload_tmp/"
+```
+
+> P3 result: PASS / FAIL — paste the actual log line
+
+---
+
+**Done when:**
+- [ ] P1: zero `__main__` matches in gatekeeper startup logs
+- [ ] P2: layer 4 log shows `agent did not return a valid lifeboat bundle (HTTP 404)`
+- [ ] P3: agent upload failure log shows file name and `507`
+- [ ] Committed: `chore(test): 1.26.9 targeted LOG-1/LOG-2/LOG-3 verification done`
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
