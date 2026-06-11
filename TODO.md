@@ -9270,7 +9270,7 @@ Changes required:
 
 ---
 
-### [ ] 1.26.8 — Fix layer 4 verify error showing Python exception class (LOG-3)
+### [x] 1.26.8 — Fix layer 4 verify error showing Python exception class (LOG-3)
 
 **Reads:** `tests/integration/1.26.1-issues.md` → LOG-3
 **Scope:** `gatekeeper/verify/nightly.py` — structural change to exception mapping
