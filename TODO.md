@@ -9293,7 +9293,7 @@ Changes required:
 
 ---
 
-### [ ] 1.26.9 — Targeted verification: LOG-1, LOG-2, LOG-3 fixes
+### [x] 1.26.9 — Targeted verification: LOG-1, LOG-2, LOG-3 fixes
 
 > **Scope:** Targeted — verifies the three log-quality fixes from 1.26.6–1.26.8 only.
 > No full backup/restore cycle needed.
@@ -9438,10 +9438,10 @@ ssh 10.99.0.11 "sudo umount /var/lib/backup-buddy/upload_tmp/"
 ---
 
 **Done when:**
-- [ ] P1: zero `__main__` matches in gatekeeper startup logs
-- [ ] P2: layer 4 log shows `agent did not return a valid lifeboat bundle (HTTP 404)`
-- [ ] P3: agent upload failure log shows file name and `507`
-- [ ] Committed: `chore(test): 1.26.9 targeted LOG-1/LOG-2/LOG-3 verification done`
+- [x] P1: zero `__main__` matches in gatekeeper startup logs
+- [x] P2: layer 4 log shows `agent did not return a valid lifeboat bundle (HTTP 404)`
+- [x] P3: agent upload failure log shows file name and `507`
+- [x] Committed: `chore(test): 1.26.9 targeted LOG-1/LOG-2/LOG-3 verification done`
 
 ---
 
