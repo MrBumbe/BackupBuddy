@@ -352,10 +352,11 @@ def apply_grace_extension(db, vote_id: int) -> None:
     if member is None:
         raise ValueError(f"Member {target_node_id!r} not found")
 
-    new_grace_days = member["grace_days"] + days
+    current_grace_days = member["grace_days"] or 0
+    new_grace_days = current_grace_days + days
     db.update_member(target_node_id, grace_days=new_grace_days)
 
     logger.info(
         "Grace extension applied: %s grace_days %d → %d (vote_id=%d)",
-        target_node_id, member["grace_days"], new_grace_days, vote_id,
+        target_node_id, current_grace_days, new_grace_days, vote_id,
     )

@@ -394,3 +394,24 @@ class TestApplyGraceExtension:
         vote = extend_grace_period(db, "bob", days=7, proposed_by="alice")
         with pytest.raises(ValueError, match="has not passed"):
             apply_grace_extension(db, vote.vote_id)
+
+    def test_null_grace_days_treated_as_zero(self, db, monkeypatch):
+        # Guard against NULL grace_days (pre-migration rows or unexpected DB state).
+        _add_member(db, "alice")
+        _add_member(db, "carol")
+        _add_member(db, "bob", status="grace")
+        vote = self._pass_extension_vote(db, "bob", days=7, voters=["alice", "carol"])
+
+        real_get_member = db.get_member
+        def _null_grace(node_id):
+            row = real_get_member(node_id)
+            if row is None:
+                return None
+            return {**row, "grace_days": None}
+        monkeypatch.setattr(db, "get_member", _null_grace)
+
+        apply_grace_extension(db, vote.vote_id)
+
+        monkeypatch.undo()
+        after = db.get_member("bob")["grace_days"]
+        assert after == 7  # None treated as 0, plus 7 days extension

@@ -9722,7 +9722,7 @@ Same pattern as `verify_tailscale_binding()` in the normal startup path.
 
 ---
 
-### [ ] 1.27.3 — Bug: None + int crash in apply_grace_extension
+### [x] 1.27.3 — Bug: None + int crash in apply_grace_extension
 
 **Reads:** gatekeeper/cluster/removal.py
 
@@ -9746,7 +9746,11 @@ new_grace_days = (member["grace_days"] or 0) + days
 - `fix(cluster): 1.27.3 complete` committed
 
 ```
-> Kludde:
+> Kludde: gatekeeper/cluster/removal.py:355 — None-guard added. Split into
+> `current_grace_days = member["grace_days"] or 0` + `new_grace_days = current_grace_days + days`.
+> Also fixed the logger.info format string on the same path (would have raised TypeError on %d with None).
+> Test added: `test_null_grace_days_treated_as_zero` monkeypatches `db.get_member` to return
+> `grace_days: None` and verifies the result is 0 + 7 = 7. All 42 unit tests pass.
 ```
 
 ---
