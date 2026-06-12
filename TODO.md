@@ -9496,6 +9496,77 @@ Expected: startup lines such as `agent.main — BackupBuddy agent starting`.
 
 ---
 
+### [ ] 1.26.11 — Targeted verification: agent logger name fix (1.26.10)
+
+> **Scope:** Targeted — verifies the agent entry-point logger name fix from 1.26.10 only.
+> No backup/restore cycle needed.
+> **VMs required:** LXC 301 (agent-anders-pc) only.
+> VM 101 may remain off.
+
+The change is isolated to one line in `agent/main.py`. No logic, storage, or timing
+changes. Only the logger name visible in journald output is affected.
+
+---
+
+**Setup — update to HEAD and restart**
+
+If LXC 301 is still running from the previous sim, skip rollback.
+Otherwise start it from the post-1.26.5 snapshot.
+
+Pull HEAD and restart the agent:
+
+```bash
+# LXC 301 — agent-anders-pc
+pct exec 301 -- bash -c "cd /opt/backup-buddy && git pull"
+pct exec 301 -- systemctl restart backup-buddy-agent
+```
+
+Wait 15 seconds for startup to complete.
+
+---
+
+**P1 — no module logs as `__main__`**
+
+```bash
+pct exec 301 -- journalctl -u backup-buddy-agent -n 100 | grep '__main__'
+```
+
+Expected: zero matching lines.
+
+If any hit → regression in 1.26.10: re-check that `agent/main.py` uses
+`logging.getLogger("agent.main")` and not `logging.getLogger(__name__)`.
+
+> P1 result: PASS / FAIL
+
+---
+
+**P2 — startup lines carry `agent.main` as logger name**
+
+```bash
+pct exec 301 -- journalctl -u backup-buddy-agent -n 20 | grep 'agent\.main'
+```
+
+Expected log lines:
+
+```
+agent.main — BackupBuddy agent starting
+agent.main — Configuration loaded from /etc/backup-buddy/backup.cfg
+agent.main — Agent running — file watcher and upload worker active
+```
+
+If lines are missing or still show `__main__` → regression in 1.26.10.
+
+> P2 result: PASS / FAIL — paste one representative log line
+
+---
+
+**Done when:**
+- [ ] P1: zero `__main__` matches in agent startup logs
+- [ ] P2: startup lines show `agent.main` as logger name
+- [ ] Committed: `chore(test): 1.26.11 targeted agent logger name verification done`
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
