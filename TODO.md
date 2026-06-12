@@ -9445,6 +9445,57 @@ ssh 10.99.0.11 "sudo umount /var/lib/backup-buddy/upload_tmp/"
 
 ---
 
+### [ ] 1.26.10 — Fix agent entry point logger name (LOG-2 follow-up)
+
+**Finding from:** 1.26.9 — agent/main.py still logged as `__main__` after 1.26.7 fix.
+
+`agent/main.py` used `logging.getLogger(__name__)`. When the service runs as
+`python -m agent.main`, `__name__` resolves to `__main__`, not `agent.main`.
+The 1.26.7 fix applied the same pattern to `gatekeeper/main.py` but missed the agent.
+
+**Fix:** `agent/main.py` line 32 — change to `logging.getLogger("agent.main")`.
+
+**Changes required:**
+- `agent/main.py`: `logger = logging.getLogger("agent.main")`
+- Committed: `fix(agent): replace __main__ logger name with agent.main`
+
+---
+
+**Verification — restart and grep:**
+
+```bash
+# LXC 301 — agent-anders-pc
+pct exec 301 -- bash -c "cd /opt/backup-buddy && git pull"
+pct exec 301 -- systemctl restart backup-buddy-agent
+```
+
+Wait 15 seconds, then:
+
+```bash
+pct exec 301 -- journalctl -u backup-buddy-agent -n 100 | grep '__main__'
+```
+
+Expected: zero matching lines.
+
+Confirm module name appears correctly:
+
+```bash
+pct exec 301 -- journalctl -u backup-buddy-agent -n 20 | grep 'agent.main'
+```
+
+Expected: startup lines such as `agent.main — BackupBuddy agent starting`.
+
+> Result: PASS / FAIL — paste one representative log line
+
+---
+
+**Done when:**
+- [ ] Zero `__main__` matches in agent startup logs
+- [ ] Startup lines show `agent.main` as logger name
+- [ ] Committed: `chore(test): 1.26.10 agent logger name fix verified`
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
