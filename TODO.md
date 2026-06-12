@@ -9755,7 +9755,7 @@ new_grace_days = (member["grace_days"] or 0) + days
 
 ---
 
-### [ ] 1.27.4 — Targeted simulation: verify 1.27.2 and 1.27.3
+### [x] 1.27.4 — Targeted simulation: verify 1.27.2 and 1.27.3
 
 > **Scope:** Targeted — verifies the two changes from 1.27.2 and 1.27.3 only.
 > No full backup/restore cycle needed.
@@ -9814,7 +9814,7 @@ ssh 10.99.0.13 "sudo mv /etc/backup-buddy/gatekeeper.cfg.bak /etc/backup-buddy/g
 ssh 10.99.0.13 "sudo systemctl restart backup-buddy-gatekeeper"
 ```
 
-> P1 result: PASS / FAIL — paste the actual log line
+> P1 result: PASS — `2026-06-12T19:09:25 INFO gatekeeper.main — Onboarding wizard at http://10.99.0.13:8080`
 
 ---
 
@@ -9865,7 +9865,7 @@ Expected: `PASS: grace_days None + 7 = 7`
 If `TypeError` → 1.27.3 fix not deployed.
 If `AssertionError` → fix deployed but produces wrong result.
 
-> P2 result: PASS / FAIL — paste actual output
+> P2 result: PASS — `PASS: grace_days None + 7 = 7`
 
 ---
 
@@ -9882,15 +9882,15 @@ Expected: all three return `200`.
 If a node returns 503 or fails to respond → service startup regression introduced
 by 1.27.x changes.
 
-> P3 result: PASS / FAIL
+> P3 result: PASS — anders 200, bjorn 200, carina 200
 
 ---
 
 **Done when:**
-- [ ] P1: log shows `Onboarding wizard at http://10.99.0.13:8080` — no `0.0.0.0`
-- [ ] P2: `apply_grace_extension` with NULL grace_days returns 7
-- [ ] P3: all three dashboards return HTTP 200
-- [ ] Committed: `chore(test): 1.27.4 targeted simulation done`
+- [x] P1: log shows `Onboarding wizard at http://10.99.0.13:8080` — no `0.0.0.0`
+- [x] P2: `apply_grace_extension` with NULL grace_days returns 7
+- [x] P3: all three dashboards return HTTP 200
+- [x] Committed: `chore(test): 1.27.4 targeted simulation done`
 
 ---
 
