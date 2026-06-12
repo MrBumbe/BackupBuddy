@@ -9755,6 +9755,145 @@ new_grace_days = (member["grace_days"] or 0) + days
 
 ---
 
+### [ ] 1.27.4 — Targeted simulation: verify 1.27.2 and 1.27.3
+
+> **Scope:** Targeted — verifies the two changes from 1.27.2 and 1.27.3 only.
+> No full backup/restore cycle needed.
+> **VMs required:** VM 101 (gk-anders), VM 102 (gk-bjorn), VM 103 (gk-carina).
+
+1.27.2 changed `_start_setup_mode()` in `gatekeeper/main.py`: removed the silent
+`"0.0.0.0"` fallback and replaced it with a hard abort (RuntimeError) when no LAN IP
+is found. 1.27.3 changed `apply_grace_extension()` in `gatekeeper/cluster/removal.py`:
+added a None-guard so that a member with `grace_days = NULL` in the DB is treated as 0
+instead of crashing with `TypeError`.
+
+The abort branch of 1.27.2 (no private IPv4) cannot be triggered in this environment
+without losing the SSH session. It is covered by code inspection. P1 tests the happy
+path only — setup mode still starts and binds to the LAN IP.
+
+---
+
+**Setup — update all running GK VMs to HEAD**
+
+```bash
+# VM 101 — gk-anders
+ssh 10.99.0.11 "cd /opt/backup-buddy && git pull"
+ssh 10.99.0.11 "sudo systemctl restart backup-buddy-gatekeeper"
+
+# VM 102 — gk-bjorn
+ssh 10.99.0.12 "cd /opt/backup-buddy && git pull"
+ssh 10.99.0.12 "sudo systemctl restart backup-buddy-gatekeeper"
+
+# VM 103 — gk-carina
+ssh 10.99.0.13 "cd /opt/backup-buddy && git pull"
+ssh 10.99.0.13 "sudo systemctl restart backup-buddy-gatekeeper"
+```
+
+Wait 10 seconds for services to restart.
+
+---
+
+**P1 — 1.27.2 regression: setup mode binds to LAN IP, not 0.0.0.0**
+
+Put gk-carina temporarily into setup mode by renaming its config aside:
+
+```bash
+ssh 10.99.0.13 "sudo mv /etc/backup-buddy/gatekeeper.cfg /etc/backup-buddy/gatekeeper.cfg.bak"
+ssh 10.99.0.13 "sudo systemctl restart backup-buddy-gatekeeper"
+sleep 3
+ssh 10.99.0.13 "journalctl -u backup-buddy-gatekeeper -n 20 | grep -E 'Onboarding wizard|setup mode'"
+```
+
+Expected: a line containing `Onboarding wizard at http://10.99.0.13:8080`.
+Must NOT contain `0.0.0.0`.
+
+Restore config immediately:
+
+```bash
+ssh 10.99.0.13 "sudo mv /etc/backup-buddy/gatekeeper.cfg.bak /etc/backup-buddy/gatekeeper.cfg"
+ssh 10.99.0.13 "sudo systemctl restart backup-buddy-gatekeeper"
+```
+
+> P1 result: PASS / FAIL — paste the actual log line
+
+---
+
+**P2 — 1.27.3 regression: apply_grace_extension handles NULL grace_days**
+
+Copy the live cluster.db to /tmp (never modify the live DB). Insert a passed
+grace_extension vote for a member whose grace_days is set to NULL, then call
+apply_grace_extension and confirm the result is 0 + 7 = 7 days.
+
+```bash
+ssh 10.99.0.11 "cp /var/lib/backup-buddy/cluster.db /tmp/test_grace.db && \
+python3 -c \"
+import sys, time
+sys.path.insert(0, '/opt/backup-buddy')
+from gatekeeper.db.cluster import ClusterDB
+from gatekeeper.cluster.removal import apply_grace_extension
+
+with ClusterDB('/tmp/test_grace.db') as db:
+    members = db.list_members(status='active')
+    target = members[0]['node_id']
+    proposer = members[1]['node_id']
+
+    db.update_member(target, status='grace', grace_days=None)
+
+    db.upsert_vote(
+        vote_id=9999,
+        vote_type='grace_extension',
+        target_node_id=target,
+        proposed_by=proposer,
+        proposed_at=time.time() - 3600,
+        closes_at=time.time() + 3600,
+        votes_yes=2,
+        votes_no=0,
+        resolved=True,
+        grace_extension_days=7,
+    )
+
+    apply_grace_extension(db, 9999)
+
+    after = db.get_member(target)['grace_days']
+    assert after == 7, f'Expected 7, got {after}'
+    print(f'PASS: grace_days None + 7 = {after}')
+\""
+```
+
+Expected: `PASS: grace_days None + 7 = 7`
+
+If `TypeError` → 1.27.3 fix not deployed.
+If `AssertionError` → fix deployed but produces wrong result.
+
+> P2 result: PASS / FAIL — paste actual output
+
+---
+
+**P3 — Cluster health check after HEAD deployment**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://10.99.0.11:8080
+curl -s -o /dev/null -w "%{http_code}" http://10.99.0.12:8080
+curl -s -o /dev/null -w "%{http_code}" http://10.99.0.13:8080
+```
+
+Expected: all three return `200`.
+
+If a node returns 503 or fails to respond → service startup regression introduced
+by 1.27.x changes.
+
+> P3 result: PASS / FAIL
+
+---
+
+**Done when:**
+- [ ] P1: log shows `Onboarding wizard at http://10.99.0.13:8080` — no `0.0.0.0`
+- [ ] P2: `apply_grace_extension` with NULL grace_days returns 7
+- [ ] P3: all three dashboards return HTTP 200
+- [ ] Committed: `chore(test): 1.27.4 targeted simulation done`
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
