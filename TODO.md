@@ -9567,6 +9567,128 @@ If lines are missing or still show `__main__` → regression in 1.26.10.
 
 ---
 
+## 1.27 — Code review
+
+> **Goal:** Systematically review all BackupBuddy-specific Python code for correctness,
+> security, dead code, and design issues before Phase 1 is declared complete.
+> This group treats the codebase as a whole — not just individual features.
+>
+> **Scope:** All files under `gatekeeper/` and `agent/` written for BackupBuddy.
+> Tahoe-LAFS fork source (`src/allmydata/`, `integration/`, etc.) is out of scope.
+>
+> **Output policy:**
+> - One-liner fix (rename, delete an unused import, fix a constant) → fix immediately,
+>   note in Kludde comment under 1.27.1.
+> - Any finding that requires more than a trivial edit → open a new task (1.27.2, 1.27.3 …).
+>   The new task must include: file, line reference, what was found, what the fix is.
+>
+> **Rule:** Do not start 1.27.2+ until 1.27.1 is committed.
+
+---
+
+### [ ] 1.27.1 — Full code review: gatekeeper/ and agent/
+
+**Reads:** SECURITY.md, DECISIONS.md, CLAUDE.md, project-docs/architecture.md
+
+**Review checklist — for every file:**
+
+#### Security
+- [ ] No string-formatted SQL queries (all queries parameterized)
+- [ ] No secrets, keys, or passphrases written to disk or logs
+- [ ] No Tahoe internals (FURL, cap, shares) in user-facing strings, log messages, or GUI routes
+- [ ] GUI routes use Tailscale IP only (never `0.0.0.0`)
+- [ ] Agent API verified: LAN IP bind, no 0.0.0.0
+- [ ] All inbound data (cluster messages, API requests, config) validated with Pydantic before use
+- [ ] All file paths resolved with `os.path.realpath` before use
+- [ ] Storage pool exclusion enforced — no backup path can overlap with a pool path
+- [ ] No hardcoded secrets, tokens, or passphrases in source
+
+#### Correctness and robustness
+- [ ] Background jobs log start, completion, and errors — no silent swallowing
+- [ ] No bare `except:` or `except Exception: pass` hiding real errors
+- [ ] asyncio coroutines not called without await
+- [ ] No logic that can cause SQLite to be written from multiple threads without a lock
+- [ ] Error branches return appropriate HTTP status codes (not 200 on failure)
+- [ ] Hash verification (`sha256_before` vs `sha256_after`) used wherever file content flows through code
+
+#### Dead code and unused imports
+- [ ] No unused imports (`import X` never referenced in the file)
+- [ ] No unreachable code paths, commented-out code blocks left in
+- [ ] No TODO/FIXME comments that reference Phase 2 work implemented in Phase 1 files
+- [ ] No stub functions that do nothing (`pass` bodies that were never implemented)
+
+#### Code quality
+- [ ] No hardcoded paths, ports, or configuration values (must come from config)
+- [ ] No duplicate logic that should be shared (copy-paste between files)
+- [ ] Consistent naming: snake_case for functions/variables, UPPER_CASE for module-level constants
+- [ ] All public functions have consistent and appropriate return types
+
+**Files to review (in order):**
+
+```
+agent/
+  config.py
+  watcher.py
+  gatekeeper_client.py
+  main.py
+
+gatekeeper/
+  config.py
+  main.py
+  tailscale.py
+  secrets.py
+  tahoe/client.py
+  tahoe/storage_node.py
+  tahoe/introducer.py
+  db/catalog.py
+  db/cluster.py
+  storage/pool.py
+  fragmenter/profiles.py
+  fragmenter/fragmenter.py
+  fragmenter/queue_worker.py
+  fragmenter/adaptive.py
+  watcher/__init__.py
+  lifeboat/crypto.py
+  lifeboat/recovery_kit.py
+  lifeboat/bundle.py
+  lifeboat/distributor.py
+  lifeboat/keystore.py
+  cluster/invites.py
+  cluster/join.py
+  cluster/removal.py
+  cluster/orphans.py
+  cluster/sync.py
+  restore/restore.py
+  restore/reconstruct.py
+  verify/nightly.py
+  rebalance/worker.py
+  rebalance/scheduler.py
+  notify/smtp.py
+  notify/webhook.py
+  notify/dispatcher.py
+  gui/app.py
+  gui/wizard_state.py
+  gui/routes/onboarding.py
+  gui/routes/dashboard.py
+  gui/routes/agents.py
+  gui/routes/buddies.py
+  gui/routes/restore.py
+  gui/routes/settings.py
+  gui/routes/logs.py
+```
+
+**Done when:**
+- All files above reviewed against the full checklist
+- One-liner fixes applied and committed
+- Each non-trivial finding recorded as a new task (1.27.2, 1.27.3 …)
+- This task committed: `chore(review): 1.27.1 full code review complete`
+
+```
+> Kludde:
+```
+
+---
+
 # Phase 2 — Maturity
 
 > **Status: To be detailed.**
