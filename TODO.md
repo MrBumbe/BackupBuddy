@@ -9445,7 +9445,7 @@ ssh 10.99.0.11 "sudo umount /var/lib/backup-buddy/upload_tmp/"
 
 ---
 
-### [ ] 1.26.10 — Fix agent entry point logger name (LOG-2 follow-up)
+### [x] 1.26.10 — Fix agent entry point logger name (LOG-2 follow-up)
 
 **Finding from:** 1.26.9 — agent/main.py still logged as `__main__` after 1.26.7 fix.
 
@@ -9490,9 +9490,9 @@ Expected: startup lines such as `agent.main — BackupBuddy agent starting`.
 ---
 
 **Done when:**
-- [ ] Zero `__main__` matches in agent startup logs
-- [ ] Startup lines show `agent.main` as logger name
-- [ ] Committed: `chore(test): 1.26.10 agent logger name fix verified`
+- [x] Zero `__main__` matches in agent startup logs
+- [x] Startup lines show `agent.main` as logger name
+- [x] Committed: `chore(test): 1.26.10 agent logger name fix verified`
 
 ---
 
