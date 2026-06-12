@@ -727,7 +727,6 @@ def create_onboarding_router() -> APIRouter:
                 )
                 # Persist root_dir_cap for the /complete page (will be cleared after confirmation)
                 # SECURITY: never log this value
-                request.app.state.wizard_root_dir_cap = root_dir_cap
                 save_state(data_dir, state)
                 return _redirect("/onboarding/complete")
             else:

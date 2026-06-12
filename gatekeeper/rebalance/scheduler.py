@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as _time
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Callable
 
 from gatekeeper.config import FragmentationConfig, RebalanceConfig
@@ -37,7 +37,7 @@ def _seconds_until(target: time) -> float:
         microsecond=0,
     )
     if candidate <= now:
-        candidate = candidate.replace(day=candidate.day + 1)
+        candidate += timedelta(days=1)
     return (candidate - now).total_seconds()
 
 

@@ -24,7 +24,7 @@ _CHUNK_SIZE = 65536
 _TIMEOUT = httpx.Timeout(connect=30.0, read=3600.0, write=3600.0, pool=30.0)
 
 
-async def _iter_file(path: Path) -> ...:
+async def _iter_file(path: Path) -> "AsyncIterator[bytes]":
     """Yield file content in chunks without loading the whole file into memory."""
     loop = asyncio.get_running_loop()
     with open(path, "rb") as f:

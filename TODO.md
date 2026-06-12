@@ -9586,7 +9586,7 @@ If lines are missing or still show `__main__` → regression in 1.26.10.
 
 ---
 
-### [ ] 1.27.1 — Full code review: gatekeeper/ and agent/
+### [x] 1.27.1 — Full code review: gatekeeper/ and agent/
 
 **Reads:** SECURITY.md, DECISIONS.md, CLAUDE.md, project-docs/architecture.md
 
@@ -9682,6 +9682,66 @@ gatekeeper/
 - One-liner fixes applied and committed
 - Each non-trivial finding recorded as a new task (1.27.2, 1.27.3 …)
 - This task committed: `chore(review): 1.27.1 full code review complete`
+
+```
+> Kludde: All 40 files reviewed. One-liner fixes applied directly:
+> (1) agent/main.py — added missing `import os` (os.strerror used on line 128).
+> (2) gatekeeper/tahoe/client.py:27 — fixed `_iter_file` return annotation `...` → `AsyncIterator[bytes]`.
+> (3) gatekeeper/cluster/sync.py:160 — fixed Swedish default fallback `"lagom"` → `"adaptive"` (invalid profile + CLAUDE.md English rule).
+> (4) gatekeeper/rebalance/scheduler.py:39 — fixed month-boundary crash: `replace(day=day+1)` → `+= timedelta(days=1)`.
+> (5) gatekeeper/gui/routes/onboarding.py:730 — removed dead code: `request.app.state.wizard_root_dir_cap` was set but never read.
+> Non-trivial findings opened as 1.27.2–1.27.3.
+```
+
+---
+
+### [ ] 1.27.2 — Security: remove 0.0.0.0 fallback in _start_setup_mode
+
+**Reads:** SECURITY.md, gatekeeper/main.py
+
+**File:** `gatekeeper/main.py` ~line 1060
+**Found:** `_start_setup_mode()` falls back to `"0.0.0.0"` when no LAN IP is detected:
+```python
+gui_host = lan_ip if lan_ip else "0.0.0.0"
+```
+This violates SECURITY.md §3 ("NEVER bind any server to 0.0.0.0") and CLAUDE.md rule 6.
+
+**Fix:** Abort startup with a `RuntimeError` if no LAN IP is found — never fall back to `0.0.0.0`.
+Same pattern as `verify_tailscale_binding()` in the normal startup path.
+
+**Done when:**
+- Fallback removed; startup aborts with a clear error message if no LAN IP is available
+- Log message tells the user to check their network before retrying
+- `chore(review): 1.27.2 complete` committed
+
+```
+> Kludde:
+```
+
+---
+
+### [ ] 1.27.3 — Bug: None + int crash in apply_grace_extension
+
+**Reads:** gatekeeper/cluster/removal.py
+
+**File:** `gatekeeper/cluster/removal.py` ~line 355
+**Found:** `apply_grace_extension()` reads `member["grace_days"]` from the DB and adds an integer
+without null-checking it:
+```python
+new_grace_days = member["grace_days"] + days
+```
+The column default is NULL for members who have never had their grace period set, causing
+`TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` at runtime.
+
+**Fix:** Treat `None` as `0` before the addition:
+```python
+new_grace_days = (member["grace_days"] or 0) + days
+```
+
+**Done when:**
+- None-guard added
+- Test scenario covers the NULL case
+- `fix(cluster): 1.27.3 complete` committed
 
 ```
 > Kludde:

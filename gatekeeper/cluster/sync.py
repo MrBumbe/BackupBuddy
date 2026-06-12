@@ -157,7 +157,7 @@ async def push_member_list_to_peers(
             node_id=m["node_id"],
             display_name=m["display_name"],
             tailscale_hostname=m["tailscale_hostname"],
-            profile=m.get("profile", "lagom"),
+            profile=m.get("profile", "adaptive"),
         )
         for m in members
         if m.get("status") in ("active", "grace")
