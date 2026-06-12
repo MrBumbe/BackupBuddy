@@ -1057,7 +1057,17 @@ def _start_setup_mode(data_dir: Path, config_path: Path, log_level: str) -> None
     triggers a service restart, normal mode activates.
     """
     lan_ip = get_lan_ip()
-    gui_host = lan_ip if lan_ip else "0.0.0.0"
+    if not lan_ip:
+        logger.error(
+            "Setup mode aborted: no LAN IP address found. "
+            "Check that a network interface with a private IPv4 address is up, "
+            "then retry."
+        )
+        raise RuntimeError(
+            "No LAN IP address available — cannot start setup mode. "
+            "Check your network connection and try again."
+        )
+    gui_host = lan_ip
     gui_port = _DEFAULT_WEB_PORT
 
     logger.warning(

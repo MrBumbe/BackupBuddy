@@ -9695,7 +9695,7 @@ gatekeeper/
 
 ---
 
-### [ ] 1.27.2 — Security: remove 0.0.0.0 fallback in _start_setup_mode
+### [x] 1.27.2 — Security: remove 0.0.0.0 fallback in _start_setup_mode
 
 **Reads:** SECURITY.md, gatekeeper/main.py
 
@@ -9715,7 +9715,9 @@ Same pattern as `verify_tailscale_binding()` in the normal startup path.
 - `chore(review): 1.27.2 complete` committed
 
 ```
-> Kludde:
+> Kludde: gatekeeper/main.py:1059 — removed `"0.0.0.0"` fallback. Now raises RuntimeError
+> with a clear user-facing message and logs an error telling the operator to check their
+> network interface. Same abort-on-missing pattern as `verify_tailscale_binding()`.
 ```
 
 ---
