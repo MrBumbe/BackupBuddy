@@ -29,7 +29,7 @@ from agent.config import AgentConfig, ConfigError, load_config, watch_config
 from agent.gatekeeper_client import GatekeeperClient, RegistrationError
 from agent.watcher import FileWatcher
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("agent.main")
 
 _DEFAULT_CONFIG = Path("/etc/backup-buddy/backup.cfg")
 _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
