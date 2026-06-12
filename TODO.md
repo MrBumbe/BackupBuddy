@@ -9496,7 +9496,7 @@ Expected: startup lines such as `agent.main — BackupBuddy agent starting`.
 
 ---
 
-### [ ] 1.26.11 — Targeted verification: agent logger name fix (1.26.10)
+### [x] 1.26.11 — Targeted verification: agent logger name fix (1.26.10)
 
 > **Scope:** Targeted — verifies the agent entry-point logger name fix from 1.26.10 only.
 > No backup/restore cycle needed.
@@ -9561,9 +9561,9 @@ If lines are missing or still show `__main__` → regression in 1.26.10.
 ---
 
 **Done when:**
-- [ ] P1: zero `__main__` matches in agent startup logs
-- [ ] P2: startup lines show `agent.main` as logger name
-- [ ] Committed: `chore(test): 1.26.11 targeted agent logger name verification done`
+- [x] P1: zero `__main__` matches in agent startup logs
+- [x] P2: startup lines show `agent.main` as logger name
+- [x] Committed: `chore(test): 1.26.11 targeted agent logger name verification done`
 
 ---
 
